@@ -85,8 +85,8 @@ def main():
         "TRACKING_RUN_NAME": "qwen25-canadian-cot"
     }
     
-    # Commande de démarrage (démarre SSH, exécute le script puis dort indéfiniment pour garder le pod vivant même en cas d'erreur)
-    container_command = f"bash -c 'service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh; sleep infinity'"
+    # Commande de démarrage (génère les clés d'hôte SSH, démarre le service SSH et dort indéfiniment)
+    container_command = "bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; sleep infinity'"
     
     print(f"Création d'un pod de Fine-Tuning sur RunPod ({args.gpu_type})...")
     
