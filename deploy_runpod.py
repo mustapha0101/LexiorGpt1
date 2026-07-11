@@ -79,8 +79,8 @@ def main():
     runpod.api_key = args.api_key
     
     # Configuration du conteneur
-    # On utilise l'image officielle d'Unsloth pour éviter de recompiler les kernels Triton à chaque boot
-    docker_image = "unslothdev/unsloth:latest"
+    # On utilise l'image PyTorch officielle publique car run_pipeline.sh se charge d'installer Unsloth
+    docker_image = "pytorch/pytorch:2.3.0-cuda12.1-cudnn8-devel"
     
     # Commande de démarrage : Cloner le dépôt et lancer run_pipeline.sh
     # On injecte les variables pour que le script d'automatisation les lise directement
