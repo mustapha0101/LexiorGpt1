@@ -99,8 +99,7 @@ def main():
             volume_in_gb=50,
             container_disk_in_gb=30,
             ports="8888/http,22/tcp",
-            env=env_vars,
-            docker_args=container_command
+            env=env_vars
         )
     except Exception as e:
         print(f"Erreur lors de la création du Pod : {e}")
