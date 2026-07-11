@@ -20,6 +20,7 @@ pip install datasets openai tqdm transformers jinja2
 # Optionnel : Démarrer et configurer Ollama localement si demandé
 if [ "$USE_LOCAL_OLLAMA" = "true" ]; then
     echo -e "\n${YELLOW}[1b/3] Installation et démarrage de Ollama (modèle local)...${NC}"
+    apt-get update && apt-get install -y zstd
     curl -fsSL https://ollama.com/install.sh | sh
     ollama serve > ollama.log 2>&1 &
     sleep 10
