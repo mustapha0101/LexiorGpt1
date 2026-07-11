@@ -94,7 +94,7 @@ def main():
     }
     
     # Script exécuté au démarrage du conteneur Docker (mis sur une seule ligne pour éviter les erreurs GraphQL)
-    container_command = f"bash -c 'echo \"Démarrage du conteneur RunPod...\" && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles && chmod +x run_pipeline.sh && ./run_pipeline.sh'"
+    container_command = f"bash -c 'echo \"Demarrage du conteneur RunPod...\" && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles && chmod +x run_pipeline.sh && ./run_pipeline.sh'"
     
     print(f"Création d'un pod sur RunPod ({args.gpu_type})...")
     
