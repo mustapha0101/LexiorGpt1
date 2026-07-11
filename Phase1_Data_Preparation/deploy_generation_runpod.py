@@ -104,25 +104,35 @@ def main():
     # Commande de démarrage
     container_command = f"bash -c 'echo Demarrage_de_la_Phase1_Generation && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase1_Data_Preparation && chmod +x run_generation.sh && ./run_generation.sh'"
     
-    # Utilisation d'un GPU RTX 3090 / 4090 pour faire tourner Qwen 2.5 32B en local via Ollama
-    gpu_type = "NVIDIA GeForce RTX 3090"
+    # Ordre de préférence des GPU : RTX 4090 pour la vitesse, puis RTX 3090, puis A40
+    gpu_preferences = ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 3090", "NVIDIA A40"]
+    pod = None
     
-    print(f"Création d'un pod de génération de données sur RunPod ({gpu_type}) avec Ollama local...")
-    
-    try:
-        pod = runpod.create_pod(
-            name="lexior-phase1-generation",
-            image_name=docker_image,
-            gpu_type_id=gpu_type,
-            gpu_count=1,
-            volume_in_gb=30,
-            container_disk_in_gb=20,
-            ports="8888/http,22/tcp",
-            env=env_vars,
-            docker_args=container_command
-        )
-    except Exception as e:
-        print(f"Erreur lors de la création du Pod : {e}")
+    for gpu_type in gpu_preferences:
+        print(f"Tentative de création du pod sur RunPod avec le GPU : {gpu_type}...")
+        try:
+            pod = runpod.create_pod(
+                name="lexior-phase1-generation",
+                image_name=docker_image,
+                gpu_type_id=gpu_type,
+                gpu_count=1,
+                volume_in_gb=40, # Augmenté à 40 Go pour loger le modèle 32B et Ollama confortablement
+                container_disk_in_gb=20,
+                ports="8888/http,22/tcp",
+                env=env_vars,
+                docker_args=container_command
+            )
+            print(f"Succès ! Pod alloué sur GPU : {gpu_type}")
+            break
+        except Exception as e:
+            error_msg = str(e)
+            if "resources" in error_msg.lower() or "availability" in error_msg.lower():
+                print(f"Ressources insuffisantes pour {gpu_type}, tentative avec le GPU suivant...")
+            else:
+                print(f"Erreur lors de la tentative avec {gpu_type} : {e}")
+                
+    if not pod:
+        print("Erreur critique : Impossible de créer le Pod sur l'un des GPU configurés.")
         sys.exit(1)
         
     print(f"Pod de génération créé avec succès ! ID : {pod['id']}")
