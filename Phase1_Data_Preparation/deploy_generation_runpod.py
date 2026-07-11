@@ -119,8 +119,7 @@ def main():
                 volume_in_gb=40, # Augmenté à 40 Go pour loger le modèle 32B et Ollama confortablement
                 container_disk_in_gb=20,
                 ports="8888/http,22/tcp",
-                env=env_vars,
-                docker_args="sleep infinity"
+                env=env_vars
             )
             print(f"Succès ! Pod alloué sur GPU : {gpu_type}")
             break
