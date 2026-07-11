@@ -85,8 +85,8 @@ def main():
         "TRACKING_RUN_NAME": "qwen25-canadian-cot"
     }
     
-    # Commande de démarrage (nettoie le répertoire avant de cloner pour éviter les conflits au redémarrage RunPod)
-    container_command = f"bash -c 'rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh'"
+    # Commande de démarrage (installe git, nettoie et clone le repo)
+    container_command = f"bash -c 'apt-get update && apt-get install -y git && rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh'"
     
     print(f"Création d'un pod de Fine-Tuning sur RunPod ({args.gpu_type})...")
     
