@@ -66,9 +66,12 @@ python3 generate_ccq_data.py \
     --scenarios_per_article 10 \
     --output_file "data/processed/generated_ccq_cot.jsonl"
 
-# Concaténer les deux fichiers de génération
-echo -e "\n${YELLOW}[2c/3] Fusion des datasets (A2AJ + CCQ)...${NC}"
-cat data/processed/generated_a2aj_cot.jsonl data/processed/generated_ccq_cot.jsonl > data/processed/combined_raw_cot.jsonl
+echo -e "\n${YELLOW}[2c/3] Génération du jeu d'alignement d'identité (LexiorGPT Branding)...${NC}"
+python3 generate_identity_data.py
+
+# Concaténer les trois fichiers de génération
+echo -e "\n${YELLOW}[2d/3] Fusion des datasets (A2AJ + CCQ + Identité)...${NC}"
+cat data/processed/generated_a2aj_cot.jsonl data/processed/generated_ccq_cot.jsonl data/processed/generated_identity_cot.jsonl > data/processed/combined_raw_cot.jsonl
 
 # 3. Exécution du formatage de chat
 echo -e "\n${YELLOW}[3/3] Application du template conversationnel sur le corpus combiné...${NC}"

@@ -36,20 +36,20 @@ def parse_args():
     parser.add_argument(
         "--openai_key",
         type=str,
-        default=os.environ.get("OPENAI_API_KEY", ""),
-        help="Clé API du modèle Teacher (ex: OpenAI, Groq, etc.)."
+        default=os.environ.get("OPENAI_API_KEY", "ollama"),
+        help="Clé API du modèle Teacher."
     )
     parser.add_argument(
         "--openai_url",
         type=str,
-        default=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        help="URL de base de l'API Teacher."
+        default=os.environ.get("OPENAI_BASE_URL", "http://localhost:11434/v1"),
+        help="URL de base de l'API Teacher (local Ollama par défaut)."
     )
     parser.add_argument(
         "--teacher_model",
         type=str,
-        default="gpt-4o-mini",
-        help="Modèle Teacher à utiliser (ex: gpt-4o-mini, llama3-70b-instruct)."
+        default="qwen2.5:32b-instruct-q4_K_M",
+        help="Modèle Teacher à utiliser (Ollama)."
     )
     parser.add_argument(
         "--hf_token",
@@ -61,7 +61,7 @@ def parse_args():
         "--hf_dataset_repo",
         type=str,
         default=os.environ.get("HF_DATASET_REPO_ID", ""),
-        help="Dépôt cible pour le dataset sur Hugging Face (ex: 'username/dataset-name')."
+        help="Dépôt cible pour le dataset sur Hugging Face."
     )
     parser.add_argument(
         "--limit",
@@ -72,8 +72,8 @@ def parse_args():
     parser.add_argument(
         "--workers",
         type=int,
-        default=15,
-        help="Nombre de threads parallèles d'appels API."
+        default=8,
+        help="Nombre de threads parallèles d'appels API (8-10 max pour Ollama en local)."
     )
     return parser.parse_args()
 
@@ -86,7 +86,7 @@ def main():
         
     runpod.api_key = args.api_key
     
-    # Image PyTorch légère (pas besoin de CUDA lourd pour de la génération d'API)
+    # Image PyTorch officielle avec CUDA
     docker_image = "pytorch/pytorch:2.3.0-cuda12.1-cudnn8-devel"
     
     # Définition des variables d'environnement pour le conteneur
@@ -97,16 +97,17 @@ def main():
         "HF_TOKEN": args.hf_token,
         "HF_DATASET_REPO_ID": args.hf_dataset_repo,
         "GEN_LIMIT": str(args.limit),
-        "GEN_WORKERS": str(args.workers)
+        "GEN_WORKERS": str(args.workers),
+        "USE_LOCAL_OLLAMA": "true"
     }
     
     # Commande de démarrage
     container_command = f"bash -c 'echo Demarrage_de_la_Phase1_Generation && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase1_Data_Preparation && chmod +x run_generation.sh && ./run_generation.sh'"
     
-    # CPU léger ou GPU économique (ex: RTX 3070 ou CPU-only si supporté, RTX 3070 est parfaite pour rester pas cher)
-    gpu_type = "NVIDIA GeForce RTX 3070"
+    # Utilisation d'un GPU RTX 3090 / 4090 pour faire tourner Qwen 2.5 32B en local via Ollama
+    gpu_type = "NVIDIA GeForce RTX 3090"
     
-    print(f"Création d'un pod de génération de données sur RunPod ({gpu_type})...")
+    print(f"Création d'un pod de génération de données sur RunPod ({gpu_type}) avec Ollama local...")
     
     try:
         pod = runpod.create_pod(
