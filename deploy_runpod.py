@@ -117,7 +117,7 @@ def main():
             container_disk_in_gb=30,
             ports="8888/http,22/tcp", # Ports pour Jupyter / SSH si besoin
             env=env_vars,
-            command=container_command
+            docker_args=container_command
         )
     except Exception as e:
         print(f"Erreur lors de la création du Pod : {e}")
