@@ -17,13 +17,30 @@ echo -e "\n${YELLOW}[1/3] Installation des packages de base (datasets, openai)..
 pip install --upgrade pip
 pip install datasets openai tqdm transformers jinja2
 
+# Optionnel : Démarrer et configurer Ollama localement si demandé
+if [ "$USE_LOCAL_OLLAMA" = "true" ]; then
+    echo -e "\n${YELLOW}[1b/3] Installation et démarrage de Ollama (modèle local)...${NC}"
+    curl -fsSL https://ollama.com/install.sh | sh
+    ollama serve > ollama.log 2>&1 &
+    sleep 10
+    echo -e "${YELLOW}Téléchargement du modèle Teacher local (${GEN_MODEL:-qwen2.5:32b})...${NC}"
+    ollama pull ${GEN_MODEL:-qwen2.5:32b-instruct-q4_K_M}
+fi
+
 # 2. Exécution du générateur parallèle (A2AJ)
 echo -e "\n${YELLOW}[2/3] Génération de données synthétiques à partir de A2AJ...${NC}"
 # Récupération des variables d'environnement
 DATASET=${DATASET_NAME:-"a2aj/canadian-laws"}
 LIMIT=${GEN_LIMIT:-1000}
-WORKERS=${GEN_WORKERS:-15}
-MODEL=${GEN_MODEL:-"gpt-4o-mini"}
+WORKERS=${GEN_WORKERS:-8}
+# Définir le modèle par défaut pour Ollama si non spécifié
+if [ "$USE_LOCAL_OLLAMA" = "true" ]; then
+    MODEL=${GEN_MODEL:-"qwen2.5:32b-instruct-q4_K_M"}
+    export OPENAI_API_KEY="ollama"
+    export OPENAI_BASE_URL="http://localhost:11434/v1"
+else
+    MODEL=${GEN_MODEL:-"gpt-4o-mini"}
+fi
 
 if [ -z "$OPENAI_API_KEY" ]; then
     echo -e "${RED}Erreur : La variable \$OPENAI_API_KEY n'est pas définie.${NC}"
