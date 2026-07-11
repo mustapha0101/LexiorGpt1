@@ -64,6 +64,12 @@ if [ $? -eq 0 ]; then
     echo -e "\n${GREEN}======================================================================${NC}"
     echo -e "${GREEN}  PHASE 1 TERMINÉE ! Le dataset combiné est dans data/processed/    ${NC}"
     echo -e "${GREEN}======================================================================${NC}"
+    
+    # Étape facultative : Pousser sur Hugging Face Hub si la variable est configurée
+    if [ -n "$HF_DATASET_REPO_ID" ]; then
+        echo -e "\n${YELLOW}[Facultatif] Téléversement du dataset sur Hugging Face Hub...${NC}"
+        python3 push_to_hf.py
+    fi
 else
     echo -e "${RED}Erreur pendant le formatage des données.${NC}"
     exit 1
