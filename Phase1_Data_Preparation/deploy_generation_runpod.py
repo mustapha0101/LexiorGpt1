@@ -108,8 +108,8 @@ def main():
     gpu_preferences = ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 3090", "NVIDIA A40"]
     pod = None
     
-    # Commande de démarrage (génère les clés d'hôte SSH, démarre le service SSH et dort indéfiniment)
-    container_command = "bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; sleep infinity'"
+    # Commande de démarrage (démarre SSH, clone le repo via token et lance le script principal de génération)
+    container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase1_Data_Preparation && chmod +x run_generation.sh && ./run_generation.sh; sleep infinity'"
     
     for gpu_type in gpu_preferences:
         print(f"Tentative de création du pod sur RunPod avec le GPU : {gpu_type}...")
