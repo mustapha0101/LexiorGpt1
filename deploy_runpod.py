@@ -34,8 +34,8 @@ def parse_args():
     parser.add_argument(
         "--gpu_type",
         type=str,
-        default="NVIDIA RTX 4090",
-        choices=["NVIDIA RTX 4090", "NVIDIA RTX 3090", "NVIDIA A40", "NVIDIA A100-SXM4-80GB"],
+        default="NVIDIA GeForce RTX 4090",
+        choices=["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 3090", "NVIDIA A40", "NVIDIA A100-SXM4-80GB"],
         help="Type de GPU à allouer."
     )
     parser.add_argument(
