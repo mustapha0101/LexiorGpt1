@@ -85,9 +85,8 @@ def main():
         "TRACKING_RUN_NAME": "qwen25-canadian-cot"
     }
     
-    # Commande de démarrage (sans guillemets doubles)
-    # Se déplace dans le sous-dossier Phase2_FineTuning et lance run_training.sh
-    container_command = f"bash -c 'echo Demarrage_de_la_Phase2_FineTuning && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh'"
+    # Commande de démarrage (nettoie le répertoire avant de cloner pour éviter les conflits au redémarrage RunPod)
+    container_command = f"bash -c 'rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh'"
     
     print(f"Création d'un pod de Fine-Tuning sur RunPod ({args.gpu_type})...")
     

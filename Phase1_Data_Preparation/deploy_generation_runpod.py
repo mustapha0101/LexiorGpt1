@@ -101,8 +101,8 @@ def main():
         "USE_LOCAL_OLLAMA": "true"
     }
     
-    # Commande de démarrage
-    container_command = f"bash -c 'echo Demarrage_de_la_Phase1_Generation && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase1_Data_Preparation && chmod +x run_generation.sh && ./run_generation.sh'"
+    # Commande de démarrage (nettoie le répertoire avant de cloner pour éviter les conflits au redémarrage RunPod)
+    container_command = f"bash -c 'rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase1_Data_Preparation && chmod +x run_generation.sh && ./run_generation.sh'"
     
     # Ordre de préférence des GPU : RTX 4090 pour la vitesse, puis RTX 3090, puis A40
     gpu_preferences = ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 3090", "NVIDIA A40"]
