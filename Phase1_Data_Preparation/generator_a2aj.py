@@ -123,11 +123,49 @@ def process_single_item(item, idx, client, dataset_name, model, system_prompt, o
         
         generated_output = response.choices[0].message.content
         
-        # Validation minimale de la présence du CoT
+        # Validation rigoureuse de la présence du CoT et filtrage anti-hallucination
         if "<thinking>" in generated_output and "</thinking>" in generated_output:
             parts = generated_output.split("</thinking>")
             thinking_part = parts[0].replace("<thinking>", "").strip()
             content_part = parts[1].strip()
+            
+            # --- ÉTAPE DE VALIDATION & ANTI-HALLUCINATION ---
+            # 1. Vérification IRAC
+            thinking_lower = thinking_part.lower()
+            has_issue = any(w in thinking_lower for w in ["issue", "question de droit", "problème"])
+            has_rule = any(w in thinking_lower for w in ["rule", "règle", "loi", "article", "ccq"])
+            has_app = any(w in thinking_lower for w in ["application", "analyse", "faits"])
+            has_concl = any(w in thinking_lower for w in ["conclusion", "décision"])
+            
+            irac_score = sum([has_issue, has_rule, has_app, has_concl])
+            if irac_score < 3:
+                # Rejeter si le raisonnement logique n'est pas assez complet
+                return False
+                
+            # 2. Vérification syntaxique JSON de bas de page
+            footnote_match = re.search(r"\[\^\d+\]:\s*(\{.*\})", content_part)
+            if not footnote_match:
+                # Rejeter si le format de citation Lexior n'est pas présent
+                return False
+            try:
+                json_cite = json.loads(footnote_match.group(1))
+                if "type" not in json_cite or "url" not in json_cite:
+                    return False
+            except json.JSONDecodeError:
+                return False
+                
+            # 3. FILTRAGE ANTI-HALLUCINATION (Grounding)
+            # Extraire les références d'articles/sections citées dans la réflexion
+            # ex: "art. 1457", "section 50", "s. 96", "par. 25"
+            citations = re.findall(r"(?:art\.|article|section|s\.|par\.|para\.)\s*(\d+(?:\(\d+\))?)", thinking_lower)
+            text_lower = truncated_text.lower()
+            
+            for cite_num in citations:
+                # Vérifier si le numéro d'article ou de paragraphe cité existe bien dans le texte brut de référence
+                if cite_num not in text_lower and cite_num not in json.dumps(context_meta).lower():
+                    # Hallucination détectée : le modèle cite un article/section absent du texte d'origine !
+                    return False
+            # ------------------------------------------------
             
             # On crée une question réaliste basée sur l'Issue identifiée dans la CoT
             issue_match = re.search(r"Issue\s*:\s*(.*)", thinking_part, re.IGNORECASE)
@@ -150,7 +188,6 @@ def process_single_item(item, idx, client, dataset_name, model, system_prompt, o
                     f_out.write(json.dumps(message_data, ensure_ascii=False) + "\n")
             return True
     except Exception as e:
-        # Éviter de bloquer l'affichage global en cas d'erreur ponctuelle d'API
         pass
     return False
 
@@ -191,9 +228,13 @@ def main():
         "   [^1]:{\"type\":\"url\",\"url\":\"https://www.canlii.org/...\",\"title\":\"Titre\"}"
     )
     
-    # Récupération de la plage
-    sample_range = min(args.limit, len(raw_ds))
-    print(f"Lancement de la génération CoT en parallèle avec {args.workers} workers...")
+    # Récupération de la plage (si limit < 0, on traite tout le dataset)
+    if args.limit < 0:
+        sample_range = len(raw_ds)
+    else:
+        sample_range = min(args.limit, len(raw_ds))
+        
+    print(f"Lancement de la génération CoT en parallèle avec {args.workers} workers sur {sample_range} exemples...")
     
     success_count = 0
     
