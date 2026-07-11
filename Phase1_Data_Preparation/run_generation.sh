@@ -39,20 +39,30 @@ python3 generator_a2aj.py \
     --output_file "data/processed/generated_a2aj_cot.jsonl"
 
 if [ $? -ne 0 ]; then
-    echo -e "${RED}Erreur pendant la génération. Arrêt du script.${NC}"
+    echo -e "${RED}Erreur pendant la génération A2AJ. Arrêt du script.${NC}"
     exit 1
 fi
 
+echo -e "\n${YELLOW}[2b/3] Génération de cas pratiques basés sur le Code civil du Québec (CCQ)...${NC}"
+python3 generate_ccq_data.py \
+    --model "$MODEL" \
+    --scenarios_per_article 10 \
+    --output_file "data/processed/generated_ccq_cot.jsonl"
+
+# Concaténer les deux fichiers de génération
+echo -e "\n${YELLOW}[2c/3] Fusion des datasets (A2AJ + CCQ)...${NC}"
+cat data/processed/generated_a2aj_cot.jsonl data/processed/generated_ccq_cot.jsonl > data/processed/combined_raw_cot.jsonl
+
 # 3. Exécution du formatage de chat
-echo -e "\n${YELLOW}[3/3] Application du template conversationnel...${NC}"
+echo -e "\n${YELLOW}[3/3] Application du template conversationnel sur le corpus combiné...${NC}"
 python3 dataset_formatter.py \
-    --local_file "data/processed/generated_a2aj_cot.jsonl" \
+    --local_file "data/processed/combined_raw_cot.jsonl" \
     --output_dir "data/processed" \
     --test_size 0.05
 
 if [ $? -eq 0 ]; then
     echo -e "\n${GREEN}======================================================================${NC}"
-    echo -e "${GREEN}  PHASE 1 TERMINÉE ! Le dataset formaté est dans data/processed/     ${NC}"
+    echo -e "${GREEN}  PHASE 1 TERMINÉE ! Le dataset combiné est dans data/processed/    ${NC}"
     echo -e "${GREEN}======================================================================${NC}"
 else
     echo -e "${RED}Erreur pendant le formatage des données.${NC}"
