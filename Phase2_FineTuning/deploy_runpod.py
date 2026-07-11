@@ -85,8 +85,8 @@ def main():
         "TRACKING_RUN_NAME": "qwen25-canadian-cot"
     }
     
-    # Commande de démarrage (installe git, nettoie et clone le repo)
-    container_command = f"bash -c 'apt-get update && apt-get install -y git && rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh'"
+    # Commande de démarrage (exécute le script puis dort indéfiniment pour garder le pod vivant même en cas d'erreur)
+    container_command = f"bash -c 'rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh; sleep infinity'"
     
     print(f"Création d'un pod de Fine-Tuning sur RunPod ({args.gpu_type})...")
     
@@ -99,7 +99,8 @@ def main():
             volume_in_gb=50,
             container_disk_in_gb=30,
             ports="8888/http,22/tcp",
-            env=env_vars
+            env=env_vars,
+            docker_args=container_command
         )
     except Exception as e:
         print(f"Erreur lors de la création du Pod : {e}")

@@ -108,6 +108,9 @@ def main():
     gpu_preferences = ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 3090", "NVIDIA A40"]
     pod = None
     
+    # Commande de démarrage (exécute le script puis dort indéfiniment pour garder le pod vivant même en cas d'erreur)
+    container_command = f"bash -c 'rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase1_Data_Preparation && chmod +x run_generation.sh && ./run_generation.sh; sleep infinity'"
+    
     for gpu_type in gpu_preferences:
         print(f"Tentative de création du pod sur RunPod avec le GPU : {gpu_type}...")
         try:
@@ -119,7 +122,8 @@ def main():
                 volume_in_gb=40, # Augmenté à 40 Go pour loger le modèle 32B et Ollama confortablement
                 container_disk_in_gb=20,
                 ports="8888/http,22/tcp",
-                env=env_vars
+                env=env_vars,
+                docker_args=container_command
             )
             print(f"Succès ! Pod alloué sur GPU : {gpu_type}")
             break
