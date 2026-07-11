@@ -3,9 +3,9 @@
 
 """
 Script de formatage du dataset pour la distillation Chain-of-Thought (CoT).
-Il télécharge le dataset SuperMust/irac-thinking, fusionne le champ 'thinking' 
-et le champ 'content' de l'assistant dans des balises <thinking>, et applique
-le chat template de Llama 3.
+Il télécharge le dataset SuperMust/irac-thinking ou lit un fichier local généré par generator_a2aj.py,
+fusionne le champ 'thinking' et le champ 'content' de l'assistant dans des balises <thinking>,
+et applique le chat template.
 """
 
 import os
@@ -75,7 +75,6 @@ def main():
             print(f"Erreur lors du chargement de '{args.dataset_name}' : {e}")
             print("Tentative de chargement en tant que jeu brut sans spécifier de split...")
             dataset = load_dataset(args.dataset_name)
-            # Si c'est un DatasetDict, on récupère le premier split disponible
             if hasattr(dataset, "keys"):
                 first_key = list(dataset.keys())[0]
                 print(f"Utilisation du split : {first_key}")
@@ -85,11 +84,8 @@ def main():
 
     # 4. Fonction de formatage CoT
     def format_cot_dataset(example):
-        # On suppose que chaque ligne du dataset contient une colonne 'messages'
-        # ou similaire contenant une liste de messages.
         messages_bruts = example.get("messages", [])
         
-        # Si 'messages' n'est pas présent directement, on tente de le trouver sous un autre nom
         if not messages_bruts:
             for key in ["conversations", "dialogue", "chat"]:
                 if key in example:
@@ -97,8 +93,6 @@ def main():
                     break
         
         if not messages_bruts:
-            # Si le format est plat (ex. instruction / input / output)
-            # On le reconstruit au format conversationnel
             instruction = example.get("instruction", example.get("prompt", ""))
             input_context = example.get("input", "")
             output = example.get("output", example.get("response", ""))
@@ -117,7 +111,6 @@ def main():
         messages_formates = []
         for msg in messages_bruts:
             role = msg.get("role", msg.get("from", ""))
-            # Normalisation du rôle
             if role in ["developer", "system"]:
                 role = "system"
             elif role in ["human", "user"]:
@@ -130,7 +123,6 @@ def main():
             
             # Injection du contexte de droit canadien/québécois dans le prompt système
             if role == "system":
-                # Forcer l'alignement sur le droit canadien/québécois et LexiorGPT
                 content = (
                     "Tu es un assistant juridique Lexior, spécialisé en droit canadien et québécois. "
                     "Raisonne en français selon le format IRAC. Tu dois obligatoirement baser tes analyses "
@@ -145,12 +137,10 @@ def main():
                     content_final = f"<thinking>\n{thinking}\n</thinking>\n\n{content}"
                 else:
                     content_final = content
-                
                 messages_formates.append({"role": role, "content": content_final})
             else:
                 messages_formates.append({"role": role, "content": content})
                 
-        # Application du template de chat du tokenizer
         text = tokenizer.apply_chat_template(
             messages_formates,
             tokenize=False,
@@ -164,7 +154,7 @@ def main():
     mapped_dataset = dataset.map(
         format_cot_dataset,
         remove_columns=dataset.column_names,
-        desc="Formatting dataset to Llama-3 CoT format"
+        desc="Formatting dataset to Llama-3/Qwen CoT format"
     )
 
     # 6. Split Train / Test

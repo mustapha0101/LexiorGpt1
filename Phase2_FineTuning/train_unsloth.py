@@ -20,28 +20,27 @@ try:
 except ImportError:
     raise ImportError(
         "Unsloth ou PyTorch n'est pas installé. Ce script doit être exécuté sur un environnement avec GPU NVIDIA "
-        "et les bibliothèques CUDA appropriées installées. Veuillez utiliser run_pipeline.sh."
+        "et les bibliothèques CUDA appropriées installées."
     )
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Entraînement QLoRA avec Unsloth.")
-    # Modèle et données
     parser.add_argument(
         "--model_name", 
         type=str, 
-        default="unsloth/llama-3-8b-Instruct-bnb-4bit",
-        help="Modèle de base Unsloth (ex. unsloth/llama-3-8b-Instruct-bnb-4bit ou unsloth/Qwen2.5-7B-Instruct-bnb-4bit)."
+        default="unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+        help="Modèle de base Unsloth (ex. unsloth/Qwen2.5-7B-Instruct-bnb-4bit ou unsloth/llama-3-8b-Instruct-bnb-4bit)."
     )
     parser.add_argument(
         "--train_file", 
         type=str, 
-        default="data/processed/train_dataset.jsonl",
+        default="../Phase1_Data_Preparation/data/processed/train_dataset.jsonl",
         help="Chemin vers le fichier JSONL de train formaté."
     )
     parser.add_argument(
         "--test_file", 
         type=str, 
-        default="data/processed/test_dataset.jsonl",
+        default="../Phase1_Data_Preparation/data/processed/test_dataset.jsonl",
         help="Chemin vers le fichier JSONL de test formaté (facultatif)."
     )
     parser.add_argument(
@@ -50,13 +49,9 @@ def parse_args():
         default=4096,
         help="Longueur maximale de séquence (context length)."
     )
-    
-    # Paramètres LoRA
     parser.add_argument("--lora_r", type=int, default=16, help="Rang de LoRA (r).")
     parser.add_argument("--lora_alpha", type=int, default=32, help="Alpha de LoRA.")
     parser.add_argument("--lora_dropout", type=float, default=0.0, help="Dropout pour LoRA (0.0 est recommandé par Unsloth).")
-    
-    # Hyperparamètres d'entraînement
     parser.add_argument("--epochs", type=int, default=3, help="Nombre d'époques d'entraînement.")
     parser.add_argument("--batch_size", type=int, default=2, help="Batch size par GPU.")
     parser.add_argument("--grad_accum", type=int, default=4, help="Nombre d'étapes d'accumulation de gradient.")
@@ -64,8 +59,6 @@ def parse_args():
     parser.add_argument("--output_dir", type=str, default="outputs/checkpoints", help="Dossier de sortie pour les checkpoints.")
     parser.add_argument("--logging_steps", type=int, default=10, help="Intervalle d'affichage des logs.")
     parser.add_argument("--save_steps", type=int, default=100, help="Intervalle de sauvegarde des checkpoints.")
-    
-    # Export & HuggingFace
     parser.add_argument(
         "--export_dir", 
         type=str, 
@@ -100,35 +93,39 @@ def parse_args():
         action="store_true", 
         help="Exporter le modèle fusionné en float16 (Poids complets)."
     )
-    # Logging et Tracking
     parser.add_argument(
         "--report_to",
         type=str,
         default="none",
         choices=["none", "wandb", "tensorboard"],
-        help="Framework à utiliser pour suivre et logger l'entraînement (ex. wandb ou tensorboard)."
+        help="Framework à utiliser pour suivre l'entraînement."
     )
     parser.add_argument(
         "--run_name",
         type=str,
-        default="llama3-juridique-cot",
-        help="Nom de l'expérience de fine-tuning (utile pour différencier les runs dans Weights & Biases)."
+        default="qwen25-juridique-cot",
+        help="Nom de l'expérience de fine-tuning."
     )
     return parser.parse_args()
 
 def main():
     args = parse_args()
     
-    # 1. Configuration et chargement du modèle
     print(f"Chargement du modèle de base : {args.model_name}...")
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=args.model_name,
         max_seq_length=args.max_seq_length,
         dtype=None,  # Détection automatique de float16/bfloat16
-        load_in_4bit=True,  # Chargement en 4-bit pour économiser la VRAM (QLoRA)
+        load_in_4bit=True,
     )
     
-    # 2. Application de LoRA (PEFT)
+    # Ajout des tokens spéciaux juridiques s'ils ne sont pas présents
+    special_tokens = ["<loi>", "</loi>", "<arrêt>", "</arrêt>", "<thinking>", "</thinking>"]
+    num_added = tokenizer.add_special_tokens({"additional_special_tokens": special_tokens})
+    if num_added > 0:
+        model.resize_token_embeddings(len(tokenizer))
+        print(f"Ajout de {num_added} tokens spéciaux juridiques au tokenizer.")
+    
     print("Configuration des modules LoRA...")
     model = FastLanguageModel.get_peft_model(
         model,
@@ -140,12 +137,11 @@ def main():
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         bias="none",
-        use_gradient_checkpointing="unsloth",  # Optimisation mémoire d'Unsloth
+        use_gradient_checkpointing="unsloth",
         random_state=3407,
         max_seq_length=args.max_seq_length,
     )
     
-    # 3. Chargement des datasets formatés
     print(f"Chargement des données d'entraînement depuis {args.train_file}...")
     dataset_dict = {"train": load_dataset("json", data_files=args.train_file, split="train")}
     
@@ -153,7 +149,6 @@ def main():
         print(f"Chargement des données de test depuis {args.test_file}...")
         dataset_dict["test"] = load_dataset("json", data_files=args.test_file, split="train")
     
-    # 4. Configuration de l'entraîneur (SFTTrainer)
     print("Initialisation du SFTTrainer...")
     trainer = SFTTrainer(
         model=model,
@@ -162,7 +157,7 @@ def main():
         dataset_text_field="text",
         max_seq_length=args.max_seq_length,
         dataset_num_proc=2,
-        packing=False,  # Peut être passé à True pour des contextes longs combinés
+        packing=False,
         args=TrainingArguments(
             per_device_train_batch_size=args.batch_size,
             gradient_accumulation_steps=args.grad_accum,
@@ -182,54 +177,38 @@ def main():
             output_dir=args.output_dir,
             report_to=args.report_to,
             run_name=args.run_name if args.report_to != "none" else None,
+            logging_dir="outputs/logs"
         ),
     )
     
-    # 5. Lancement du Fine-Tuning
     print("Début du Fine-Tuning...")
     trainer_stats = trainer.train()
     print("Entraînement terminé !")
-    print(f"Statistiques d'entraînement : {trainer_stats.metrics}")
     
-    # 6. Sauvegarde locale des adapters LoRA
     os.makedirs(args.export_dir, exist_ok=True)
     lora_dir = os.path.join(args.export_dir, "lora_adapters")
     print(f"Sauvegarde locale des adapters LoRA dans : {lora_dir}")
     model.save_pretrained(lora_dir)
     tokenizer.save_pretrained(lora_dir)
     
-    # 7. Options d'export
-    # Option A : Push des Adapters sur HF Hub
     if args.push_to_hub and args.hf_repo_id:
         print(f"Téléversement des adapters LoRA sur le Hugging Face Hub ({args.hf_repo_id})...")
         model.push_to_hub(args.hf_repo_id, commit_message="Ajout des adapters LoRA spécialisés")
         tokenizer.push_to_hub(args.hf_repo_id)
 
-    # Option B : Export fusionné en Float16
     if args.export_merged_16bit:
         merged_dir = os.path.join(args.export_dir, "merged_16bit")
         print(f"Fusion des poids et sauvegarde du modèle complet 16-bit dans : {merged_dir}...")
         model.save_pretrained_merged(merged_dir, tokenizer, save_method="merged_16bit")
         if args.push_to_hub and args.hf_repo_id:
-            print(f"Téléversement du modèle complet 16-bit sur Hugging Face Hub ({args.hf_repo_id}-merged)...")
             model.push_to_hub_merged(f"{args.hf_repo_id}-merged", tokenizer, save_method="merged_16bit")
             
-    # Option C : Export direct en format GGUF pour Ollama/Llama.cpp
     if args.export_gguf:
         gguf_dir = os.path.join(args.export_dir, f"gguf_{args.gguf_quantization}")
         print(f"Exportation directe au format GGUF ({args.gguf_quantization}) dans : {gguf_dir}...")
-        model.save_pretrained_gguf(
-            gguf_dir, 
-            tokenizer, 
-            quantization_method=args.gguf_quantization
-        )
+        model.save_pretrained_gguf(gguf_dir, tokenizer, quantization_method=args.gguf_quantization)
         if args.push_to_hub and args.hf_repo_id:
-            print(f"Téléversement du fichier GGUF sur Hugging Face Hub ({args.hf_repo_id}-gguf)...")
-            model.push_to_hub_gguf(
-                f"{args.hf_repo_id}-gguf", 
-                tokenizer, 
-                quantization_method=args.gguf_quantization
-            )
+            model.push_to_hub_gguf(f"{args.hf_repo_id}-gguf", tokenizer, quantization_method=args.gguf_quantization)
             
     print("Processus d'entraînement et d'export terminé !")
 
