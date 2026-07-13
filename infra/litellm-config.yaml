@@ -1,0 +1,32 @@
+# Configuration LiteLLM - Passerelle de Production LexiorGPT
+# Conforme à la Loi 25 (Québec) : Zéro journalisation de données sensibles
+
+model_list:
+  - model_name: Qwen/Qwen2.5-32B-Instruct-AWQ
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-32B-Instruct-AWQ
+      api_base: http://vllm:8000/v1
+      api_key: none
+
+general_settings:
+  # Activer la gestion de clés API d'accès
+  master_key: ${LITELLM_MASTER_KEY}
+
+litellm_settings:
+  # --- CONFORMITÉ LOI 25 ---
+  # Désactive toute journalisation des requêtes (prompts) et réponses (completions)
+  disable_logging: true
+  
+  # Désactive les callbacks externes de télémétrie ou de tracking tiers
+  success_callback: []
+  failure_callback: []
+  
+  # Empêche la conservation des métadonnées utilisateurs dans la base locale
+  enable_metadata: false
+  
+  # Masquer les prompts et complétions dans les logs d'erreurs en cas de plantage
+  turn_off_message_logging: true
+
+router_settings:
+  routing_strategy: round-robin
+  routing_strategy_args: {}
