@@ -61,8 +61,8 @@ def parse_args():
     parser.add_argument(
         "--inference_gpu",
         type=str,
-        default="NVIDIA GeForce RTX 4090",
-        help="Type de GPU pour le serveur d'inférence vLLM (ex: 'NVIDIA GeForce RTX 4090', 'NVIDIA GeForce RTX 3090')."
+        default="NVIDIA A100 80GB PCIe",
+        help="Type de GPU pour le serveur d'inférence vLLM (ex: 'NVIDIA A100 80GB PCIe', 'NVIDIA GeForce RTX 4090')."
     )
     parser.add_argument(
         "--generation_gpu",
@@ -89,14 +89,24 @@ def main():
     # Commande de démarrage vLLM avec modèle Qwen 2.5 32B quantifié AWQ
     # Limiter max-model-len à 8192 et gpu-memory-utilization à 0.85 pour tenir sur 24 Go de VRAM
     container_command_inf = (
-        "serve Qwen/Qwen2.5-14B-Instruct-AWQ "
+        "serve Qwen/Qwen2.5-32B-Instruct-AWQ "
         "--quantization awq "
         "--port 8000 "
-        "--max-model-len 8192 "
-        "--gpu-memory-utilization 0.85"
+        "--max-model-len 4096 "
+        "--gpu-memory-utilization 0.90 "
+        "--kv-cache-dtype fp8"
     )
     
-    inference_gpu_preferences = [args.inference_gpu, "NVIDIA GeForce RTX 3090", "NVIDIA A100 80GB PCIe"]
+    inference_gpu_preferences = [
+        args.inference_gpu,
+        "NVIDIA A100-SXM4-80GB",
+        "NVIDIA A100 80GB PCIe",
+        "NVIDIA A100 SXM4 80GB",
+        "NVIDIA A30",
+        "NVIDIA RTX 6000 Ada",
+        "NVIDIA GeForce RTX 4090",
+        "NVIDIA GeForce RTX 3090"
+    ]
     pod_inf = None
     
     print("--- ÉTAPE 1 : RÉCUPÉRATION OU CRÉATION DU SERVEUR D'INFÉRENCE vLLM ---", flush=True)
@@ -167,7 +177,7 @@ def main():
     env_vars_gen = {
         "OPENAI_API_KEY": "vllm-key",
         "OPENAI_BASE_URL": openai_url,
-        "GEN_MODEL": "Qwen/Qwen2.5-14B-Instruct-AWQ",
+        "GEN_MODEL": "Qwen/Qwen2.5-32B-Instruct-AWQ",
         "HF_TOKEN": args.hf_token,
         "HF_DATASET_REPO_ID": args.hf_dataset_repo,
         "GEN_LIMIT": str(args.limit),
