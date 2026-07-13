@@ -49,7 +49,7 @@ if [ -z "$OPENAI_API_KEY" ]; then
     exit 1
 fi
 
-python3 generator_a2aj.py \
+python3 resume_from_hf.py \
     --dataset "$DATASET" \
     --limit "$LIMIT" \
     --workers "$WORKERS" \
