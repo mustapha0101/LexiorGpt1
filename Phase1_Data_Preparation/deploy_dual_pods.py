@@ -89,8 +89,7 @@ def main():
     # Commande de démarrage vLLM avec modèle Qwen 2.5 32B quantifié AWQ
     # Limiter max-model-len à 8192 et gpu-memory-utilization à 0.85 pour tenir sur 24 Go de VRAM
     container_command_inf = (
-        "python3 -m vllm.entrypoints.openai.api_server "
-        "--model Qwen/Qwen2.5-32B-Instruct-AWQ "
+        "serve Qwen/Qwen2.5-32B-Instruct-AWQ "
         "--quantization awq "
         "--port 8000 "
         "--max-model-len 8192 "
@@ -100,53 +99,61 @@ def main():
     inference_gpu_preferences = [args.inference_gpu, "NVIDIA GeForce RTX 3090", "NVIDIA A100 80GB PCIe"]
     pod_inf = None
     
-    print("--- ÉTAPE 1 : CRÉATION DU SERVEUR D'INFÉRENCE vLLM ---")
-    for gpu_type in inference_gpu_preferences:
-        print(f"Tentative d'allocation de l'inférence sur GPU : {gpu_type}...")
-        try:
-            pod_inf = runpod.create_pod(
-                name="lexior-phase1-inference-vllm",
-                image_name=docker_image_inf,
-                gpu_type_id=gpu_type,
-                gpu_count=1,
-                volume_in_gb=50, # 50 Go pour stocker les poids AWQ (environ 20 Go)
-                container_disk_in_gb=20,
-                ports="8000/http,22/tcp",
-                env={"HF_TOKEN": args.hf_token},
-                docker_args=container_command_inf
-            )
-            print(f"Succès ! Serveur alloué sur GPU : {gpu_type}")
+    print("--- ÉTAPE 1 : RÉCUPÉRATION OU CRÉATION DU SERVEUR D'INFÉRENCE vLLM ---", flush=True)
+    existing_pods = runpod.get_pods()
+    for p in existing_pods:
+        if p.get("name") == "lexior-phase1-inference-vllm" and p.get("desiredStatus") == "RUNNING":
+            pod_inf = p
+            print(f"Pod d'inférence existant trouvé : {pod_inf['id']}", flush=True)
             break
-        except Exception as e:
-            print(f"Erreur d'allocation pour {gpu_type} : {e}")
             
     if not pod_inf:
-        print("Erreur critique : Impossible d'allouer le Pod d'Inférence vLLM.")
+        for gpu_type in inference_gpu_preferences:
+            print(f"Tentative d'allocation de l'inférence sur GPU : {gpu_type}...", flush=True)
+            try:
+                pod_inf = runpod.create_pod(
+                    name="lexior-phase1-inference-vllm",
+                    image_name=docker_image_inf,
+                    gpu_type_id=gpu_type,
+                    gpu_count=1,
+                    volume_in_gb=50, # 50 Go pour stocker les poids AWQ (environ 20 Go)
+                    container_disk_in_gb=20,
+                    ports="8000/http,22/tcp",
+                    env={"HF_TOKEN": args.hf_token},
+                    docker_args=container_command_inf
+                )
+                print(f"Succès ! Serveur alloué sur GPU : {gpu_type}", flush=True)
+                break
+            except Exception as e:
+                print(f"Erreur d'allocation pour {gpu_type} : {e}", flush=True)
+            
+    if not pod_inf:
+        print("Erreur critique : Impossible d'allouer le Pod d'Inférence vLLM.", flush=True)
         sys.exit(1)
         
     pod_id_inf = pod_inf["id"]
-    print(f"ID du Pod d'Inférence : {pod_id_inf}")
+    print(f"ID du Pod d'Inférence : {pod_id_inf}", flush=True)
     
     # ----------------------------------------------------
     # ÉTAPE 2 : ATTENTE DU DÉMARRAGE ET RÉCUPÉRATION DU PROXY URL
     # ----------------------------------------------------
     print("\n--- ÉTAPE 2 : ATTENTE DE LA MISE EN LIGNE DU SERVEUR D'INFÉRENCE ---")
     openai_url = f"https://{pod_id_inf}-8000.proxy.runpod.net/v1"
-    
     while True:
         time.sleep(10)
         try:
             status_data = runpod.get_pod(pod_id_inf)
             if not status_data:
-                print("Erreur : Le pod d'inférence s'est éteint brusquement.")
+                print("Erreur : Le pod d'inférence s'est éteint brusquement.", flush=True)
                 sys.exit(1)
-            status = status_data.get("status")
-            print(f"Statut actuel : {status} (attente de 'RUNNING'...)")
-            if status == "RUNNING":
-                print("Le serveur vLLM est en ligne (statut RUNNING) !")
+            desired_status = status_data.get("desiredStatus")
+            runtime = status_data.get("runtime")
+            print(f"Statut actuel - desiredStatus: {desired_status}, runtime: {bool(runtime)} (attente du démarrage...)", flush=True)
+            if desired_status == "RUNNING" and runtime is not None:
+                print("Le serveur vLLM est en ligne et initialisé !", flush=True)
                 break
         except Exception as e:
-            print(f"Erreur de suivi : {e}")
+            print(f"Erreur de suivi : {e}", flush=True)
             
     # Laisser 10 secondes supplémentaires pour s'assurer que le port proxy est mappé au niveau réseau
     time.sleep(10)
