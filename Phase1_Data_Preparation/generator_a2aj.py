@@ -85,15 +85,15 @@ def process_single_item(item, idx, client, dataset_name, model, system_prompt, o
     context_meta = {}
     
     if dataset_name == "a2aj/canadian-laws":
-        raw_text = item.get("text", "")
+        raw_text = item.get("unofficial_text_fr", "") or item.get("unofficial_text_en", "") or item.get("text", "")
         context_meta = {
-            "title": item.get("title", "Loi canadienne"),
+            "title": item.get("name_fr", "") or item.get("name_en", "") or item.get("title", "Loi canadienne"),
             "section": item.get("section", "N/A")
         }
     elif dataset_name == "a2aj/canadian-case-law":
-        raw_text = item.get("text", item.get("content", ""))
+        raw_text = item.get("unofficial_text_fr", "") or item.get("unofficial_text_en", "") or item.get("text", "") or item.get("content", "")
         context_meta = {
-            "citation": item.get("citation", "Jurisprudence"),
+            "citation": item.get("citation_fr", "") or item.get("citation_en", "") or item.get("citation", "Jurisprudence"),
             "court": item.get("court", "Tribunal canadien")
         }
         
@@ -188,7 +188,7 @@ def process_single_item(item, idx, client, dataset_name, model, system_prompt, o
                     f_out.write(json.dumps(message_data, ensure_ascii=False) + "\n")
             return True
     except Exception as e:
-        pass
+        print(f"\n[Erreur index {idx}] : {e}")
     return False
 
 def main():

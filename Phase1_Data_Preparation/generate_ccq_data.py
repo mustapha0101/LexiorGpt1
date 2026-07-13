@@ -10,6 +10,7 @@ en français québécois, permettant au modèle d'apprendre la substance du Code
 import os
 import sys
 import json
+import re
 import argparse
 from tqdm import tqdm
 from openai import OpenAI
