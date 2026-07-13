@@ -88,13 +88,15 @@ def process_single_item(item, idx, client, dataset_name, model, system_prompt, o
         raw_text = item.get("unofficial_text_fr", "") or item.get("unofficial_text_en", "") or item.get("text", "")
         context_meta = {
             "title": item.get("name_fr", "") or item.get("name_en", "") or item.get("title", "Loi canadienne"),
-            "section": item.get("section", "N/A")
+            "section": item.get("section", "N/A"),
+            "url": item.get("source_url_fr", "") or item.get("source_url_en", "") or ""
         }
     elif dataset_name == "a2aj/canadian-case-law":
         raw_text = item.get("unofficial_text_fr", "") or item.get("unofficial_text_en", "") or item.get("text", "") or item.get("content", "")
         context_meta = {
             "citation": item.get("citation_fr", "") or item.get("citation_en", "") or item.get("citation", "Jurisprudence"),
-            "court": item.get("court", "Tribunal canadien")
+            "court": item.get("court", "Tribunal canadien"),
+            "url": item.get("source_url_fr", "") or item.get("source_url_en", "") or ""
         }
         
     if not raw_text or len(raw_text.strip()) < 150:
@@ -142,16 +144,25 @@ def process_single_item(item, idx, client, dataset_name, model, system_prompt, o
                 # Rejeter si le raisonnement logique n'est pas assez complet
                 return False
                 
-            # 2. Vérification syntaxique JSON de bas de page
-            footnote_match = re.search(r"\[\^\d+\]:\s*(\{.*\})", content_part)
+            # 2. Vérification syntaxique JSON de bas de page et correction d'URL
+            footnote_match = re.search(r"(\[\^\d+\]:\s*)(\{.*\})", content_part)
             if not footnote_match:
                 # Rejeter si le format de citation Lexior n'est pas présent
                 return False
             try:
-                json_cite = json.loads(footnote_match.group(1))
-                if "type" not in json_cite or "url" not in json_cite:
+                prefix = footnote_match.group(1)
+                cite_json_str = footnote_match.group(2)
+                cite_json = json.loads(cite_json_str)
+                if "type" not in cite_json or "url" not in cite_json:
                     return False
-            except json.JSONDecodeError:
+                
+                # Injection de l'URL réelle du dataset source si disponible
+                real_url = context_meta.get("url", "")
+                if real_url:
+                    cite_json["url"] = real_url
+                    new_cite_json_str = json.dumps(cite_json, ensure_ascii=False)
+                    content_part = content_part.replace(footnote_match.group(0), f"{prefix}{new_cite_json_str}")
+            except Exception:
                 return False
                 
             # 3. FILTRAGE ANTI-HALLUCINATION (Grounding) - Désactivé ou assoupli pour éviter le rejet massif
