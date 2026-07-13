@@ -89,7 +89,7 @@ def main():
     # Commande de démarrage vLLM avec modèle Qwen 2.5 32B quantifié AWQ
     # Limiter max-model-len à 8192 et gpu-memory-utilization à 0.85 pour tenir sur 24 Go de VRAM
     container_command_inf = (
-        "serve Qwen/Qwen2.5-32B-Instruct-AWQ "
+        "serve Qwen/Qwen2.5-14B-Instruct-AWQ "
         "--quantization awq "
         "--port 8000 "
         "--max-model-len 8192 "
@@ -167,7 +167,7 @@ def main():
     env_vars_gen = {
         "OPENAI_API_KEY": "vllm-key",
         "OPENAI_BASE_URL": openai_url,
-        "GEN_MODEL": "Qwen/Qwen2.5-32B-Instruct-AWQ",
+        "GEN_MODEL": "Qwen/Qwen2.5-14B-Instruct-AWQ",
         "HF_TOKEN": args.hf_token,
         "HF_DATASET_REPO_ID": args.hf_dataset_repo,
         "GEN_LIMIT": str(args.limit),
