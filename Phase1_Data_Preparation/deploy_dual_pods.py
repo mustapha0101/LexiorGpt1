@@ -120,17 +120,38 @@ def main():
     if not pod_inf:
         for gpu_type in inference_gpu_preferences:
             print(f"Tentative d'allocation de l'inférence sur GPU : {gpu_type}...", flush=True)
+            # Paramètres vLLM optimisés pour le GPU alloué (vitesse maximale vs stabilité)
+            if "A100" in gpu_type or "H100" in gpu_type:
+                # Mode Performance Ultime : pas de compression de cache, grand contexte, grand parallélisme
+                cmd = (
+                    "serve Qwen/Qwen2.5-32B-Instruct-AWQ "
+                    "--quantization awq "
+                    "--port 8000 "
+                    "--max-model-len 8192 "
+                    "--gpu-memory-utilization 0.95 "
+                    "--max-num-seqs 256"
+                )
+            else:
+                # Mode Optimisé 24Go/48Go : FP8 KV cache, contexte modéré pour éviter OOM
+                cmd = (
+                    "serve Qwen/Qwen2.5-32B-Instruct-AWQ "
+                    "--quantization awq "
+                    "--port 8000 "
+                    "--max-model-len 4096 "
+                    "--gpu-memory-utilization 0.90 "
+                    "--kv-cache-dtype fp8"
+                )
             try:
                 pod_inf = runpod.create_pod(
                     name="lexior-phase1-inference-vllm",
                     image_name=docker_image_inf,
                     gpu_type_id=gpu_type,
                     gpu_count=1,
-                    volume_in_gb=50, # 50 Go pour stocker les poids AWQ (environ 20 Go)
+                    volume_in_gb=50,
                     container_disk_in_gb=20,
                     ports="8000/http,22/tcp",
                     env={"HF_TOKEN": args.hf_token},
-                    docker_args=container_command_inf
+                    docker_args=cmd
                 )
                 print(f"Succès ! Serveur alloué sur GPU : {gpu_type}", flush=True)
                 break
@@ -192,7 +213,16 @@ def main():
         f"./run_generation.sh; sleep infinity'"
     )
     
-    generation_gpu_preferences = [args.generation_gpu, "NVIDIA GeForce RTX 3060", "NVIDIA A30"]
+    generation_gpu_preferences = [
+        args.generation_gpu,
+        "NVIDIA GeForce RTX 3070",
+        "NVIDIA GeForce RTX 3060",
+        "NVIDIA GeForce RTX 4070 Ti",
+        "NVIDIA GeForce RTX 4080",
+        "NVIDIA GeForce RTX 3080",
+        "NVIDIA L4",
+        "NVIDIA A30"
+    ]
     pod_gen = None
     
     for gpu_type in generation_gpu_preferences:
