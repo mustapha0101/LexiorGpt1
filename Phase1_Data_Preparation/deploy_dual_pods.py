@@ -84,7 +84,7 @@ def main():
     # ----------------------------------------------------
     # ÉTAPE 1 : DÉPLOIEMENT DU POD INFERENCE (vLLM)
     # ----------------------------------------------------
-    docker_image_inf = "vllm/vllm-openai:latest"
+    docker_image_inf = "vllm/vllm-openai:v0.5.2"
     
     # Commande de démarrage vLLM avec modèle Qwen 2.5 32B quantifié AWQ
     # Limiter max-model-len à 8192 et gpu-memory-utilization à 0.85 pour tenir sur 24 Go de VRAM
