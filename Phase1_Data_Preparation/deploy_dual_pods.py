@@ -124,7 +124,7 @@ def main():
             if "A100" in gpu_type or "H100" in gpu_type:
                 # Mode Performance Ultime : pas de compression de cache, grand contexte, grand parallélisme
                 cmd = (
-                    "serve Qwen/Qwen2.5-32B-Instruct-AWQ "
+                    "--model Qwen/Qwen2.5-32B-Instruct-AWQ "
                     "--quantization awq "
                     "--port 8000 "
                     "--max-model-len 8192 "
@@ -134,7 +134,7 @@ def main():
             else:
                 # Mode Optimisé 24Go/48Go : FP8 KV cache, contexte modéré pour éviter OOM
                 cmd = (
-                    "serve Qwen/Qwen2.5-32B-Instruct-AWQ "
+                    "--model Qwen/Qwen2.5-32B-Instruct-AWQ "
                     "--quantization awq "
                     "--port 8000 "
                     "--max-model-len 4096 "
