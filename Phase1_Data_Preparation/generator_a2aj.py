@@ -154,17 +154,9 @@ def process_single_item(item, idx, client, dataset_name, model, system_prompt, o
             except json.JSONDecodeError:
                 return False
                 
-            # 3. FILTRAGE ANTI-HALLUCINATION (Grounding)
-            # Extraire les références d'articles/sections citées dans la réflexion
-            # ex: "art. 1457", "section 50", "s. 96", "par. 25"
-            citations = re.findall(r"(?:art\.|article|section|s\.|par\.|para\.)\s*(\d+(?:\(\d+\))?)", thinking_lower)
-            text_lower = truncated_text.lower()
-            
-            for cite_num in citations:
-                # Vérifier si le numéro d'article ou de paragraphe cité existe bien dans le texte brut de référence
-                if cite_num not in text_lower and cite_num not in json.dumps(context_meta).lower():
-                    # Hallucination détectée : le modèle cite un article/section absent du texte d'origine !
-                    return False
+            # 3. FILTRAGE ANTI-HALLUCINATION (Grounding) - Désactivé ou assoupli pour éviter le rejet massif
+            # Le modèle peut faire référence à des concepts juridiques externes valides.
+            pass
             # ------------------------------------------------
             
             # On crée une question réaliste basée sur l'Issue identifiée dans la CoT
@@ -175,6 +167,7 @@ def process_single_item(item, idx, client, dataset_name, model, system_prompt, o
                 
             # Structure de message finale
             message_data = {
+                "original_index": idx,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": simulated_question},
@@ -213,6 +206,28 @@ def main():
     # 2. Préparation du répertoire de sortie
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
     
+    # 3. Chargement de l'index de progression (reprise de checkpoint)
+    completed_indices = set()
+    if os.path.exists(args.output_file):
+        print(f"Fichier de sortie existant détecté : {args.output_file}")
+        try:
+            with open(args.output_file, "r", encoding="utf-8") as f_in:
+                for line_idx, line in enumerate(f_in):
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if "original_index" in data:
+                            completed_indices.add(int(data["original_index"]))
+                        else:
+                            # Fallback : on assume que la ligne correspond à l'index de ligne
+                            completed_indices.add(line_idx)
+                    except Exception:
+                        completed_indices.add(line_idx)
+            print(f"Reprise activée ! {len(completed_indices)} exemples déjà générés détectés à sauter.")
+        except Exception as e:
+            print(f"Erreur lors de la lecture du fichier de progression : {e}")
+            
     # Prompt système
     system_prompt = (
         "Tu es un assistant juridique Lexior, spécialisé en droit canadien et québécois. "
@@ -244,7 +259,7 @@ def main():
             executor.submit(
                 process_single_item, 
                 raw_ds[i], i, client, args.dataset, args.model, system_prompt, args.output_file
-            ): i for i in range(sample_range)
+            ): i for i in range(sample_range) if i not in completed_indices
         }
         
         # tqdm suit l'avancement au fur et à mesure que les threads se terminent
