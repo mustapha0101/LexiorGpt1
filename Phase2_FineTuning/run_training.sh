@@ -33,10 +33,11 @@ fi
 # Installation des dépendances et d'Unsloth en une seule commande optimisée par uv
 echo -e "\n${YELLOW}Installation des dépendances et d'Unsloth avec uv...${NC}"
 uv pip install --system --no-cache \
-    "transformers<4.46.0" "peft<0.12.0" "trl<0.9.0" "accelerate==0.34.2" \
+    transformers peft trl accelerate \
     datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic "numpy<2.0" \
     rich tensorboard wandb \
     "unsloth[$UNSLOTH_EXTRA] @ git+https://github.com/unslothai/unsloth.git"
+
 
 
 
