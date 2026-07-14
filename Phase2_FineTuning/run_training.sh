@@ -26,16 +26,10 @@ fi
 
 # 3. Lancement du Fine-Tuning
 echo -e "\n${YELLOW}[3/3] Lancement de l'entraînement...${NC}"
-EPOCHS=${TRAIN_EPOCHS:-3}
-BATCH_SIZE=${TRAIN_BATCH_SIZE:-2}
-GRAD_ACCUM=${TRAIN_GRAD_ACCUM:-4}
-LR=${TRAIN_LR:-2e-4}
-MODEL_BASE=${MODEL_NAME:-"unsloth/Qwen2.5-7B-Instruct-bnb-4bit"}
-
 # Détection automatique du fichier de données généré dans la Phase 1
-# Si le fichier local n'existe pas, on peut surcharger par une variable d'environnement
-DATASET_PATH=${TRAIN_DATASET_FILE:-"../Phase1_Data_Preparation/data/processed/train_dataset.jsonl"}
-TEST_PATH=${TEST_DATASET_FILE:-"../Phase1_Data_Preparation/data/processed/test_dataset.jsonl"}
+# On charge en priorité depuis le dépôt Hugging Face pour s'assurer d'avoir les 7500 exemples
+DATASET_PATH=${TRAIN_DATASET_FILE:-"intelliwork/canadian-cot-dataset"}
+MODEL_BASE=${MODEL_NAME:-"unsloth/Qwen2.5-32B-Instruct-bnb-4bit"}
 
 # Options d'export
 PUSH_FLAG=""
@@ -45,10 +39,14 @@ if [ -n "$HF_REPO_ID" ]; then
     REPO_FLAG="--hf_repo_id $HF_REPO_ID"
 fi
 
+EPOCHS=${TRAIN_EPOCHS:-3}
+BATCH_SIZE=${TRAIN_BATCH_SIZE:-2}
+GRAD_ACCUM=${TRAIN_GRAD_ACCUM:-4}
+LR=${TRAIN_LR:-2e-4}
+
 python3 train_unsloth.py \
     --model_name "$MODEL_BASE" \
     --train_file "$DATASET_PATH" \
-    --test_file "$TEST_PATH" \
     --epochs "$EPOCHS" \
     --batch_size "$BATCH_SIZE" \
     --grad_accum "$GRAD_ACCUM" \

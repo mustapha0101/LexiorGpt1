@@ -28,8 +28,8 @@ def parse_args():
     parser.add_argument(
         "--model_name", 
         type=str, 
-        default="unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
-        help="Modèle de base Unsloth (ex. unsloth/Qwen2.5-7B-Instruct-bnb-4bit ou unsloth/llama-3-8b-Instruct-bnb-4bit)."
+        default="unsloth/Qwen2.5-32B-Instruct-bnb-4bit",
+        help="Modèle de base Unsloth (ex. unsloth/Qwen2.5-32B-Instruct-bnb-4bit)."
     )
     parser.add_argument(
         "--train_file", 
@@ -143,11 +143,16 @@ def main():
     )
     
     print(f"Chargement des données d'entraînement depuis {args.train_file}...")
-    dataset_dict = {"train": load_dataset("json", data_files=args.train_file, split="train")}
-    
-    if args.test_file and os.path.exists(args.test_file):
-        print(f"Chargement des données de test depuis {args.test_file}...")
-        dataset_dict["test"] = load_dataset("json", data_files=args.test_file, split="train")
+    if args.train_file.startswith("intelliwork/"):
+        dataset_dict = {
+            "train": load_dataset(args.train_file, split="train", token=os.environ.get("HF_TOKEN")),
+            "test": load_dataset(args.train_file, split="test", token=os.environ.get("HF_TOKEN"))
+        }
+    else:
+        dataset_dict = {"train": load_dataset("json", data_files=args.train_file, split="train")}
+        if args.test_file and os.path.exists(args.test_file):
+            print(f"Chargement des données de test depuis {args.test_file}...")
+            dataset_dict["test"] = load_dataset("json", data_files=args.test_file, split="train")
     
     print("Initialisation du SFTTrainer...")
     trainer = SFTTrainer(
