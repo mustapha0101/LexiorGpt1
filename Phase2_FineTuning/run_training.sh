@@ -12,18 +12,18 @@ echo -e "${GREEN}===============================================================
 echo -e "${GREEN}    Phase 2 : Fine-Tuning QLoRA avec Unsloth (RunPod)                 ${NC}"
 echo -e "${GREEN}======================================================================${NC}"
 
-# 1. Installation d'Unsloth et dépendances de base depuis PyPI
+# 1. Installation d'Unsloth et dépendances de base (compatibles PyTorch 2.2.0)
 echo -e "\n${YELLOW}[1/3] Installation des dépendances et d'Unsloth...${NC}"
-export PATH=$PATH:/root/.local/bin
+export PATH=$PATH:/root/.local/bin:/usr/local/bin
 pip install --upgrade pip
-pip install transformers peft trl accelerate datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic numpy<2.0
-# Installation directe depuis PyPI (sans clone Git de secours)
+# Contraintes strictes pour correspondre à PyTorch 2.2.0 de l'image de base RunPod
+pip install "transformers<4.46.0" "peft<0.12.0" "trl<0.9.0" "accelerate<0.34.0" datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic "numpy<2.0"
 pip install --no-cache-dir "unsloth[cu121-torch220]"
 
-# 2. Hugging Face Login
+# 2. Hugging Face Login (Programmation Python Robuste)
 echo -e "\n${YELLOW}[2/3] Connexion au Hugging Face Hub...${NC}"
 if [ -n "$HF_TOKEN" ]; then
-    python3 -m huggingface_hub.cli.huggingface_cli login --token "$HF_TOKEN" --add-to-git-credential
+    python3 -c "from huggingface_hub.hf_api import HfFolder; HfFolder.save_token('$HF_TOKEN')"
 fi
 
 # 3. Lancement du Fine-Tuning
