@@ -119,12 +119,7 @@ def main():
         load_in_4bit=True,
     )
     
-    # Ajout des tokens spéciaux juridiques s'ils ne sont pas présents
-    special_tokens = ["<loi>", "</loi>", "<arrêt>", "</arrêt>", "<thinking>", "</thinking>"]
-    num_added = tokenizer.add_special_tokens({"additional_special_tokens": special_tokens})
-    if num_added > 0:
-        model.resize_token_embeddings(len(tokenizer))
-        print(f"Ajout de {num_added} tokens spéciaux juridiques au tokenizer.")
+
     
     print("Configuration des modules LoRA...")
     model = FastLanguageModel.get_peft_model(
