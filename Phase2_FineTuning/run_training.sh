@@ -12,33 +12,13 @@ echo -e "${GREEN}===============================================================
 echo -e "${GREEN}    Phase 2 : Fine-Tuning QLoRA avec Unsloth (RunPod)                 ${NC}"
 echo -e "${GREEN}======================================================================${NC}"
 
-# 1. Installation d'Unsloth et dépendances de base
-echo -e "\n${YELLOW}[1/3] Installation des dépendances et d'Unsloth...${NC}"
+# 1. Installation des dépendances standard de Hugging Face
+echo -e "\n${YELLOW}[1/3] Installation des dépendances standard de Hugging Face...${NC}"
 export PATH=$PATH:/root/.local/bin:/usr/local/bin
 pip install --upgrade pip
 
-# Vérifier la compatibilité CUDA du pilote hôte
-python3 -c "import torch; print(torch.cuda.is_available())" 2>/dev/null | grep -q "True"
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Le pilote NVIDIA du système hôte est trop ancien pour CUDA 12.1. Réinstallation de PyTorch avec CUDA 11.8...${NC}"
-    pip uninstall -y torch torchvision torchaudio
-    pip install --no-cache-dir torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https://download.pytorch.org/whl/cu118
-fi
-
-echo -e "\n${YELLOW}Installation de Unsloth et des dépendances optimisées...${NC}"
-# Installer d'abord les packages système de base avec leurs dépendances (absents par défaut sur RunPod)
-pip install datasets tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic "numpy<2.0" rich tensorboard wandb huggingface_hub "torch==2.2.0" "torchvision==0.17.0" "torchaudio==2.2.0"
-# Installer Unsloth (Colab tag)
-pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" "torch==2.2.0" "torchvision==0.17.0" "torchaudio==2.2.0"
-# Installer/Ecraser les versions requises sans les dépendances récursives pour éviter le backtracking
-pip install --no-deps "xformers<0.0.27" "trl<0.9.0" peft accelerate bitsandbytes
-
-
-
-
-
-
-
+# Installer les versions stables et adaptées à l'image RunPod (PyTorch 2.2.0)
+pip install "transformers==4.45.2" "peft==0.12.0" "trl==0.9.6" "accelerate==0.34.2" datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja jinja2 pydantic "numpy<2.0" rich tensorboard wandb huggingface_hub
 
 # 2. Hugging Face Login (Programmation Python Robuste)
 echo -e "\n${YELLOW}[2/3] Connexion au Hugging Face Hub...${NC}"
@@ -66,7 +46,7 @@ BATCH_SIZE=${TRAIN_BATCH_SIZE:-2}
 GRAD_ACCUM=${TRAIN_GRAD_ACCUM:-4}
 LR=${TRAIN_LR:-2e-4}
 
-python3 train_unsloth.py \
+python3 train_hf.py \
     --model_name "$MODEL_BASE" \
     --train_file "$DATASET_PATH" \
     --epochs "$EPOCHS" \
@@ -77,7 +57,6 @@ python3 train_unsloth.py \
     --run_name "${TRACKING_RUN_NAME:-qwen25-canadian-cot}" \
     $PUSH_FLAG \
     $REPO_FLAG \
-    --export_gguf \
     --export_merged_16bit
 
 if [ $? -eq 0 ]; then
