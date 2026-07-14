@@ -17,8 +17,9 @@ echo -e "\n${YELLOW}[1/3] Installation des dépendances standard de Hugging Face
 export PATH=$PATH:/root/.local/bin:/usr/local/bin
 pip install --upgrade pip
 
-# Installer les versions stables et adaptées à l'image RunPod (PyTorch 2.2.0)
-pip install "transformers==4.45.2" "peft==0.12.0" "trl==0.9.6" "accelerate==0.34.2" datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja jinja2 pydantic "numpy<2.0" rich tensorboard wandb huggingface_hub
+# Installer les versions adaptées à l'image RunPod (PyTorch 2.2.0) et laisser les autres bibliothèques se mettre à jour pour corriger les bugs
+pip install "torch==2.2.0" "torchvision==0.17.0" "torchaudio==2.2.0" transformers peft trl accelerate datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja jinja2 pydantic "numpy<2.0" rich tensorboard wandb huggingface_hub
+
 
 # 2. Hugging Face Login (Programmation Python Robuste)
 echo -e "\n${YELLOW}[2/3] Connexion au Hugging Face Hub...${NC}"
