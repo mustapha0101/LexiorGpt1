@@ -132,7 +132,7 @@ def main():
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         bias="none",
-        use_gradient_checkpointing="unsloth",
+        use_gradient_checkpointing=True,
         random_state=3407,
         max_seq_length=args.max_seq_length,
     )
@@ -156,7 +156,6 @@ def main():
         eval_dataset=dataset_dict.get("test"),
         dataset_text_field="text",
         max_seq_length=args.max_seq_length,
-        dataset_num_proc=2,
         packing=False,
         args=TrainingArguments(
             per_device_train_batch_size=args.batch_size,
