@@ -119,8 +119,8 @@ def main():
         load_in_4bit=True,
     )
     
+    tokenizer.padding_side = "right"
 
-    
     print("Configuration des modules LoRA...")
     model = FastLanguageModel.get_peft_model(
         model,

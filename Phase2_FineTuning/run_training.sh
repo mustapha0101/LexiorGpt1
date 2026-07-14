@@ -12,15 +12,16 @@ echo -e "${GREEN}===============================================================
 echo -e "${GREEN}    Phase 2 : Fine-Tuning QLoRA avec Unsloth (RunPod)                 ${NC}"
 echo -e "${GREEN}======================================================================${NC}"
 
-# 1. Installation d'Unsloth et dépendances de base (compatibles PyTorch 2.2.0)
+# 1. Installation d'Unsloth et dépendances de base (compatibles PyTorch 2.2.0 et GPU Ampere/A100)
 echo -e "\n${YELLOW}[1/3] Installation des dépendances et d'Unsloth...${NC}"
 export PATH=$PATH:/root/.local/bin:/usr/local/bin
 pip install --upgrade pip
 # Contraintes strictes pour correspondre à PyTorch 2.2.0 de l'image de base RunPod
 pip install "transformers<4.46.0" "peft<0.12.0" "trl<0.9.0" "accelerate==0.34.2" datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic "numpy<2.0"
-pip install --no-cache-dir "unsloth[cu121-torch220]"
-# Installation explicite des packages requis, et forçage des versions d'accelerate et bitsandbytes pour éviter tout conflit ou downgrade d'unsloth
-pip install rich tensorboard wandb "accelerate==0.34.2" "bitsandbytes>=0.49.0"
+pip install --no-cache-dir "unsloth[cu121-ampere-torch220] @ git+https://github.com/unslothai/unsloth.git"
+# Installation explicite des packages requis
+pip install rich tensorboard wandb
+
 
 # 2. Hugging Face Login (Programmation Python Robuste)
 echo -e "\n${YELLOW}[2/3] Connexion au Hugging Face Hub...${NC}"
