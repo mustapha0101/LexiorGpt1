@@ -19,7 +19,8 @@ pip install --upgrade pip
 
 # Installer les versions stables et adaptées à PyTorch 2.2.0 de l'image de base RunPod
 pip install --no-cache-dir "torch==2.2.0" "torchvision==0.17.0" "torchaudio==2.2.0"
-pip install --no-cache-dir "huggingface_hub<0.25.0" "transformers<4.46.0" "peft<0.13.0" "trl<0.10.0" "accelerate<0.35.0" bitsandbytes datasets tqdm sentencepiece protobuf packaging ninja jinja2 pydantic "numpy<2.0" rich tensorboard wandb
+pip install --no-cache-dir "huggingface_hub<0.25.0" "transformers<4.46.0" "peft<0.13.0" "trl<0.10.0" "accelerate<0.35.0" "bitsandbytes==0.43.3" datasets tqdm sentencepiece protobuf packaging ninja jinja2 pydantic "numpy<2.0" rich tensorboard wandb
+
 
 
 
