@@ -12,15 +12,34 @@ echo -e "${GREEN}===============================================================
 echo -e "${GREEN}    Phase 2 : Fine-Tuning QLoRA avec Unsloth (RunPod)                 ${NC}"
 echo -e "${GREEN}======================================================================${NC}"
 
-# 1. Installation d'Unsloth et dépendances de base (compatibles PyTorch 2.2.0 et GPU Ampere/A100)
+# 1. Installation d'Unsloth et dépendances de base
 echo -e "\n${YELLOW}[1/3] Installation des dépendances et d'Unsloth...${NC}"
 export PATH=$PATH:/root/.local/bin:/usr/local/bin
 pip install --upgrade pip
-# Contraintes strictes pour correspondre à PyTorch 2.2.0 de l'image de base RunPod
+
+# Vérifier la compatibilité CUDA du pilote hôte
+python3 -c "import torch; print(torch.cuda.is_available())" 2>/dev/null | grep -q "True"
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Le pilote NVIDIA du système hôte est trop ancien pour CUDA 12.1. Réinstallation de PyTorch avec CUDA 11.8...${NC}"
+    pip uninstall -y torch torchvision torchaudio xformers
+    pip install --no-cache-dir torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https://download.pytorch.org/whl/cu118
+    UNSLOTH_EXTRA="cu118-torch220"
+else
+    echo -e "${GREEN}Le pilote NVIDIA est compatible avec CUDA 12.1. Utilisation de la version par défaut.${NC}"
+    # Désinstaller xformers pour éviter les plantages (segfault) et forcer l'utilisation de PyTorch SDPA stable
+    pip uninstall -y xformers
+    UNSLOTH_EXTRA="cu121-torch220"
+fi
+
+# Installation des dépendances de base
 pip install "transformers<4.46.0" "peft<0.12.0" "trl<0.9.0" "accelerate==0.34.2" datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic "numpy<2.0"
-pip install --no-cache-dir "unsloth[cu121-ampere-torch220] @ git+https://github.com/unslothai/unsloth.git"
-# Installation explicite des packages requis
+
+# Installation de la version la plus récente d'Unsloth depuis GitHub (support complet Qwen 2.5)
+pip install --no-cache-dir "unsloth[$UNSLOTH_EXTRA] @ git+https://github.com/unslothai/unsloth.git"
+
+# Installation des packages de tracking
 pip install rich tensorboard wandb
+
 
 
 # 2. Hugging Face Login (Programmation Python Robuste)
