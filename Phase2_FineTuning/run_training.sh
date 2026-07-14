@@ -12,16 +12,18 @@ echo -e "${GREEN}===============================================================
 echo -e "${GREEN}    Phase 2 : Fine-Tuning QLoRA avec Unsloth (RunPod)                 ${NC}"
 echo -e "${GREEN}======================================================================${NC}"
 
-# 1. Installation d'Unsloth et dépendances de base
+# 1. Installation d'Unsloth et dépendances de base depuis PyPI
 echo -e "\n${YELLOW}[1/3] Installation des dépendances et d'Unsloth...${NC}"
+export PATH=$PATH:/root/.local/bin
 pip install --upgrade pip
 pip install transformers peft trl accelerate datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic numpy<2.0
-pip install --no-cache-dir "unsloth[colab-new] @ git+https://github.com/unslothdev/unsloth.git"
+# Installation directe depuis PyPI (sans clone Git de secours)
+pip install --no-cache-dir "unsloth[cu121-torch220]"
 
 # 2. Hugging Face Login
 echo -e "\n${YELLOW}[2/3] Connexion au Hugging Face Hub...${NC}"
 if [ -n "$HF_TOKEN" ]; then
-    huggingface-cli login --token "$HF_TOKEN" --add-to-git-credential
+    python3 -m huggingface_hub.cli.huggingface_cli login --token "$HF_TOKEN" --add-to-git-credential
 fi
 
 # 3. Lancement du Fine-Tuning
