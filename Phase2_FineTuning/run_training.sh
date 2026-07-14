@@ -12,31 +12,24 @@ echo -e "${GREEN}===============================================================
 echo -e "${GREEN}    Phase 2 : Fine-Tuning QLoRA avec Unsloth (RunPod)                 ${NC}"
 echo -e "${GREEN}======================================================================${NC}"
 
-# 1. Installation de uv et configuration
-echo -e "\n${YELLOW}[1/3] Installation de uv pour une résolution rapide...${NC}"
+# 1. Installation d'Unsloth et dépendances de base
+echo -e "\n${YELLOW}[1/3] Installation des dépendances et d'Unsloth...${NC}"
 export PATH=$PATH:/root/.local/bin:/usr/local/bin
-pip install uv
+pip install --upgrade pip
 
 # Vérifier la compatibilité CUDA du pilote hôte
 python3 -c "import torch; print(torch.cuda.is_available())" 2>/dev/null | grep -q "True"
 if [ $? -ne 0 ]; then
     echo -e "${RED}Le pilote NVIDIA du système hôte est trop ancien pour CUDA 12.1. Réinstallation de PyTorch avec CUDA 11.8...${NC}"
-    uv pip uninstall --system torch torchvision torchaudio xformers
-    uv pip install --system --no-cache torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https://download.pytorch.org/whl/cu118
-    UNSLOTH_EXTRA="cu118-torch220"
-else
-    echo -e "${GREEN}Le pilote NVIDIA est compatible avec CUDA 12.1. Utilisation de la version par défaut.${NC}"
-    uv pip uninstall --system xformers
-    UNSLOTH_EXTRA="cu121-torch220"
+    pip uninstall -y torch torchvision torchaudio
+    pip install --no-cache-dir torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https://download.pytorch.org/whl/cu118
 fi
 
-# Installation des dépendances et d'Unsloth en une seule commande optimisée par uv
-echo -e "\n${YELLOW}Installation des dépendances et d'Unsloth avec uv...${NC}"
-uv pip install --system --no-cache \
-    transformers peft trl accelerate \
-    datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic "numpy<2.0" \
-    rich tensorboard wandb \
-    "unsloth[$UNSLOTH_EXTRA] @ git+https://github.com/unslothai/unsloth.git"
+echo -e "\n${YELLOW}Installation de Unsloth et des dépendances optimisées...${NC}"
+pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+pip install --no-deps "xformers<0.0.27" "trl<0.9.0" peft accelerate bitsandbytes
+pip install datasets tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic "numpy<2.0" rich tensorboard wandb
+
 
 
 
