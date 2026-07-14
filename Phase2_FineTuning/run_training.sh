@@ -20,7 +20,7 @@ pip install --upgrade pip
 pip install "transformers<4.46.0" "peft<0.12.0" "trl<0.9.0" "accelerate<0.34.0" datasets bitsandbytes tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic "numpy<2.0"
 pip install --no-cache-dir "unsloth[cu121-torch220]"
 # Installation explicite des packages désinstallés ou requis par trl/transformers
-pip install rich tensorboard
+pip install rich tensorboard wandb
 
 # 2. Hugging Face Login (Programmation Python Robuste)
 echo -e "\n${YELLOW}[2/3] Connexion au Hugging Face Hub...${NC}"
