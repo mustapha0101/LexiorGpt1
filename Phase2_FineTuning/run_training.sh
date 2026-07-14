@@ -26,9 +26,13 @@ if [ $? -ne 0 ]; then
 fi
 
 echo -e "\n${YELLOW}Installation de Unsloth et des dépendances optimisées...${NC}"
+# Installer d'abord les packages système de base avec leurs dépendances (absents par défaut sur RunPod)
+pip install datasets tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic "numpy<2.0" rich tensorboard wandb huggingface_hub
+# Installer Unsloth (Colab tag)
 pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+# Installer/Ecraser les versions requises sans les dépendances récursives pour éviter le backtracking
 pip install --no-deps "xformers<0.0.27" "trl<0.9.0" peft accelerate bitsandbytes
-pip install datasets tqdm sentencepiece protobuf packaging ninja triton jinja2 pydantic "numpy<2.0" rich tensorboard wandb
+
 
 
 
