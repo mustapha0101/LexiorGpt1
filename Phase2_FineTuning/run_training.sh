@@ -89,9 +89,10 @@ if repo_id and token:
 "
 
 python3 train_hf.py \
-
     --model_name "$MODEL_BASE" \
     --train_file "$DATASET_PATH" \
+
+
     --epochs "$EPOCHS" \
     --batch_size "$BATCH_SIZE" \
     --grad_accum "$GRAD_ACCUM" \
