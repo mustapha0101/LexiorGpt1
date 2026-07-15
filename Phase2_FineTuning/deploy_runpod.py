@@ -81,9 +81,12 @@ def main():
         "HF_TOKEN": args.hf_token,
         "HF_REPO_ID": args.hf_repo_id,
         "WANDB_API_KEY": args.wandb_key,
+        "WANDB_PROJECT": "huggingface",
+        "WANDB_ENTITY": "lexiorgpt-intelliwork",
         "TRACKING_REPORT_TO": "wandb" if args.wandb_key else "none",
         "TRACKING_RUN_NAME": "qwen25-canadian-cot"
     }
+
     
     # Commande de démarrage (démarre SSH, clone le repo via token et lance le script principal de fine-tuning)
     container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh; sleep infinity'"
