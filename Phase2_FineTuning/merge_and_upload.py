@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 import os
+# Configurer le cache Hugging Face sur le volume étendu avant d'importer transformers
+os.environ["HF_HOME"] = "/workspace/hf_cache"
+os.makedirs("/workspace/hf_cache", exist_ok=True)
+
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
+
 
 def main():
     # Définition des chemins et dépôts
