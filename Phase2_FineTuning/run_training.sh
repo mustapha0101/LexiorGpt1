@@ -55,7 +55,41 @@ BATCH_SIZE=${TRAIN_BATCH_SIZE:-2}
 GRAD_ACCUM=${TRAIN_GRAD_ACCUM:-4}
 LR=${TRAIN_LR:-2e-4}
 
+# Téléchargement automatique de tout checkpoint sauvegardé sur Hugging Face
+echo -e "\n${YELLOW}Recherche de checkpoints existants sur Hugging Face...${NC}"
+python3 -c "
+import os
+from huggingface_hub import HfApi, snapshot_download
+repo_id = os.environ.get('HF_REPO_ID')
+token = os.environ.get('HF_TOKEN')
+if repo_id and token:
+    try:
+        api = HfApi(token=token)
+        files = api.list_repo_files(repo_id)
+        checkpoints = set()
+        for f in files:
+            if '/' in f and f.startswith('checkpoint-'):
+                checkpoints.add(f.split('/')[0])
+        if checkpoints:
+            print('Checkpoints trouvés sur Hugging Face :', list(checkpoints))
+            os.makedirs('outputs/checkpoints', exist_ok=True)
+            for cp in checkpoints:
+                print(f'Téléchargement de {cp}...')
+                snapshot_download(
+                    repo_id=repo_id,
+                    allow_patterns=f'{cp}/*',
+                    local_dir='outputs/checkpoints',
+                    token=token
+                )
+            print('Téléchargement des checkpoints terminé !')
+        else:
+            print('Aucun checkpoint trouvé sur le Hub.')
+    except Exception as e:
+        print('Erreur ou aucun checkpoint trouvé sur le Hub :', e)
+"
+
 python3 train_hf.py \
+
     --model_name "$MODEL_BASE" \
     --train_file "$DATASET_PATH" \
     --epochs "$EPOCHS" \
