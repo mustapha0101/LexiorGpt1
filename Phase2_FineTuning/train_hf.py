@@ -181,13 +181,23 @@ def main():
     print("Début du Fine-Tuning...")
     resume_checkpoint = None
     if os.path.isdir(args.output_dir):
-        checkpoints = [os.path.join(args.output_dir, d) for d in os.listdir(args.output_dir) if d.startswith("checkpoint-")]
+        checkpoints = []
+        for d in os.listdir(args.output_dir):
+            if d.startswith("checkpoint-"):
+                path = os.path.join(args.output_dir, d)
+                # Un checkpoint PEFT valide doit contenir au moins adapter_config.json et un fichier de poids
+                has_config = os.path.exists(os.path.join(path, "adapter_config.json"))
+                has_weights = os.path.exists(os.path.join(path, "adapter_model.safetensors")) or os.path.exists(os.path.join(path, "adapter_model.bin"))
+                if has_config and has_weights:
+                    checkpoints.append(path)
+                    
         if checkpoints:
             checkpoints.sort(key=lambda x: int(x.split("-")[-1]))
             resume_checkpoint = checkpoints[-1]
-            print(f"Checkpoint trouvé, reprise de l'entraînement depuis : {resume_checkpoint}")
+            print(f"Checkpoint valide trouvé, reprise de l'entraînement depuis : {resume_checkpoint}")
             
     trainer.train(resume_from_checkpoint=resume_checkpoint)
+
 
     print("Entraînement terminé !")
     
