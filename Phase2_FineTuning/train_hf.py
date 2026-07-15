@@ -180,6 +180,20 @@ def main():
         ),
     )
     
+    if args.report_to == "wandb":
+        import wandb
+        wandb_key = os.environ.get("WANDB_API_KEY")
+        if wandb_key:
+            print("Authentification explicite à Weights & Biases...")
+            wandb.login(key=wandb_key)
+            print("Initialisation de la session de tracking Wandb...")
+            wandb.init(
+                project=os.environ.get("WANDB_PROJECT", "huggingface"),
+                entity=os.environ.get("WANDB_ENTITY", "lexiorgpt-intelliwork"),
+                name=args.run_name,
+                resume="allow"
+            )
+
     print("Début du Fine-Tuning...")
     resume_checkpoint = None
     if os.path.isdir(args.output_dir):
