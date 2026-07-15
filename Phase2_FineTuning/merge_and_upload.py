@@ -48,9 +48,22 @@ def main():
     tokenizer.save_pretrained(merged_dir)
     
     # 4. Téléversement sur le Hub Hugging Face
-    print(f"4/4. Téléversement du modèle fusionné sur : {merged_repo_id}...")
+    api = HfApi(token=hf_token)
+    
+    # A. Téléversement des adapters LoRA finaux (Étape 2703)
+    print(f"4a/4. Téléversement des adapters LoRA finaux sur : {repo_id}...")
+    api.upload_folder(
+        folder_path=lora_dir,
+        repo_id=repo_id,
+        commit_message="Ajout des adapters LoRA finalisés (Étape 2703)"
+    )
+    print("Adapters LoRA finaux envoyés avec succès !")
+    
+    # B. Téléversement du modèle complet fusionné
+    print(f"4b/4. Téléversement du modèle fusionné sur : {merged_repo_id}...")
     merged_model.push_to_hub(merged_repo_id, token=hf_token)
     tokenizer.push_to_hub(merged_repo_id, token=hf_token)
+
     
     print("==================================================")
     print(" FUSION ET TÉLÉVERSEMENT TERMINÉS AVEC SUCCÈS !")
