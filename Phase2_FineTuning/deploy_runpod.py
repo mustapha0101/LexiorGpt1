@@ -94,7 +94,7 @@ def main():
         pod_name = "lexior-phase2-merge"
     else:
         container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh; sleep infinity'"
-        volume_size = 120
+        volume_size = 200
         pod_name = "lexior-phase2-finetuning"
     
     print(f"Création d'un pod sur RunPod ({args.gpu_type})...")
