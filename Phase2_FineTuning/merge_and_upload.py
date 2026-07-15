@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 import os
-# Configurer le cache Hugging Face sur le volume étendu avant d'importer transformers
-os.environ["HF_HOME"] = "/workspace/hf_cache"
-os.makedirs("/workspace/hf_cache", exist_ok=True)
+# Configurer le cache Hugging Face sur le volume persistant disponible
+volume_path = "/runpod-volume" if os.path.exists("/runpod-volume") else "/workspace"
+os.environ["HF_HOME"] = os.path.join(volume_path, "hf_cache")
+os.makedirs(os.environ["HF_HOME"], exist_ok=True)
+
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
