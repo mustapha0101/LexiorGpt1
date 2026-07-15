@@ -150,7 +150,9 @@ def main():
     print("Initialisation du SFTTrainer...")
     trainer = SFTTrainer(
         model=model,
+        tokenizer=tokenizer,
         train_dataset=dataset_dict["train"],
+
         eval_dataset=dataset_dict.get("test"),
         dataset_text_field="text",
         max_seq_length=args.max_seq_length,
