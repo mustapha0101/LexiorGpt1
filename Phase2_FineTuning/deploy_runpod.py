@@ -96,8 +96,9 @@ def main():
             image_name=docker_image,
             gpu_type_id=args.gpu_type,
             gpu_count=1,
-            volume_in_gb=50,
-            container_disk_in_gb=30,
+            volume_in_gb=120,
+            container_disk_in_gb=40,
+
             ports="8888/http,22/tcp",
             env=env_vars,
             docker_args=container_command

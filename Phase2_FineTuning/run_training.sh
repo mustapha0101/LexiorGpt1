@@ -12,7 +12,12 @@ echo -e "${GREEN}===============================================================
 echo -e "${GREEN}    Phase 2 : Fine-Tuning QLoRA avec Unsloth (RunPod)                 ${NC}"
 echo -e "${GREEN}======================================================================${NC}"
 
+# Configurer le répertoire de cache Hugging Face sur le volume workspace
+mkdir -p /workspace/hf_cache
+export HF_HOME="/workspace/hf_cache"
+
 # 1. Installation des dépendances standard de Hugging Face
+
 echo -e "\n${YELLOW}[1/3] Installation des dépendances standard de Hugging Face...${NC}"
 export PATH=$PATH:/root/.local/bin:/usr/local/bin
 pip install --upgrade pip

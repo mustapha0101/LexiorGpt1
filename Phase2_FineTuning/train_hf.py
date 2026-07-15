@@ -179,7 +179,16 @@ def main():
     )
     
     print("Début du Fine-Tuning...")
-    trainer.train()
+    resume_checkpoint = None
+    if os.path.isdir(args.output_dir):
+        checkpoints = [os.path.join(args.output_dir, d) for d in os.listdir(args.output_dir) if d.startswith("checkpoint-")]
+        if checkpoints:
+            checkpoints.sort(key=lambda x: int(x.split("-")[-1]))
+            resume_checkpoint = checkpoints[-1]
+            print(f"Checkpoint trouvé, reprise de l'entraînement depuis : {resume_checkpoint}")
+            
+    trainer.train(resume_from_checkpoint=resume_checkpoint)
+
     print("Entraînement terminé !")
     
     os.makedirs(args.export_dir, exist_ok=True)
