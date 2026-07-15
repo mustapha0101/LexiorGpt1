@@ -119,25 +119,7 @@ def main():
     print(f"Pod créé avec succès ! ID : {pod_id}")
     print(f"Vous pouvez suivre l'état du pod sur : https://www.runpod.io/console/pods")
     
-    if args.autostop:
-        print("Suivi de l'avancement activé. Le Pod sera supprimé automatiquement après l'entraînement...")
-        while True:
-            time.sleep(60)
-            try:
-                pod_status = runpod.get_pod(pod_id)
-                if not pod_status:
-                    break
-                status = pod_status.get("status")
-                print(f"Statut actuel : {status}")
-                if status in ["COMPLETED", "STOPPED"]:
-                    print("Fine-tuning terminé. Suppression de l'instance...")
-                    runpod.terminate_pod(pod_id)
-                    print("Pod supprimé avec succès.")
-                    break
-            except Exception as e:
-                print(f"Erreur de suivi : {e}")
-    else:
-        print("\nDéploiement terminé. Pensez à arrêter le Pod manuellement après l'entraînement.")
+    print("\nDéploiement terminé. Pensez à arrêter le Pod manuellement après l'entraînement ou la fusion.")
 
 if __name__ == "__main__":
     main()
