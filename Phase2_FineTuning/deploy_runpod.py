@@ -58,9 +58,9 @@ def parse_args():
         help="Clé API Weights & Biases."
     )
     parser.add_argument(
-        "--autostop",
+        "--only_merge",
         action="store_true",
-        help="Arrêter/Terminer le Pod automatiquement une fois le fine-tuning terminé."
+        help="Déployer uniquement pour exécuter le script de fusion et d'upload."
     )
     return parser.parse_args()
 
@@ -87,21 +87,26 @@ def main():
         "TRACKING_RUN_NAME": "qwen25-canadian-cot"
     }
 
+    # Ajustement des configurations selon le mode (entraînement ou fusion simple)
+    if args.only_merge:
+        container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && pip install --no-cache-dir huggingface_hub transformers peft accelerate bitsandbytes sentencepiece protobuf && python3 merge_and_upload.py; sleep infinity'"
+        volume_size = 200
+        pod_name = "lexior-phase2-merge"
+    else:
+        container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh; sleep infinity'"
+        volume_size = 120
+        pod_name = "lexior-phase2-finetuning"
     
-    # Commande de démarrage (démarre SSH, clone le repo via token et lance le script principal de fine-tuning)
-    container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh; sleep infinity'"
-    
-    print(f"Création d'un pod de Fine-Tuning sur RunPod ({args.gpu_type})...")
+    print(f"Création d'un pod sur RunPod ({args.gpu_type})...")
     
     try:
         pod = runpod.create_pod(
-            name="lexior-phase2-finetuning",
+            name=pod_name,
             image_name=docker_image,
             gpu_type_id=args.gpu_type,
             gpu_count=1,
-            volume_in_gb=120,
+            volume_in_gb=volume_size,
             container_disk_in_gb=40,
-
             ports="8888/http,22/tcp",
             env=env_vars,
             docker_args=container_command
