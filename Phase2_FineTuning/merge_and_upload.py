@@ -36,7 +36,18 @@ def main():
     # 2. Application et fusion des adapters LoRA
     print("2/4. Chargement et fusion des adapters LoRA...")
     if not os.path.exists(lora_dir):
-        raise FileNotFoundError(f"Dossier des adapters introuvable à : {lora_dir}")
+        print(f"Dossier local des adapters non trouvé à '{lora_dir}'. Téléchargement depuis Hugging Face ({repo_id})...")
+        from huggingface_hub import snapshot_download
+        os.makedirs(lora_dir, exist_ok=True)
+        snapshot_download(
+            repo_id=repo_id,
+            allow_patterns=["*.json", "*.safetensors", "*.txt"],
+            ignore_patterns=["checkpoint-*/*"],
+            local_dir=lora_dir,
+            token=hf_token
+        )
+        print("Téléchargement des adapters terminé avec succès !")
+
         
     model_to_merge = PeftModel.from_pretrained(base_model, lora_dir)
     merged_model = model_to_merge.merge_and_unload()
