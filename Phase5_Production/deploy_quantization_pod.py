@@ -86,14 +86,17 @@ def main():
     # 2. Clone le dépôt Git
     # 3. Installe AutoAWQ et les dépendances requises
     # 4. Exécute le script quantize_awq.py avec calibration juridique et upload HF
+
     container_command = (
         "bash -c '"
+        "mkdir -p ~/.ssh && echo \"$PUBLIC_KEY\" > ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys; "
         "ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; "
         "rm -rf /workspace/DistillationModeles && "
         f"git clone {args.git_repo} /workspace/DistillationModeles && "
         "cd /workspace/DistillationModeles && "
         "pip uninstall -y torchvision torchaudio && "
-        "pip install --no-cache-dir autoawq transformers torch huggingface_hub && "
+        "pip install --no-cache-dir transformers torch huggingface_hub && "
+        "pip install git+https://github.com/casper-hansen/AutoAWQ.git && "
         "python3 Phase5_Production/quantize_awq.py "
         f"--model_path {args.model_id} "
         f"--quant_path /runpod-volume/outputs/final_model/quantized_awq_4bit "
