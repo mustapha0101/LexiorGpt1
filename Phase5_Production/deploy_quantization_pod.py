@@ -105,7 +105,7 @@ def main():
         f"git clone {args.git_repo} /workspace/DistillationModeles && "
         "cd /workspace/DistillationModeles && "
         "pip uninstall -y torchvision torchaudio && "
-        "pip install --no-cache-dir transformers torch huggingface_hub && "
+        "pip install --no-cache-dir transformers==4.46.0 torch huggingface_hub && "
         "pip install git+https://github.com/casper-hansen/AutoAWQ.git && "
         "python3 Phase5_Production/quantize_awq.py "
         f"--model_path {args.model_id} "
