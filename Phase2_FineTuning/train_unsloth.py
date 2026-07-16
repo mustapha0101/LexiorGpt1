@@ -44,6 +44,12 @@ def parse_args():
         help="Chemin vers le fichier JSONL de test formaté (facultatif)."
     )
     parser.add_argument(
+        "--dpo_file",
+        type=str,
+        default="../Phase1_Data_Preparation/data/processed/generated_identity_dpo.jsonl",
+        help="Chemin vers le fichier JSONL d'alignement DPO (facultatif)."
+    )
+    parser.add_argument(
         "--max_seq_length", 
         type=int, 
         default=4096,
@@ -106,6 +112,11 @@ def parse_args():
         default="qwen25-juridique-cot",
         help="Nom de l'expérience de fine-tuning."
     )
+    parser.add_argument(
+        "--run_dpo",
+        action="store_true",
+        help="Exécuter la phase d'alignement DPO après la phase SFT."
+    )
     return parser.parse_args()
 
 def main():
@@ -148,6 +159,12 @@ def main():
         if args.test_file and os.path.exists(args.test_file):
             print(f"Chargement des données de test depuis {args.test_file}...")
             dataset_dict["test"] = load_dataset("json", data_files=args.test_file, split="train")
+            
+    # Chargement du jeu DPO facultatif
+    dpo_dataset = None
+    if args.run_dpo and args.dpo_file and os.path.exists(args.dpo_file):
+        print(f"Chargement des données DPO depuis {args.dpo_file}...")
+        dpo_dataset = load_dataset("json", data_files=args.dpo_file, split="train")
     
     print("Initialisation du SFTTrainer...")
     trainer = SFTTrainer(
@@ -180,9 +197,51 @@ def main():
         ),
     )
     
-    print("Début du Fine-Tuning...")
+    print("Début du Fine-Tuning SFT...")
     trainer_stats = trainer.train()
-    print("Entraînement terminé !")
+    print("Phase SFT terminée !")
+    
+    # ------------------ ALIGNEMENT DPO ------------------
+    if args.run_dpo and dpo_dataset:
+        print("Préparation de la phase d'alignement DPO (Direct Preference Optimization)...")
+        # FastLanguageModel supporte l'entraînement DPO via Patching
+        from trl import DPOTrainer
+        from unsloth import PatchDPOTrainer
+        PatchDPOTrainer() # Applique les patches Unsloth pour accélérer le DPO
+        
+        # Ajustement des arguments pour le DPO
+        dpo_args = TrainingArguments(
+            per_device_train_batch_size=max(1, args.batch_size // 2), # Le DPO consomme 2x plus de VRAM (modèle de référence)
+            gradient_accumulation_steps=args.grad_accum * 2,
+            warmup_ratio=0.1,
+            num_train_epochs=1, # 1 époque suffit généralement pour l'alignement d'identité
+            learning_rate=5e-6, # Learning rate plus faible recommandé pour le DPO
+            fp16=not torch.cuda.is_bf16_supported(),
+            bf16=torch.cuda.is_bf16_supported(),
+            logging_steps=args.logging_steps,
+            optim="paged_adamw_8bit",
+            weight_decay=0.01,
+            lr_scheduler_type="cosine",
+            seed=3407,
+            output_dir=os.path.join(args.output_dir, "dpo"),
+            report_to=args.report_to,
+            run_name=f"{args.run_name}-dpo" if args.report_to != "none" else None,
+        )
+        
+        dpo_trainer = DPOTrainer(
+            model=model,
+            ref_model=None, # Si None, DPOTrainer clone LoRA en interne (recommandé par Unsloth)
+            args=dpo_args,
+            beta=0.1, # Coefficient de pénalisation DPO
+            train_dataset=dpo_dataset,
+            max_length=1024, # Limiter la longueur pour économiser la VRAM
+            max_prompt_length=256,
+        )
+        
+        print("Début de l'alignement DPO pour le rejet d'Alibaba/Qwen/OpenAI...")
+        dpo_trainer.train()
+        print("Phase d'alignement DPO terminée !")
+    # ----------------------------------------------------
     
     os.makedirs(args.export_dir, exist_ok=True)
     lora_dir = os.path.join(args.export_dir, "lora_adapters")

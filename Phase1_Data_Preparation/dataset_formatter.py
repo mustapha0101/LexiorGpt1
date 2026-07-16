@@ -109,6 +109,9 @@ def main():
             ]
 
         messages_formates = []
+        has_system_msg = False
+        system_msg_index = -1
+        
         for msg in messages_bruts:
             role = msg.get("role", msg.get("from", ""))
             if role in ["developer", "system"]:
@@ -140,6 +143,18 @@ def main():
                 messages_formates.append({"role": role, "content": content_final})
             else:
                 messages_formates.append({"role": role, "content": content})
+                if role == "system":
+                    has_system_msg = True
+                    system_msg_index = len(messages_formates) - 1
+
+        # APPLICATION DU SYSTEM PROMPT DROPOUT (20% de chances d'omettre le system prompt)
+        # On utilise une vérification déterministe basée sur l'id de l'exemple ou une sélection pour rester reproductible
+        # example_id est déterminé par la méthode map (on peut utiliser une variable globale ou l'index de l'exemple)
+        # Pour faire simple, nous retirons le message système si l'exemple contient des indices spécifiques 
+        # ou au hasard de manière déterministe.
+        # Ici on fait un dropout si l'exemple a le tag dropout
+        if has_system_msg and example.get("dropout_system_prompt", False):
+            messages_formates.pop(system_msg_index)
                 
         text = tokenizer.apply_chat_template(
             messages_formates,
@@ -147,13 +162,36 @@ def main():
             add_generation_prompt=False
         )
         
-        return {"text": text}
+        # Déterminer la catégorie légale pour la taxonomie
+        category = "general"
+        if "identity" in example.get("source_file", "").lower():
+            category = "identity"
+        elif "ccq" in example.get("source_file", "").lower() or "civil" in example.get("source_file", "").lower():
+            category = "provincial_quebec"
+        elif "a2aj" in example.get("source_file", "").lower() or "federal" in example.get("source_file", "").lower():
+            category = "federal"
+        elif "tool_calling" in example.get("source_file", "").lower() or "mcp" in example.get("source_file", "").lower():
+            category = "tools"
+            
+        return {"text": text, "category": category}
 
-    # 5. Mapping du dataset
+    # 5. Injection de l'indicateur de dropout et de la source avant le mapping
+    print("Préparation des méta-données et application du System Prompt Dropout...")
+    # On ajoute des colonnes temporaires pour gérer le dropout de 20%
+    source_file_val = args.local_file if args.local_file else args.dataset_name
+    
+    def add_meta(example, idx):
+        # 20% de dropout système (1 sur 5)
+        example["dropout_system_prompt"] = (idx % 5 == 0)
+        example["source_file"] = source_file_val
+        return example
+        
+    dataset_with_meta = dataset.map(add_meta, with_indices=True, desc="Adding metadata for system prompt dropout")
+
     print("Application du formatage CoT...")
-    mapped_dataset = dataset.map(
+    mapped_dataset = dataset_with_meta.map(
         format_cot_dataset,
-        remove_columns=dataset.column_names,
+        remove_columns=dataset_with_meta.column_names,
         desc="Formatting dataset to Llama-3/Qwen CoT format"
     )
 
@@ -167,19 +205,52 @@ def main():
         train_dataset = mapped_dataset
         test_dataset = None
 
-    # 7. Sauvegarde locale
+    # 7. Sauvegarde locale structurée (Taxonomie du Droit Canadien & Québécois)
+    print("\nSauvegarde des datasets par catégories (Taxonomie juridique)...")
+    
+    categories = ["identity", "provincial_quebec", "federal", "tools", "general"]
+    
+    for cat in categories:
+        # Filtrer par catégorie
+        cat_train = train_dataset.filter(lambda x: x["category"] == cat)
+        if len(cat_train) > 0:
+            cat_dir = os.path.join(args.output_dir, cat)
+            os.makedirs(cat_dir, exist_ok=True)
+            cat_path = os.path.join(cat_dir, "train.jsonl")
+            print(f" -> [{cat.upper()}] : {len(cat_train)} exemples d'entraînement sauvegardés dans {cat_path}")
+            with open(cat_path, "w", encoding="utf-8") as f:
+                for item in cat_train:
+                    # Enlever le champ category du fichier final pour ne garder que 'text'
+                    clean_item = {"text": item["text"]}
+                    f.write(json.dumps(clean_item, ensure_ascii=False) + "\n")
+                    
+        if test_dataset:
+            cat_test = test_dataset.filter(lambda x: x["category"] == cat)
+            if len(cat_test) > 0:
+                cat_dir = os.path.join(args.output_dir, cat)
+                os.makedirs(cat_dir, exist_ok=True)
+                cat_path = os.path.join(cat_dir, "test.jsonl")
+                print(f" -> [{cat.upper()}] : {len(cat_test)} exemples de test sauvegardés dans {cat_path}")
+                with open(cat_path, "w", encoding="utf-8") as f:
+                    for item in cat_test:
+                        clean_item = {"text": item["text"]}
+                        f.write(json.dumps(clean_item, ensure_ascii=False) + "\n")
+
+    # Sauvegarde globale pour compatibilité ascendante
     train_path = os.path.join(args.output_dir, "train_dataset.jsonl")
-    print(f"Sauvegarde du jeu d'entraînement dans {train_path} ({len(train_dataset)} exemples)...")
+    print(f"\nSauvegarde globale d'entraînement dans {train_path} ({len(train_dataset)} exemples)...")
     with open(train_path, "w", encoding="utf-8") as f:
         for item in train_dataset:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+            clean_item = {"text": item["text"]}
+            f.write(json.dumps(clean_item, ensure_ascii=False) + "\n")
             
     if test_dataset:
         test_path = os.path.join(args.output_dir, "test_dataset.jsonl")
-        print(f"Sauvegarde du jeu de test dans {test_path} ({len(test_dataset)} exemples)...")
+        print(f"Sauvegarde globale de test dans {test_path} ({len(test_dataset)} exemples)...")
         with open(test_path, "w", encoding="utf-8") as f:
             for item in test_dataset:
-                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+                clean_item = {"text": item["text"]}
+                f.write(json.dumps(clean_item, ensure_ascii=False) + "\n")
 
     print("Formatage terminé avec succès !")
 
