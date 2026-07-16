@@ -821,16 +821,15 @@ export default function App() {
                 </h3>
 
                 <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
-                  Le modèle a été spécialisé à l'aide d'un dataset de **triage juridique** ciblant précisément la législation et la réglementation canadienne et québécoise.
+                  Le modèle a été spécialisé sur un corpus de 293 cas d'entraînement ciblant les **Lois et Règlements Fédéraux du Canada** extraits de CanLII et de Justice Canada.
                 </p>
 
                 <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span style={{ fontSize: '11px', color: '#34d399', fontWeight: 'bold' }}>Domaines de spécialisation juridique :</span>
+                  <span style={{ fontSize: '11px', color: '#34d399', fontWeight: 'bold' }}>Structure et méthodologie du Dataset :</span>
                   <ul style={{ margin: '8px 0 0 0', paddingLeft: '16px', fontSize: '12px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <li><strong>Droit Civil (Québec)</strong> : Code civil du Québec (Lois contractuelles, responsabilité civile, baux).</li>
-                    <li><strong>Droit Administratif & PRP</strong> : Protection des renseignements personnels, Commission d'accès à l'information (CAI).</li>
-                    <li><strong>Sécurité Routière</strong> : Code de la sécurité routière du Québec (infractions, points, alcoolémie).</li>
-                    <li><strong>Droit du Travail</strong> : Normes du travail, congédiement déguisé, modification unilatérale de contrats.</li>
+                    <li><strong>Lois fédérales majeures</strong> : Loi sur les produits dangereux, Rentes sur l'État, Protection civile, Hydrocarbures, Système correctionnel.</li>
+                    <li><strong>Formalisme IRAC obligatoire</strong> : Structuration explicite en Issue (Question), Rule (Règle), Application (Analyse), Conclusion.</li>
+                    <li><strong>Citations structurées</strong> : Références de bas de page formater sous forme de métadonnées JSON liant vers les lois CanLII.</li>
                   </ul>
                 </div>
 
