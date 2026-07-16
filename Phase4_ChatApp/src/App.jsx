@@ -495,6 +495,12 @@ export default function App() {
             >
               <FileText style={{ width: '16px', height: '16px' }} /> Benchmark d'Évaluation CoT
             </button>
+            <button 
+              onClick={() => setActiveTab('doc')} 
+              className={`glass-button ${activeTab === 'doc' ? 'active' : ''}`}
+            >
+              <BookOpen style={{ width: '16px', height: '16px' }} /> Méthode & Dataset
+            </button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -761,6 +767,88 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* WORKSPACE 3: METHODOLOGY & DATASET DOCUMENTATION */}
+        {activeTab === 'doc' && (
+          <div className="evaluation-workspace" style={{ maxWidth: '1000px', margin: '0 auto', width: '100%', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {/* Header Title Card */}
+            <div className="glass-panel" style={{ padding: '24px', background: 'linear-gradient(135deg, rgba(99,102,241,0.05), rgba(16,185,129,0.05))', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <img src="/logo.png" style={{ width: '64px', height: '64px', borderRadius: '14px', border: '1px solid rgba(245,158,11,0.3)' }} alt="Logo" />
+                <div>
+                  <h2 style={{ fontSize: '22px', fontWeight: 'bold', color: 'white', margin: 0 }}>Rapport technique : Distillation de LexiorGPT-1</h2>
+                  <p style={{ fontSize: '13px', color: '#9ca3af', margin: '4px 0 0 0' }}>Comprendre la méthodologie d'entraînement, le jeu de données et l'infrastructure de service.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Content grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+              {/* Left Column: Distillation details */}
+              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexSpace: 'column', flexDirection: 'column', gap: '16px' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 'bold', color: '#34d399', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Sparkles style={{ width: '18px', height: '18px' }} /> Méthode de Distillation
+                </h3>
+                
+                <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
+                  LexiorGPT-1 est un modèle distillé à partir de **DeepSeek-R1** (modèle enseignant) vers **Qwen-2.5-32B-Instruct** (modèle étudiant) à l'aide de la méthode de Fine-Tuning de précision **LoRA (Low-Rank Adaptation)**.
+                </p>
+
+                <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <span style={{ fontSize: '11px', color: '#818cf8', fontWeight: 'bold' }}>Hyperparamètres d'entraînement :</span>
+                  <ul style={{ margin: '8px 0 0 0', paddingLeft: '16px', fontSize: '12px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <li><strong>Rank LoRA (r)</strong> : 16</li>
+                    <li><strong>Alpha LoRA</strong> : 32</li>
+                    <li><strong>Modules ciblés</strong> : q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj</li>
+                    <li><strong>Époques</strong> : 3</li>
+                    <li><strong>Taille de batch</strong> : 16 (avec accumulation de gradient)</li>
+                    <li><strong>Loss finale</strong> : ~0.05 (convergence optimale)</li>
+                  </ul>
+                </div>
+
+                <p style={{ fontSize: '12px', color: '#9ca3af', lineHeight: '1.5', margin: 0 }}>
+                  La distillation LoRA permet de transférer la structure de raisonnement **Chain of Thought (CoT)** et la rigueur d'analyse logique de DeepSeek-R1 tout en conservant l'efficacité multilingue et le format d'instruction natif de Qwen-2.5.
+                </p>
+              </div>
+
+              {/* Right Column: Dataset Structure */}
+              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 'bold', color: '#818cf8', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BookOpen style={{ width: '18px', height: '18px' }} /> Jeu de données (Dataset)
+                </h3>
+
+                <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
+                  Le modèle a été spécialisé à l'aide d'un dataset de **triage juridique** ciblant précisément la législation et la réglementation canadienne et québécoise.
+                </p>
+
+                <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <span style={{ fontSize: '11px', color: '#34d399', fontWeight: 'bold' }}>Domaines de spécialisation juridique :</span>
+                  <ul style={{ margin: '8px 0 0 0', paddingLeft: '16px', fontSize: '12px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <li><strong>Droit Civil (Québec)</strong> : Code civil du Québec (Lois contractuelles, responsabilité civile, baux).</li>
+                    <li><strong>Droit Administratif & PRP</strong> : Protection des renseignements personnels, Commission d'accès à l'information (CAI).</li>
+                    <li><strong>Sécurité Routière</strong> : Code de la sécurité routière du Québec (infractions, points, alcoolémie).</li>
+                    <li><strong>Droit du Travail</strong> : Normes du travail, congédiement déguisé, modification unilatérale de contrats.</li>
+                  </ul>
+                </div>
+
+                <p style={{ fontSize: '12px', color: '#9ca3af', lineHeight: '1.5', margin: 0 }}>
+                  Chaque exemple du dataset force le modèle à produire un bloc <code>&lt;think&gt;</code> contenant ses étapes de raisonnement, de citation d'articles et d'hypothèses juridiques avant d'apporter sa conclusion.
+                </p>
+              </div>
+            </div>
+
+            {/* Bottom Panel: serving infrastructure */}
+            <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Activity style={{ width: '18px', height: '18px', color: '#6366f1' }} /> Moteur d'Inférence vLLM
+              </h3>
+              <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
+                Pour garantir une vitesse d'exécution de production compatible avec les playbooks SOAR, LexiorGPT-1 est servi via le moteur **vLLM (v0.25.1)**. 
+                Ce moteur utilise des mécanismes avancés de gestion de la mémoire comme **PagedAttention** et le noyau **FlashAttention-2** pour exécuter le modèle en précision FP16 native sans goulot d'étranglement de VRAM, assurant un débit d'inférence moyen de 50+ tokens/seconde par utilisateur.
+              </p>
             </div>
           </div>
         )}
