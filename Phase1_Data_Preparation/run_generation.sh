@@ -19,12 +19,27 @@ pip install datasets openai tqdm transformers jinja2
 
 # Optionnel : Démarrer et configurer Ollama localement si demandé
 if [ "$USE_LOCAL_OLLAMA" = "true" ]; then
-    echo -e "\n${YELLOW}[1b/3] Installation et démarrage de Ollama (modèle local)...${NC}"
-    apt-get update && apt-get install -y zstd pciutils lshw
-    curl -fsSL https://ollama.com/install.sh | sh
-    ollama serve > ollama.log 2>&1 &
-    sleep 10
-    echo -e "${YELLOW}Téléchargement du modèle Teacher local (${GEN_MODEL:-qwen2.5:32b})...${NC}"
+    if command -v ollama >/dev/null 2>&1; then
+        echo -e "\n${YELLOW}[1b/3] Ollama est déjà installé. Vérification du serveur...${NC}"
+        # Démarrer le serveur uniquement s'il ne tourne pas déjà
+        if ! curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+            echo -e "${YELLOW}Démarrage du serveur Ollama...${NC}"
+            ollama serve > ollama.log 2>&1 &
+            sleep 10
+        fi
+    else
+        echo -e "\n${YELLOW}[1b/3] Installation et démarrage de Ollama (modèle local)...${NC}"
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y zstd pciutils lshw
+            curl -fsSL https://ollama.com/install.sh | sh
+            ollama serve > ollama.log 2>&1 &
+            sleep 10
+        else
+            echo -e "${RED}Erreur : apt-get introuvable et Ollama n'est pas installé. Veuillez l'installer manuellement.${NC}"
+            exit 1
+        fi
+    fi
+    echo -e "${YELLOW}Vérification du modèle Teacher local (${GEN_MODEL:-qwen2.5:32b})...${NC}"
     ollama pull ${GEN_MODEL:-qwen2.5:32b-instruct-q4_K_M}
 fi
 
