@@ -68,7 +68,7 @@ def main():
         print(f"Fichier de travail local détecté à '{args.output_file}' ({os.path.getsize(args.output_file)} octets). Reprise locale.")
 
     # 2. Exécuter generator_a2aj.py en propageant le fichier de sortie et tous les autres arguments
-    cmd = [sys.executable, "generator_a2aj.py", "--output_file", args.output_file] + unknown_args
+    cmd = [sys.executable, "federal_law/generator_a2aj.py", "--output_file", args.output_file] + unknown_args
     print(f"Lancement de la génération : {' '.join(cmd)}\n")
     
     try:

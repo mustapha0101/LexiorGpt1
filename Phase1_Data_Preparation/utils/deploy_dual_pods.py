@@ -35,6 +35,12 @@ def parse_args():
         help="URL de votre dépôt Git contenant le pipeline."
     )
     parser.add_argument(
+        "--git_branch",
+        type=str,
+        default="refactoring",
+        help="Branche git à cloner pour la génération (default: 'refactoring')."
+    )
+    parser.add_argument(
         "--hf_token",
         type=str,
         default=os.environ.get("HF_TOKEN", ""),
@@ -208,7 +214,7 @@ def main():
     
     container_command_gen = (
         f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; "
-        f"rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && "
+        f"rm -rf /workspace/DistillationModeles && git clone -b {args.git_branch} {args.git_repo} /workspace/DistillationModeles && "
         f"cd /workspace/DistillationModeles/Phase1_Data_Preparation && chmod +x run_generation.sh && "
         f"./run_generation.sh; sleep infinity'"
     )
