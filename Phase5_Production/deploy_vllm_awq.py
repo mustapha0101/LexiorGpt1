@@ -85,6 +85,9 @@ def main():
     # Image officielle vLLM (configurable via arguments)
     docker_image = args.docker_image
     
+    # Détection de la version de l'image (pour basculer les arguments RoPE scaling)
+    is_latest = "latest" in docker_image or any(f"v0.{i}" in docker_image for i in range(6, 15))
+    
     # Cache HF sur le grand volume persistant /runpod-volume
     env_vars = {
         "HF_TOKEN": args.hf_token,
@@ -102,9 +105,15 @@ def main():
         "--max-model-len", str(args.max_model_len),
         "--gpu-memory-utilization", "0.90", # Conserve 10% pour les activations de contexte
         "--kv-cache-dtype", "fp8",          # Indispensable pour stocker le KV cache 128k en VRAM
-        "--rope-scaling", "'{\\\"type\\\":\\\"yarn\\\",\\\"factor\\\":4.0,\\\"original_max_position_embeddings\\\":32768}'",
         "--tokenizer-mode", args.tokenizer_mode
     ]
+    
+    if is_latest:
+        # vLLM v0.6.0+ utilise --hf-overrides
+        vllm_cmd.extend(["--hf-overrides", "'{\\\"rope_parameters\\\":{\\\"factor\\\":4.0,\\\"original_max_position_embeddings\\\":32768}}'"])
+    else:
+        # vLLM v0.5.2- utilise --rope-scaling
+        vllm_cmd.extend(["--rope-scaling", "'{\\\"type\\\":\\\"yarn\\\",\\\"factor\\\":4.0,\\\"original_max_position_embeddings\\\":32768}'"])
     
     # Configuration Tensor Parallel si multi-GPU
     if args.gpu_count > 1:
