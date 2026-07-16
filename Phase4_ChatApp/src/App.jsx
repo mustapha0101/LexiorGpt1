@@ -543,6 +543,12 @@ export default function App() {
             >
               <FileText style={{ width: '16px', height: '16px' }} /> Rapport d'Expérimentation
             </button>
+            <button 
+              onClick={() => setActiveTab('next-steps')} 
+              className={`glass-button ${activeTab === 'next-steps' ? 'active' : ''}`}
+            >
+              <FileText style={{ width: '16px', height: '16px' }} /> Prochaines Étapes R&D
+            </button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -997,6 +1003,76 @@ export default function App() {
                     <li><strong>System Prompt Dropout</strong> : Introduire 15% à 20% d'exemples d'entraînement sans aucun prompt système pour forcer l'ancrage de l'identité directement dans les poids LoRA généraux.</li>
                     <li><strong>Alignement par DPO/RLHF</strong> : Pénaliser spécifiquement les mentions d'Alibaba ou de Qwen pour forcer le rejet de l'ancienne identité.</li>
                   </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'next-steps' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+            {/* Header banner */}
+            <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '8px', borderLeft: '4px solid #10b981' }}>
+              <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>Planification Stratégique R&D</span>
+              <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'white', margin: 0 }}>Prochaines Étapes d'Entraînement & d'Amélioration</h2>
+              <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0 }}>Objectif : Faire évoluer le raisonnement juridique de LexiorGPT et intégrer des mises à jour autonomes.</p>
+            </div>
+
+            {/* Grid Layout */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              {/* Box 1: Continuous Fine-Tuning Strategy */}
+              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#10b981', margin: 0 }}>1. Stratégie d'Entraînement Séquentiel</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px', color: '#d1d5db', lineHeight: '1.6' }}>
+                  <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                    <strong style={{ color: 'white', display: 'block', marginBottom: '4px' }}>Option Séquentielle (LoRA cumulatif) :</strong>
+                    Partir du modèle déjà fusionné <code>intelliwork/LexiorGpt1-merged</code> et entraîner un nouvel adaptateur LoRA par-dessus avec le nouveau corpus. Idéal pour des cycles de mise à jour rapides.
+                  </div>
+                  <div style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                    <strong style={{ color: 'white', display: 'block', marginBottom: '4px' }}>Option Globale (Re-entraînement de zéro) :</strong>
+                    Mélanger l'ancien dataset de 69 369 cas avec le nouveau corpus de données, puis ré-entraîner de zéro à partir de <code>Qwen2.5-32B</code>. Recommandé pour éviter l'oubli catastrophique et maximiser la cohérence.
+                  </div>
+                </div>
+              </div>
+
+              {/* Box 2: Dataset Improvements */}
+              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#10b981', margin: 0 }}>2. Améliorations Clés du Dataset</h3>
+                <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '13px', color: '#d1d5db', display: 'flex', flexDirection: 'column', gap: '8px', lineHeight: '1.5' }}>
+                  <li>
+                    <strong style={{ color: 'white' }}>System Prompt Dropout (15-20%)</strong> : Laisser un pourcentage d'exemples d'entraînement sans consigne système pour ancrer l'identité de LexiorGPT directement dans les poids LoRA généraux.
+                  </li>
+                  <li>
+                    <strong style={{ color: 'white' }}>Augmentation des Prompts Système</strong> : Varier le texte des instructions (anglais, français, court, long) pour rendre le modèle robuste aux changements d'interface.
+                  </li>
+                  <li>
+                    <strong style={{ color: 'white' }}>Alignement d'Identité Négative</strong> : Entraîner explicitement le modèle à rejeter l'identité Qwen/Alibaba même lorsqu'il est sollicité sans aucun prompt système.
+                  </li>
+                </ul>
+              </div>
+
+              {/* Box 3: Expanding Domains & Tasks */}
+              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#10b981', margin: 0 }}>3. Nouveaux Domaines & Tâches</h3>
+                <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
+                  Pour élargir le spectre de compétences du modèle, le prochain corpus de distillation doit intégrer :
+                </p>
+                <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '12px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <li><strong>Droit Provincial</strong> : Cas pratiques sur le Code de procédure civile du Québec et la législation des autres provinces canadiennes.</li>
+                  <li><strong>Rédaction Documentaire</strong> : Génération de documents juridiques types (contrats, mises en demeure) en suivant la logique analytique IRAC.</li>
+                  <li><strong>Bilinguisme Strict</strong> : Parfaite égalité des cas d'entraînement en français et en anglais.</li>
+                </ul>
+              </div>
+
+              {/* Box 4: Automation and Benchmarks */}
+              <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#10b981', margin: 0 }}>4. Pipeline d'Auto-Fine-Tuning Continu</h3>
+                <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
+                  Mettre en place un pipeline automatisé orchestré sur RunPod :
+                </p>
+                <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)', fontSize: '12px', color: '#9ca3af' }}>
+                  <span style={{ color: '#10b981', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Pipeline de déploiement automatique :</span>
+                  Nouveau dataset ➔ Trigger GitHub Actions ➔ Lancement de l'instance de Fine-Tuning RunPod ➔ Fusion & Upload automatique ➔ Évaluation sur le banc de benchmark de la Phase 3.
                 </div>
               </div>
             </div>
