@@ -224,9 +224,20 @@ def main():
             sys.exit(1)
             
         print(f"\nTéléversement du modèle quantifié sur le Hub Hugging Face : {args.repo_id}...")
-        model.push_to_hub(args.repo_id, token=args.hf_token)
-        tokenizer.push_to_hub(args.repo_id, token=args.hf_token)
-        print("Téléversement terminé avec succès !")
+        try:
+            from huggingface_hub import HfApi
+            api = HfApi()
+            api.create_repo(repo_id=args.repo_id, token=args.hf_token, exist_ok=True, private=True)
+            api.upload_folder(
+                folder_path=args.quant_path,
+                repo_id=args.repo_id,
+                repo_type="model",
+                token=args.hf_token
+            )
+            print("Téléversement terminé avec succès !")
+        except Exception as e:
+            print(f"Erreur lors du téléversement sur Hugging Face : {e}")
+            sys.exit(1)
         
     print("\n==================================================")
     print("       PROCESSUS COMPLET TERMINÉ AVEC SUCCÈS")
