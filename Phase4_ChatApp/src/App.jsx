@@ -191,6 +191,8 @@ export default function App() {
 
     if (!customPrompt) {
       setCurrentInput('');
+    } else {
+      setActiveTab('chat');
     }
 
     const newMessages = [
