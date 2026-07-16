@@ -23,9 +23,10 @@ except ImportError:
 
 try:
     from awq import AutoAWQForCausalLM
-except ImportError:
-    print("Erreur : La bibliothèque 'autoawq' n'est pas installée.")
-    print("Veuillez installer AutoAWQ localement ou sur votre instance GPU : pip install autoawq")
+except ImportError as e:
+    import traceback
+    print("Erreur lors de l'importation de 'autoawq' :")
+    traceback.print_exc()
     sys.exit(1)
 
 
