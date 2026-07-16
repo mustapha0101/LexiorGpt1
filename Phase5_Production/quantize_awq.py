@@ -156,6 +156,9 @@ def main():
     os.environ["HF_HOME"] = os.path.join(volume_path, "hf_cache")
     os.makedirs(os.environ["HF_HOME"], exist_ok=True)
     
+    # Désactiver hf_xet pour éviter le bug de téléchargement "Background writer channel closed"
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    
     print("==================================================")
     # Titre en français et esthétique propre
     print("     QUANTIFICATION HORS LIGNE LEXIORGPT AWQ")
