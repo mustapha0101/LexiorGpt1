@@ -81,15 +81,25 @@ def main():
         "RUNPOD_API_KEY": args.api_key
     }
     
-    # Commande du conteneur :
-    # 1. Active SSH
-    # 2. Clone le dépôt Git
-    # 3. Installe AutoAWQ et les dépendances requises
-    # 4. Exécute le script quantize_awq.py avec calibration juridique et upload HF
+    # Lire la clé publique locale pour l'autoriser dans le conteneur sans utiliser de variable '$' (évite les bugs de parseur GraphQL)
+    pub_key = ""
+    for key_file in ["id_ed25519.pub", "id_rsa.pub"]:
+        pub_path = os.path.expanduser(f"~/.ssh/{key_file}")
+        if os.path.exists(pub_path):
+            try:
+                with open(pub_path, "r", encoding="utf-8") as f:
+                    pub_key = f.read().strip()
+                    break
+            except Exception:
+                pass
+                
+    ssh_setup = ""
+    if pub_key:
+        ssh_setup = f"mkdir -p ~/.ssh && echo '{pub_key}' > ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys; "
 
     container_command = (
         "bash -c '"
-        "mkdir -p ~/.ssh && echo \"$PUBLIC_KEY\" > ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys; "
+        f"{ssh_setup}"
         "ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; "
         "rm -rf /workspace/DistillationModeles && "
         f"git clone {args.git_repo} /workspace/DistillationModeles && "
