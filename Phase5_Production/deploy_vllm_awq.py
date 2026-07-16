@@ -105,12 +105,18 @@ def main():
         "--max-model-len", str(args.max_model_len),
         "--gpu-memory-utilization", "0.90", # Conserve 10% pour les activations de contexte
         "--kv-cache-dtype", "fp8",          # Indispensable pour stocker le KV cache 128k en VRAM
-        "--tokenizer-mode", args.tokenizer_mode
+        "--tokenizer-mode", args.tokenizer_mode,
+        "--served-model-name", "LexiorGPT",
+        "--served-model-name", args.model_id
     ]
     
     if is_latest:
-        # vLLM v0.6.0+ utilise --hf-overrides
-        vllm_cmd.extend(["--hf-overrides", "'{\\\"rope_parameters\\\":{\\\"rope_type\\\":\\\"yarn\\\",\\\"factor\\\":4.0,\\\"original_max_position_embeddings\\\":32768}}'"])
+        # vLLM v0.6.0+ utilise --hf-overrides et supporte les arguments d'appel d'outils
+        vllm_cmd.extend([
+            "--hf-overrides", "'{\\\"rope_parameters\\\":{\\\"rope_type\\\":\\\"yarn\\\",\\\"factor\\\":4.0,\\\"original_max_position_embeddings\\\":32768}}'",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser", "hermes"
+        ])
     else:
         # vLLM v0.5.2- utilise --rope-scaling
         vllm_cmd.extend(["--rope-scaling", "'{\\\"type\\\":\\\"yarn\\\",\\\"factor\\\":4.0,\\\"original_max_position_embeddings\\\":32768}'"])
