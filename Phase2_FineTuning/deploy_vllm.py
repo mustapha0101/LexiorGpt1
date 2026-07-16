@@ -116,7 +116,7 @@ def main():
         time.sleep(5)
         pod_status = runpod.get_pod(pod_id)
         if pod_status and pod_status.get("runtime"):
-            ports = pod_status["runtime"].get("ports", [])
+            ports = pod_status["runtime"].get("ports") or []
             for p in ports:
                 if p["privatePort"] == 8000:
                     public_url = f"https://{pod_id}-8000.proxy.runpod.net/v1"
