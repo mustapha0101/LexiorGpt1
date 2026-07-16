@@ -115,6 +115,7 @@ export default function App() {
   const [systemPrompt, setSystemPrompt] = useState(
     'Tu es un assistant juridique Lexior, spécialisé en droit canadien et québécois. Raisonne en français et anglais. Tu dois obligatoirement baser tes analyses sur la législation et la jurisprudence canadienne/québécoise (ex: Code civil du Québec, CanLII).'
   );
+  const [useSystemPrompt, setUseSystemPrompt] = useState(true);
   
   // Model Parameters State
   const [temperature, setTemperature] = useState(0.3);
@@ -206,17 +207,17 @@ export default function App() {
     let firstTokenTime = 0;
     let tokenCount = 0;
 
-    // Si la question utilisateur est courte, on renforce l'ancrage français dans l'historique
-    const preparedMessages = [
-      { role: 'system', content: systemPrompt }
-    ];
+    const preparedMessages = [];
+    if (useSystemPrompt) {
+      preparedMessages.push({ role: 'system', content: systemPrompt });
 
-    // Ancrage français pour les prompts courts (< 50 caractères) pour bloquer la dérive pinyin
-    if (promptText.length < 50) {
-      preparedMessages.push({ 
-        role: 'system', 
-        content: "CRITICAL REMINDER: You must reply ONLY in French. Do not use any Chinese or English characters." 
-      });
+      // Ancrage français pour les prompts courts (< 50 caractères) pour bloquer la dérive pinyin
+      if (promptText.length < 50) {
+        preparedMessages.push({ 
+          role: 'system', 
+          content: "CRITICAL REMINDER: You must reply ONLY in French. Do not use any Chinese or English characters." 
+        });
+      }
     }
 
     preparedMessages.push(...newMessages);
@@ -482,13 +483,33 @@ export default function App() {
         </div>
 
         {/* System Prompt Config */}
-        <div className="sidebar-section" style={{ flex: 1, borderBottom: 'none' }}>
-          <label className="form-label" style={{ fontWeight: '600', marginBottom: '8px' }}>System Prompt (Instructions)</label>
+        <div className="sidebar-section" style={{ flex: 1, borderBottom: 'none', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <label className="form-label" style={{ fontWeight: '600', margin: 0 }}>System Prompt</label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#9ca3af', cursor: 'pointer', userSelect: 'none' }}>
+              <input 
+                type="checkbox" 
+                checked={useSystemPrompt} 
+                onChange={(e) => setUseSystemPrompt(e.target.checked)}
+                style={{ cursor: 'pointer', accentColor: '#818cf8' }}
+              />
+              Activer
+            </label>
+          </div>
           <textarea 
             className="glass-input" 
-            style={{ flex: 1, resize: 'none', fontSize: '12px', lineHeight: '1.5' }} 
+            style={{ 
+              flex: 1, 
+              resize: 'none', 
+              fontSize: '12px', 
+              lineHeight: '1.5',
+              opacity: useSystemPrompt ? 1 : 0.4,
+              pointerEvents: useSystemPrompt ? 'auto' : 'none',
+              transition: 'opacity 0.2s ease-in-out'
+            }} 
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
+            placeholder="Aucune instruction système envoyée..."
           />
         </div>
       </aside>
