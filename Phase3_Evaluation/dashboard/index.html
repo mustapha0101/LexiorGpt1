@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LexiorGPT - Phase 3 Évaluation & Fiabilité</title>
+  <!-- Google Fonts & Chart.js -->
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Layout Container -->
+  <div class="app-container">
+    
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo-area">
+        <span class="logo-accent"></span>
+        <h2>Lexior<span>GPT</span></h2>
+      </div>
+      <p class="sidebar-tag">Phase 3 : Évaluation & Fiabilité</p>
+      
+      <nav class="sidebar-nav">
+        <a href="#overview" class="nav-item active">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          Vue Générale
+        </a>
+        <a href="#scenarios" class="nav-item">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Explorateur A/B
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <p>Développé par Intelliwork</p>
+        <span class="version">v1.0.0</span>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- Top header bar -->
+      <header class="top-header">
+        <div class="header-title">
+          <h1>Tableau de bord de Fiabilité</h1>
+          <p>Analyse des performances qualitatives par le juge IA Gemini</p>
+        </div>
+        <div class="status-badge">
+          <span class="pulse-dot"></span>
+          Modèle : Qwen-32B (Student)
+        </div>
+      </header>
+
+      <!-- Grid for KPI Metrics -->
+      <section id="overview" class="metrics-grid">
+        
+        <!-- KPI Card 1 -->
+        <div class="kpi-card glass">
+          <div class="kpi-icon icon-purple">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <div class="kpi-data">
+            <span class="kpi-value" id="val-compliance">--%</span>
+            <span class="kpi-label">Conformité Syntaxique</span>
+          </div>
+        </div>
+
+        <!-- KPI Card 2 -->
+        <div class="kpi-card glass">
+          <div class="kpi-icon icon-blue">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <div class="kpi-data">
+            <span class="kpi-value" id="val-latency">--s</span>
+            <span class="kpi-label">Temps de Réponse Moyen</span>
+          </div>
+        </div>
+
+        <!-- KPI Card 3 -->
+        <div class="kpi-card glass">
+          <div class="kpi-icon icon-green">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2z"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+          </div>
+          <div class="kpi-data">
+            <span class="kpi-value" id="val-total">--</span>
+            <span class="kpi-label">Scénarios Évalués</span>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Charts Section -->
+      <section class="charts-row">
+        
+        <!-- Chart 1: Competencies -->
+        <div class="chart-card glass card-large">
+          <h3>Qualité du Raisonnement Juridique (Score Juge IA)</h3>
+          <div class="chart-container">
+            <canvas id="competenciesChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Chart 2: Distrubution -->
+        <div class="chart-card glass card-small">
+          <h3>Taux de Validation des Critères</h3>
+          <div class="chart-container">
+            <canvas id="compliancePieChart"></canvas>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Scenario Explorer Section -->
+      <section id="scenarios" class="scenarios-section glass">
+        
+        <div class="section-header">
+          <h3>Explorateur Comparative A/B & Raisonnement</h3>
+          <div class="select-wrapper">
+            <select id="scenario-selector">
+              <option value="" disabled selected>Sélectionnez un cas juridique de test...</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Interactive A/B Comparison Grid -->
+        <div class="comparison-grid" id="comparison-view" style="display: none;">
+          
+          <!-- User Prompt -->
+          <div class="prompt-box glass">
+            <h4>Question de l'utilisateur :</h4>
+            <p id="comp-query">--</p>
+          </div>
+
+          <!-- A/B Columns -->
+          <div class="ab-row">
+            
+            <!-- Teacher Column -->
+            <div class="ab-col glass teacher-col">
+              <div class="col-badge badge-teacher">Teacher (Référence)</div>
+              
+              <div class="text-block">
+                <h5>Raisonnement Interne (&lt;thinking&gt;) :</h5>
+                <pre class="thinking-text" id="comp-teacher-thinking">--</pre>
+              </div>
+              <div class="text-block">
+                <h5>Réponse finale & Citation :</h5>
+                <div class="answer-text" id="comp-teacher-answer">--</div>
+              </div>
+            </div>
+
+            <!-- Student Column -->
+            <div class="ab-col glass student-col">
+              <div class="col-badge badge-student">Student (LexiorGPT Fine-tuned)</div>
+              
+              <div class="text-block">
+                <h5>Raisonnement Interne (&lt;thinking&gt;) :</h5>
+                <pre class="thinking-text" id="comp-student-thinking">--</pre>
+              </div>
+              <div class="text-block">
+                <h5>Réponse finale & Citation :</h5>
+                <div class="answer-text" id="comp-student-answer">--</div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Judge Decision Box -->
+          <div class="judge-box glass">
+            <div class="judge-title">
+              <div class="judge-avatar">🤖</div>
+              <h4>Évaluation qualitative de Gemini</h4>
+            </div>
+            
+            <div class="scores-row">
+              <div class="score-pill">
+                <span class="score-lbl">Précision Légale :</span>
+                <span class="score-val" id="judge-score-precision">--/5</span>
+              </div>
+              <div class="score-pill">
+                <span class="score-lbl">Structure IRAC :</span>
+                <span class="score-val" id="judge-score-irac">--/5</span>
+              </div>
+              <div class="score-pill">
+                <span class="score-lbl">Format Citations :</span>
+                <span class="score-val" id="judge-score-formatting">--/5</span>
+              </div>
+            </div>
+
+            <div class="judge-commentary">
+              <h5>Remarques & Rations de décisions :</h5>
+              <ul class="commentary-list">
+                <li><strong>Exactitude juridique :</strong> <span id="judge-rat-precision">--</span></li>
+                <li><strong>Raisonnement :</strong> <span id="judge-rat-irac">--</span></li>
+                <li><strong>Citations :</strong> <span id="judge-rat-formatting">--</span></li>
+              </ul>
+              <div class="general-critique">
+                <strong>Synthèse du Juge :</strong>
+                <p id="judge-general-critique">--</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+    </main>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

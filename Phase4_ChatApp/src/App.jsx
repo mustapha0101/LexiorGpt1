@@ -985,6 +985,19 @@ export default function App() {
                     <li><strong>Dérive linguistique corrigée</strong> via repetition_penalty</li>
                   </ul>
                 </div>
+
+                <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px', borderLeft: '3px solid #ef4444' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#f87171', margin: 0 }}>7. Limite Critique & Recommandations R&D</h3>
+                  <p style={{ fontSize: '12px', color: '#fca5a5', fontWeight: 'bold', margin: 0 }}>Limite : Dépendance au System Prompt</p>
+                  <p style={{ fontSize: '12px', color: '#d1d5db', lineHeight: '1.5', margin: 0 }}>
+                    Si le System Prompt est désactivé, le modèle retombe immédiatement sur son identité d'origine (Qwen d'Alibaba). Cela s'explique par le fait que 100 % du jeu d'entraînement d'auto-distillation incluait le prompt système LexiorGPT.
+                  </p>
+                  <span style={{ fontSize: '11px', color: '#818cf8', fontWeight: 'bold', marginTop: '4px' }}>Actions correctives recommandées :</span>
+                  <ul style={{ margin: '4px 0 0 0', paddingLeft: '16px', fontSize: '11px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <li><strong>System Prompt Dropout</strong> : Introduire 15% à 20% d'exemples d'entraînement sans aucun prompt système pour forcer l'ancrage de l'identité directement dans les poids LoRA généraux.</li>
+                    <li><strong>Alignement par DPO/RLHF</strong> : Pénaliser spécifiquement les mentions d'Alibaba ou de Qwen pour forcer le rejet de l'ancienne identité.</li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>

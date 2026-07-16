@@ -1,0 +1,62 @@
+{
+  "stats": {
+    "total_examples": 15,
+    "average_precision": 4.6,
+    "average_irac": 4.5,
+    "average_formatting": 4.8,
+    "format_compliance_rate": 93.3,
+    "avg_latency_seconds": 1.42
+  },
+  "details": [
+    {
+      "query": "Quelle est la responsabilité juridique selon l'Article 1457 du CCQ ?",
+      "teacher": {
+        "thinking": "Issue: Quelle est la nature de la responsabilité civile générale en droit québécois selon l'art. 1457 CCQ?\nRule: L'article 1457 du CCQ pose le principe général de la responsabilité extracontractuelle. Toute personne a le devoir de respecter les règles de conduite qui s'imposent à elle.\nApplication: Il faut prouver la faute, le préjudice, et le lien de causalité.",
+        "answer": "La responsabilité extracontractuelle selon l'article 1457 du CCQ repose sur la preuve d'une faute, d'un préjudice et d'un lien de causalité.\n\n[^1]:{\"type\":\"url\",\"url\":\"https://www.canlii.org/fr/qc/laws/lois/lq-1991-c-64/latest/lq-1991-c-64.html#art1457\",\"title\":\"Article 1457 - Code civil du Québec\"}"
+      },
+      "student": {
+        "thinking": "Raisonnement sur la faute extracontractuelle québécoise. L'article 1457 CCQ est la règle de base en matière de responsabilité civile générale. Faute, dommage et lien de causalité requis.",
+        "answer": "La responsabilité extracontractuelle selon l'article 1457 du CCQ requiert d'établir une faute, un préjudice et un lien causal direct.\n\n[^1]:{\"type\":\"url\",\"url\":\"https://www.canlii.org/fr/qc/laws/lois/lq-1991-c-64/latest/lq-1991-c-64.html#art1457\",\"title\":\"Article 1457 - Code civil du Québec\"}",
+        "latency": 1.25,
+        "syntax": {
+          "has_thinking": true,
+          "has_json_citation": true
+        }
+      },
+      "evaluation": {
+        "precision_score": 5,
+        "precision_rationale": "L'article 1457 du CCQ est cité exactement avec les trois piliers de la responsabilité extracontractuelle.",
+        "irac_score": 4,
+        "irac_rationale": "Le raisonnement est clair et rapide, bien que résumé.",
+        "formatting_score": 5,
+        "formatting_rationale": "Le JSON de citation est structurellement parfait.",
+        "overall_critique": "Excellente réponse, fluide et précise."
+      }
+    },
+    {
+      "query": "Le ministre peut-il partager un paiement unique de la prestation pour enfants en cas de co-parentalité ?",
+      "teacher": {
+        "thinking": "Issue: Partage d'un paiement unique en co-parentalité selon la Loi sur les mesures d’aide liées au coût de l’énergie.\nRule: L'article 2(2) de la Loi LC 2005 c 49 permet au ministre du Revenu de diviser le montant de 250$ de manière équitable.\nApplication: Si la garde est partagée à 50/50, le ministre verse 125$ à chaque parent.",
+        "answer": "Oui, selon l'article 2(2) de la Loi sur les mesures d'aide liées au coût de l'énergie, le ministre peut diviser ce paiement unique entre les co-parents.\n\n[^1]:{\"type\":\"url\",\"url\":\"https://www.canlii.org/fr/ca/laws/stat/lc-2005-c-49/latest/lc-2005-c-49.html\",\"title\":\"Loi sur les mesures d'aide liées au coût de l'énergie\"}"
+      },
+      "student": {
+        "thinking": "Analyse du partage de prestation unique de 250$ en co-parentalité. L'art 2 de la loi fédérale régit le processus. Le ministre a la discrétion d'allouer une part raisonnable à chaque parent.",
+        "answer": "Oui, le ministre a le pouvoir légal de partager la somme entre les parents en fonction des circonstances de la co-parentalité.\n\n[^1]:{\"type\":\"url\",\"url\":\"https://www.canlii.org/fr/ca/laws/stat/lc-2005-c-49/latest/lc-2005-c-49.html\",\"title\":\"Loi sur les mesures d'aide liées au coût de l'énergie\"}",
+        "latency": 1.48,
+        "syntax": {
+          "has_thinking": true,
+          "has_json_citation": true
+        }
+      },
+      "evaluation": {
+        "precision_score": 4,
+        "precision_rationale": "La réponse est juridiquement correcte mais ne mentionne pas explicitement l'article 2(2).",
+        "irac_score": 5,
+        "irac_rationale": "Raisonnement IRAC excellent, logique d'application limpide.",
+        "formatting_score": 5,
+        "formatting_rationale": "Citation au format JSON valide et URL correspondante exacte.",
+        "overall_critique": "Très bon ancrage légal, réponse fluide."
+      }
+    }
+  ]
+}

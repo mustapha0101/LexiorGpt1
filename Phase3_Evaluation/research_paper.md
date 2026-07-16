@@ -103,3 +103,16 @@ Le modèle fusionné `intelliwork/LexiorGpt1-merged` (16-bit FP16 complet) est s
 
 ## 6. Conclusion et Perspectives (Framework R&D)
 L'auto-distillation de Qwen-2.5-32B-Instruct s'est avérée être une méthode hautement efficace pour concevoir un LLM juridique souverain. LexiorGPT-32B démontre des capacités de raisonnement structuré exceptionnelles en français tout en maintenant un débit d'inférence de niveau production. Les travaux futurs s'orienteront vers le développement d'un **framework d'auto-fine-tuning et de mise à jour continu**. Ce système permettra de maintenir le modèle à jour de façon autonome en l'entraînant progressivement sur de nouveaux domaines juridiques (jurisprudence, lois fédérales et provinciales) pour étendre son raisonnement au plus grand nombre de cas possible, tout en validant systématiquement chaque itération à l'aide de benchmarks automatisés intégrés.
+
+---
+
+## 7. Limite Critique & Recommandations R&D (Identité)
+Une limitation majeure a été identifiée lors de l'évaluation du modèle brut :
+*   **Dépendance stricte au System Prompt** : Lorsque le System Prompt est désactivé ou retiré, le modèle retombe immédiatement sur son identité d'origine (Qwen d'Alibaba) et répond en anglais ou chinois sur les questions d'identité.
+
+### Explication Technique :
+Dans le jeu de données de distillation de la Phase 1, **100 % des exemples contenaient le prompt système LexiorGPT**. Les adapters LoRA ont donc appris à s'activer uniquement lors de la présence de ce trigger de contexte. Sans lui, le modèle revient à ses poids de base pré-entraînés où la sécurité d'identité d'Alibaba est profondément ancrée.
+
+### Recommandations pour les prochaines itérations :
+1.  **System Prompt Dropout** : Durant l'entraînement, appliquer un filtre de dropout sur le prompt système (par exemple, laisser 15 à 20 % des exemples d'entraînement sans aucun System Prompt ou avec un prompt système vide). Cela forcera les adapters LoRA à ancrer l'identité de LexiorGPT directement dans la structure de base du modèle.
+2.  **Alignement par DPO/RLHF** : Introduire des paires de préférences où le modèle rejetant l'identité Qwen/Alibaba est valorisé, y compris en l'absence de tout prompt système.
