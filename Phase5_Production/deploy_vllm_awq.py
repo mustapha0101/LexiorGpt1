@@ -45,7 +45,14 @@ def parse_args():
         default="intelliwork/LexiorGpt1-merged-AWQ",
         help="ID du modèle quantifié AWQ sur Hugging Face."
     )
+    parser.add_argument(
+        "--max_model_len",
+        type=int,
+        default=32768,
+        help="Longueur maximale du contexte (ex: 32768, 65536, 131072)."
+    )
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
@@ -66,16 +73,16 @@ def main():
         "HF_HUB_ENABLE_HF_TRANSFER": "1"
     }
     
-    # Arguments optimisés pour le modèle AWQ avec un contexte de 32k (32768 tokens)
+    # Arguments optimisés pour le modèle AWQ avec contexte dynamique
     vllm_cmd = [
         "--model", args.model_id,
         "--port", "8000",
         "--host", "0.0.0.0",
         "--quantization", "awq",
-        "--max-model-len", "32768",      # Contexte étendu à 32k
-        "--gpu-memory-utilization", "0.90", # Marger 10% pour les activations à 32k
-        "--enable-auto-tool-choice",      # Appel d'outils automatique MCP
-        "--tool-call-parser", "hermes"    # Parseur compatible avec le format Hermes
+        "--max-model-len", str(args.max_model_len),
+        "--gpu-memory-utilization", "0.90", # Conserve 10% pour les activations de contexte
+        "--enable-auto-tool-choice",
+        "--tool-call-parser", "hermes"
     ]
         
     container_command = " ".join(vllm_cmd)
@@ -85,7 +92,7 @@ def main():
     print("==================================================")
     print(f"GPU Cible       : {args.gpu_type}")
     print(f"Modèle AWQ      : {args.model_id}")
-    print(f"Longueur Max    : 32768 (32k)")
+    print(f"Longueur Max    : {args.max_model_len} tokens")
     print("==================================================")
     
     try:
