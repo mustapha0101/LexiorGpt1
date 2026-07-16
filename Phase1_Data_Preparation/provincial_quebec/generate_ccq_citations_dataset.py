@@ -16,12 +16,20 @@ def generate_ccq_citations():
     output_file = "data/processed/ccq_citations_sft.jsonl"
     
     if not os.path.exists(ccq_db_path):
-        print(f"❌ Erreur : Le fichier {ccq_db_path} est introuvable. Veuillez d'abord importer ccqDb.json.")
-        return
-        
-    print(f"Lecture des articles depuis {ccq_db_path}...")
-    with open(ccq_db_path, "r", encoding="utf-8") as f:
-        articles = json.load(f)
+        print(f"⚠ Fichier {ccq_db_path} introuvable. Chargement du dataset depuis Hugging Face...")
+        try:
+            from datasets import load_dataset
+            ds = load_dataset("intelliwork/canadian-quebec-law-corpus", split="train", token=os.environ.get("HF_TOKEN"))
+            ccq_ds = ds.filter(lambda x: x["code"] == "Code civil du Québec")
+            articles = [{"numero": x["article"].replace("Article ", ""), "texte": x["texte"]} for x in ccq_ds]
+            print(f"✓ Chargement de {len(articles)} articles depuis Hugging Face complété.")
+        except Exception as e:
+            print(f"❌ Erreur : Impossible de charger le dataset depuis Hugging Face : {e}")
+            return
+    else:
+        print(f"Lecture des articles depuis {ccq_db_path}...")
+        with open(ccq_db_path, "r", encoding="utf-8") as f:
+            articles = json.load(f)
         
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     
