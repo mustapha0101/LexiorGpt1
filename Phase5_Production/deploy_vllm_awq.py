@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-Script de déploiement d'une instance vLLM de production pour LexiorGpt.
-Ce script lance un pod sur RunPod utilisant l'image officielle vllm-openai
-pour servir le modèle fusionné sous forme d'API compatible OpenAI.
+Script de déploiement d'une instance vLLM de production AWQ pour LexiorGPT.
+Ce script lance un pod sur RunPod (recommandé : RTX 4090 ou L40 économique)
+servant le modèle quantifié LexiorGPT-AWQ avec un contexte de 32 768 tokens (32k).
 """
 
 import os
@@ -20,7 +20,7 @@ except ImportError:
     sys.exit(1)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Déploiement de vLLM de production sur RunPod.")
+    parser = argparse.ArgumentParser(description="Déploiement de vLLM de production AWQ sur RunPod.")
     parser.add_argument(
         "--api_key",
         type=str,
@@ -30,8 +30,8 @@ def parse_args():
     parser.add_argument(
         "--gpu_type",
         type=str,
-        default="NVIDIA A100-SXM4-80GB",
-        help="Type de GPU à allouer (ex: 'NVIDIA A100-SXM4-80GB', 'NVIDIA A40')."
+        default="NVIDIA GeForce RTX 4090",
+        help="Type de GPU économique (ex: 'NVIDIA GeForce RTX 4090', 'NVIDIA L40', 'NVIDIA RTX 6000 Ada')."
     )
     parser.add_argument(
         "--hf_token",
@@ -42,15 +42,8 @@ def parse_args():
     parser.add_argument(
         "--model_id",
         type=str,
-        default="intelliwork/LexiorGpt1-merged",
-        help="ID du modèle fusionné sur Hugging Face."
-    )
-    parser.add_argument(
-        "--quantization",
-        type=str,
-        default=None,
-        choices=["awq", "gptq", "squeezellm", "fp8"],
-        help="Type de quantification à appliquer pour l'inférence (facultatif)."
+        default="intelliwork/LexiorGpt1-merged-AWQ",
+        help="ID du modèle quantifié AWQ sur Hugging Face."
     )
     return parser.parse_args()
 
@@ -63,54 +56,57 @@ def main():
         
     runpod.api_key = args.api_key
     
-    # Image officielle vLLM optimisée pour servir les API OpenAI
+    # Image officielle vLLM
     docker_image = "vllm/vllm-openai:latest"
     
-    # Injection des variables d'environnement
-    # Rediriger le cache HF sur le grand volume /runpod-volume (150 Go)
+    # Cache HF sur le grand volume persistant /runpod-volume
     env_vars = {
         "HF_TOKEN": args.hf_token,
         "HF_HOME": "/runpod-volume/hf_cache",
-        "HF_HUB_ENABLE_HF_TRANSFER": "1" # Accélérer drastiquement le téléchargement du modèle
+        "HF_HUB_ENABLE_HF_TRANSFER": "1"
     }
     
-    # Argument de commande pour vLLM (l'image Docker a déjà l'entrypoint vllm serve)
+    # Arguments optimisés pour le modèle AWQ avec un contexte de 32k (32768 tokens)
     vllm_cmd = [
         "--model", args.model_id,
         "--port", "8000",
         "--host", "0.0.0.0",
-        "--dtype", "float16",
-        "--max-model-len", "16384", # Taille maximale du contexte (ajustable)
-        "--enable-auto-tool-choice",
-        "--tool-call-parser", "hermes"
+        "--quantization", "awq",
+        "--max-model-len", "32768",      # Contexte étendu à 32k
+        "--gpu-memory-utilization", "0.90", # Marger 10% pour les activations à 32k
+        "--enable-auto-tool-choice",      # Appel d'outils automatique MCP
+        "--tool-call-parser", "hermes"    # Parseur compatible avec le format Hermes
     ]
-    
-    if args.quantization:
-        vllm_cmd.extend(["--quantization", args.quantization])
         
     container_command = " ".join(vllm_cmd)
     
-    print(f"Déploiement du modèle {args.model_id} avec vLLM sur {args.gpu_type}...")
+    print("==================================================")
+    print(" DÉPLOIEMENT DU POD DE PRODUCTION LEXIORGPT AWQ")
+    print("==================================================")
+    print(f"GPU Cible       : {args.gpu_type}")
+    print(f"Modèle AWQ      : {args.model_id}")
+    print(f"Longueur Max    : 32768 (32k)")
+    print("==================================================")
     
     try:
         pod = runpod.create_pod(
-            name="lexior-vllm-production",
+            name="lexior-vllm-prod-awq",
             image_name=docker_image,
             gpu_type_id=args.gpu_type,
             gpu_count=1,
-            volume_in_gb=150, # Espace suffisant pour stocker les 65 Go du modèle + marge
-            container_disk_in_gb=40,
+            volume_in_gb=100, # 100 Go suffisent largement pour le modèle AWQ (18 Go) + cache
+            container_disk_in_gb=30,
             ports="8000/http,22/tcp",
             env=env_vars,
             docker_args=container_command
         )
     except Exception as e:
-        print(f"Erreur lors de la création du Pod vLLM : {e}")
+        print(f"Erreur lors de la création du Pod vLLM AWQ : {e}")
         sys.exit(1)
         
     pod_id = pod["id"]
     print(f"\n==================================================")
-    print(f" Pod vLLM créé avec succès ! ID : {pod_id}")
+    print(f" Pod vLLM AWQ créé avec succès ! ID : {pod_id}")
     print(f"==================================================")
     print(f"Suivi de l'instance : https://www.runpod.io/console/pods")
     
@@ -123,7 +119,7 @@ def main():
             for p in ports:
                 if p["privatePort"] == 8000:
                     public_url = f"https://{pod_id}-8000.proxy.runpod.net/v1"
-                    print(f"\n🚀 Votre API de Production compatible OpenAI est prête !")
+                    print(f"\n🚀 Votre API de Production AWQ (32k) est prête !")
                     print(f"👉 URL de Base : {public_url}")
                     print(f"👉 Modèle : {args.model_id}")
                     print(f"\nExemple de connexion en Python (OpenAI SDK) :")
@@ -132,7 +128,7 @@ def main():
                     print(f"client = OpenAI(base_url='{public_url}', api_key='none')")
                     print(f"response = client.chat.completions.create(")
                     print(f"    model='{args.model_id}',")
-                    print(f"    messages=[{{'role': 'user', 'content': 'Bonjour !'}}]")
+                    print(f"    messages=[{{'role': 'user', 'content': 'Quelle est la règle d'exclusion de la preuve en vertu de l'article 24(2) de la Charte ?'}}]")
                     print(f")")
                     print(f"print(response.choices[0].message.content)")
                     print(f"----------------------------------------")
