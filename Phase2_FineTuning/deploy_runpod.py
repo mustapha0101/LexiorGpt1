@@ -89,7 +89,7 @@ def main():
 
     # Ajustement des configurations selon le mode (entraînement ou fusion simple)
     if args.only_merge:
-        container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && pip install --no-cache-dir huggingface_hub transformers peft accelerate bitsandbytes sentencepiece protobuf && python3 merge_and_upload.py; sleep infinity'"
+        container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && pip uninstall -y torchvision torchaudio && pip install --no-cache-dir huggingface_hub transformers peft accelerate bitsandbytes sentencepiece protobuf && python3 merge_and_upload.py; sleep infinity'"
         volume_size = 200
         pod_name = "lexior-phase2-merge"
     else:
