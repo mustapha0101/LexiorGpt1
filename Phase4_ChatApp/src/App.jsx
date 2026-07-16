@@ -1019,19 +1019,32 @@ export default function App() {
             </div>
 
             {/* Architecture Blueprint Image Panel */}
-            <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <h3 style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', margin: 0 }}>
                 Blueprint d'Architecture Modulaire : LexiorGPT Framework
               </h3>
-              <p style={{ fontSize: '13px', color: '#d1d5db', margin: 0 }}>
-                Notre framework adapte le paradigme de découplage de FinGPT au domaine juridique : les données CanLII, CCQ et la jurisprudence sont servies via RAG en temps réel, tandis que le modèle (fine-tuné par LoRA) est exclusivement dédié à l'application de la méthode IRAC et à la chaîne de pensée logique.
-              </p>
-              <div style={{ display: 'flex', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.15)', padding: '20px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
-                <img 
-                  src="/lexiorgpt_architecture.png" 
-                  alt="LexiorGPT Architecture Diagram" 
-                  style={{ maxWidth: '100%', maxHeight: '550px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }} 
-                />
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
+                    Ce framework adapte le paradigme de découplage de FinGPT au domaine juridique : les connaissances législatives et la jurisprudence sont servies dynamiquement par RAG en temps réel, tandis que le modèle (fine-tuné par LoRA) est exclusivement dédié au raisonnement logique IRAC et à l'analyse analytique.
+                  </p>
+                  
+                  <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold' }}>Avantages Majeurs du Framework :</span>
+                  <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '12px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '8px', lineHeight: '1.5' }}>
+                    <li><strong>Pas d'hallucinations de lois</strong> : Les articles et arrêts de principe sont injectés en temps réel via la base vectorielle. Le modèle n'a pas besoin de les mémoriser.</li>
+                    <li><strong>Réduction des coûts GPU</strong> : La distillation LoRA permet de faire tourner le raisonnement juridique sur un modèle de 32B (ou moins) au lieu de devoir utiliser des modèles géants de 400B+.</li>
+                    <li><strong>Mise à jour instantanée sans ré-entraînement</strong> : Si une loi change à CanLII, il suffit de mettre à jour le store vectoriel. Les poids du modèle restent inchangés.</li>
+                  </ul>
+                </div>
+                
+                <div style={{ display: 'flex', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.15)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <img 
+                    src="/lexiorgpt_architecture.png" 
+                    alt="LexiorGPT Architecture Diagram" 
+                    style={{ maxWidth: '100%', maxHeight: '420px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }} 
+                  />
+                </div>
               </div>
             </div>
 
@@ -1068,16 +1081,16 @@ export default function App() {
                 </ul>
               </div>
 
-              {/* Box 3: Expanding Domains & Tasks */}
+              {/* Box 3: Expanding Domains & Tasks (A2AJ Dataset) */}
               <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#10b981', margin: 0 }}>3. Nouveaux Domaines & Tâches</h3>
-                <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
-                  Pour élargir le spectre de compétences du modèle, le prochain corpus de distillation doit intégrer :
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#10b981', margin: 0 }}>3. Intégration Complète d'A2AJ & Utilité</h3>
+                <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.5', margin: 0 }}>
+                  L'intégration du dataset A2AJ (Access to Justice) complet est **extrêmement critique et utile** pour les raisons suivantes :
                 </p>
-                <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '12px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <li><strong>Droit Provincial</strong> : Cas pratiques sur le Code de procédure civile du Québec et la législation des autres provinces canadiennes.</li>
-                  <li><strong>Rédaction Documentaire</strong> : Génération de documents juridiques types (contrats, mises en demeure) en suivant la logique analytique IRAC.</li>
-                  <li><strong>Bilinguisme Strict</strong> : Parfaite égalité des cas d'entraînement en français et en anglais.</li>
+                <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '12px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '6px', lineHeight: '1.4' }}>
+                  <li><strong>Couverture des branches quotidiennes</strong> : 80% des requêtes des citoyens concernent les juridictions provinciales (logement/TAL, droit de la famille, normes du travail, petites créances), couvertes par A2AJ.</li>
+                  <li><strong>Garantie d'utilité pratique</strong> : Actuellement, LexiorGPT est très performant sur les lois fédérales théoriques. L'expansion A2AJ le transformera en un outil de triage et de consultation réellement opérationnel au quotidien.</li>
+                  <li><strong>Bilinguisme natif</strong> : Intégration des cas rédigés en anglais juridique canadien pour équilibrer le corpus.</li>
                 </ul>
               </div>
 
