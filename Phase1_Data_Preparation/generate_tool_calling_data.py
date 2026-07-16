@@ -79,6 +79,25 @@ TOOLS_DEFINITION = [
             },
             "required": ["query"]
         }
+    },
+    {
+        "name": "query_knowledge_graph",
+        "description": "Interroge le graphe de connaissances (Knowledge Graph) de LexiorNotebook pour trouver les relations, les liens d'évidence et les connexions indirectes entre différentes entités (personnes, organisations, lieux, documents ou lois).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "entities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Les entités à analyser dans le graphe (ex: ['Jean Tremblay', 'Hydro-Québec'])"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Une question ou description optionnelle pour guider la recherche sémantique dans le graphe"
+                }
+            },
+            "required": ["entities"]
+        }
     }
 ]
 
@@ -143,6 +162,16 @@ TOOL_CALLING_SAMPLES = [
         "tool_output": "Code de déontologie des avocats (Québec), section conflit d'intérêts: L'avocat doit éviter toute situation de conflit d'intérêts. Il ne peut représenter deux clients ayant des intérêts divergents à moins d'avoir obtenu leur consentement écrit préalable et éclairé.",
         "thinking_2": "Le Code de déontologie impose d'éviter le conflit et requiert un consentement écrit éclairé si la double représentation est tolérée. Je réponds à l'utilisateur.",
         "final_assistant_response": "En vertu du **Code de déontologie des avocats du Québec**, un avocat a l'obligation stricte d'éviter toute situation de conflit d'intérêts :\n\n1. **Interdiction de principe** : L'avocat ne peut pas conseiller ou représenter des parties ayant des intérêts opposés.\n2. **Exception** : Une double représentation est possible uniquement si l'avocat obtient un **consentement écrit, libre et éclairé** de chacun des clients après leur avoir exposé la situation."
+    },
+    # 7. query_knowledge_graph
+    {
+        "user_query": "Existe-t-il des liens répertoriés dans nos documents entre l'entreprise A et le gestionnaire B ?",
+        "thinking_1": "L'utilisateur veut découvrir des relations complexes ou indirectes entre deux entités (l'entreprise A et le gestionnaire B) à travers tous les documents classés. Je dois interroger le graphe de connaissances en utilisant query_knowledge_graph.",
+        "tool_name": "query_knowledge_graph",
+        "tool_args": {"entities": ["Entreprise A", "Gestionnaire B"]},
+        "tool_output": "Chemin de connexion trouvé dans le graphe: [Entreprise A] -- (a signé le contrat 202) --> [Contrat 202] -- (approuvé par) --> [Gestionnaire B]. De plus, [Gestionnaire B] est cité comme administrateur de [Filiale C], détenue à 100% par [Entreprise A].",
+        "thinking_2": "Le graphe de connaissances a trouvé deux chemins reliant les entités : une relation contractuelle directe et un poste d'administrateur dans une filiale commune. Je vais synthétiser ces liens d'évidence.",
+        "final_assistant_response": "Oui, l'analyse du **graphe de connaissances (Knowledge Graph)** montre deux connexions distinctes entre l'**Entreprise A** et le **Gestionnaire B** :\n\n1. **Lien contractuel** : Le Gestionnaire B a approuvé et signé le *Contrat 202* liant les deux parties.\n2. **Lien corporatif indirect** : Le Gestionnaire B est inscrit comme administrateur de la *Filiale C*, une entité détenue à 100 % par l'Entreprise A."
     }
 ]
 
