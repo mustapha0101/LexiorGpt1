@@ -156,6 +156,12 @@ def main():
     os.environ["HF_HOME"] = os.path.join(volume_path, "hf_cache")
     os.makedirs(os.environ["HF_HOME"], exist_ok=True)
     
+    # Rediriger le dossier de téléchargement temporaire (tempfile) vers le volume de 200 Go
+    # pour éviter de saturer le disque conteneur de 50 Go (le modèle FP16 fait 65 Go)
+    tmp_dir = os.path.join(volume_path, "tmp")
+    os.makedirs(tmp_dir, exist_ok=True)
+    os.environ["TMPDIR"] = tmp_dir
+    
     # Désactiver hf_xet pour éviter le bug de téléchargement "Background writer channel closed"
     os.environ["HF_HUB_DISABLE_XET"] = "1"
     
