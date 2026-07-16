@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument(
         "--model_name", 
         type=str, 
-        default="unsloth/llama-3-8b-Instruct",
+        default="Qwen/Qwen2.5-32B-Instruct",
         help="Nom du modèle pour extraire le tokenizer et le chat template."
     )
     parser.add_argument(
@@ -44,7 +44,7 @@ def parse_args():
         "--local_file",
         type=str,
         default=None,
-        help="Chemin vers un fichier JSON/JSONL local si vous n'utilisez pas le HF Hub."
+        help="Chemin local vers un fichier JSONL brut à formater."
     )
     return parser.parse_args()
 
@@ -60,8 +60,8 @@ def main():
         tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     except Exception as e:
         print(f"Erreur lors du chargement du tokenizer : {e}")
-        print("Tentative de chargement d'un tokenizer générique Llama-3...")
-        tokenizer = AutoTokenizer.from_pretrained("unsloth/llama-3-8b-Instruct")
+        print("Tentative de chargement d'un tokenizer générique Qwen...")
+        tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-32B-Instruct")
 
     # 3. Chargement du dataset
     if args.local_file:
