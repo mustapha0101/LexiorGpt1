@@ -31,8 +31,8 @@ def parse_args():
     parser.add_argument(
         "--gpu_type",
         type=str,
-        default="NVIDIA GeForce RTX 4090",
-        help="Type de GPU de calcul à utiliser (ex: 'NVIDIA GeForce RTX 4090')."
+        default="NVIDIA A100 80GB PCIe",
+        help="Type de GPU de calcul (ex: 'NVIDIA A100 80GB PCIe', 'NVIDIA H100 PCIe')."
     )
     parser.add_argument(
         "--git_repo",
