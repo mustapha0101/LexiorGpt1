@@ -118,6 +118,17 @@ def load_calibration_data(dataset_path, tokenizer, num_samples):
     print(f"Chargement de {num_samples} exemples de calibration depuis {dataset_path}...")
     calibration_texts = []
     
+    # Assigner un template de chat par défaut (ChatML de Qwen) si absent
+    if getattr(tokenizer, "chat_template", None) is None:
+        tokenizer.chat_template = (
+            "{% for message in messages %}"
+            "{{'<|im_start|>' + message['role'] + '\\n' + message['content'] + '<|im_end|>\\n'}}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}"
+            "{{'<|im_start|>assistant\\n'}}"
+            "{% endif %}"
+        )
+    
     with open(dataset_path, "r", encoding="utf-8") as f:
         for i, line in enumerate(f):
             if len(calibration_texts) >= num_samples:
