@@ -206,6 +206,21 @@ export default function App() {
     let firstTokenTime = 0;
     let tokenCount = 0;
 
+    // Si la question utilisateur est courte, on renforce l'ancrage français dans l'historique
+    const preparedMessages = [
+      { role: 'system', content: systemPrompt }
+    ];
+
+    // Ancrage français pour les prompts courts (< 50 caractères) pour bloquer la dérive pinyin
+    if (promptText.length < 50) {
+      preparedMessages.push({ 
+        role: 'system', 
+        content: "CRITICAL REMINDER: You must reply ONLY in French. Do not use any Chinese or English characters." 
+      });
+    }
+
+    preparedMessages.push(...newMessages);
+
     try {
       const response = await fetch(`${apiUrl}/chat/completions`, {
         method: 'POST',
@@ -215,12 +230,10 @@ export default function App() {
         },
         body: JSON.stringify({
           model: modelId,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            ...newMessages
-          ],
+          messages: preparedMessages,
           temperature: temperature,
           max_tokens: maxTokens,
+          repetition_penalty: 1.05, // Décourager les répétitions et dérives de jetons
           stream: true
         })
       });
