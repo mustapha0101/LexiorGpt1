@@ -106,7 +106,7 @@ def main():
         "cd /workspace/DistillationModeles && "
         "pip uninstall -y torchvision torchaudio && "
         "pip install --no-cache-dir transformers==4.46.0 torch huggingface_hub && "
-        "pip install git+https://github.com/casper-hansen/AutoAWQ.git && "
+        "pip install git+https://github.com/casper-hansen/AutoAWQ.git@v0.2.7.post3 && "
         "python3 Phase5_Production/quantize_awq.py "
         f"--model_path {args.model_id} "
         f"--quant_path /runpod-volume/outputs/final_model/quantized_awq_4bit "
