@@ -110,7 +110,7 @@ def main():
     
     if is_latest:
         # vLLM v0.6.0+ utilise --hf-overrides
-        vllm_cmd.extend(["--hf-overrides", "'{\\\"rope_parameters\\\":{\\\"factor\\\":4.0,\\\"original_max_position_embeddings\\\":32768}}'"])
+        vllm_cmd.extend(["--hf-overrides", "'{\\\"rope_parameters\\\":{\\\"rope_type\\\":\\\"yarn\\\",\\\"factor\\\":4.0,\\\"original_max_position_embeddings\\\":32768}}'"])
     else:
         # vLLM v0.5.2- utilise --rope-scaling
         vllm_cmd.extend(["--rope-scaling", "'{\\\"type\\\":\\\"yarn\\\",\\\"factor\\\":4.0,\\\"original_max_position_embeddings\\\":32768}'"])
