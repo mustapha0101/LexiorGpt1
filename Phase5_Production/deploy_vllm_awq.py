@@ -94,8 +94,8 @@ def main():
             image_name=docker_image,
             gpu_type_id=args.gpu_type,
             gpu_count=1,
-            volume_in_gb=100, # 100 Go suffisent largement pour le modèle AWQ (18 Go) + cache
-            container_disk_in_gb=30,
+            volume_in_gb=150, # 150 Go pour être totalement à l'aise (modèle de 18 Go + KV cache)
+            container_disk_in_gb=50,
             ports="8000/http,22/tcp",
             env=env_vars,
             docker_args=container_command

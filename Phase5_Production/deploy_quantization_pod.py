@@ -121,8 +121,8 @@ def main():
             image_name=docker_image,
             gpu_type_id=args.gpu_type,
             gpu_count=1,
-            volume_in_gb=150, # 150 Go suffisent pour charger le FP16 (65 Go) et sauvegarder l'AWQ (18 Go)
-            container_disk_in_gb=40,
+            volume_in_gb=200, # 200 Go pour être totalement serein (65 Go FP16 + 18 Go AWQ + Cache)
+            container_disk_in_gb=50,
             ports="22/tcp",
             env=env_vars,
             docker_args=container_command
