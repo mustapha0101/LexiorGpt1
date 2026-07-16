@@ -67,8 +67,10 @@ def main():
     docker_image = "vllm/vllm-openai:latest"
     
     # Injection des variables d'environnement
+    # Rediriger le cache HF sur le grand volume /workspace (100 Go)
     env_vars = {
         "HF_TOKEN": args.hf_token,
+        "HF_HOME": "/workspace/hf_cache",
         "HF_HUB_ENABLE_HF_TRANSFER": "1" # Accélérer drastiquement le téléchargement du modèle
     }
     
