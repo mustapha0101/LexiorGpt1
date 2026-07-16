@@ -87,9 +87,7 @@ def main():
         "--quantization", "awq",
         "--max-model-len", str(args.max_model_len),
         "--gpu-memory-utilization", "0.90", # Conserve 10% pour les activations de contexte
-        "--kv-cache-dtype", "fp8",          # Indispensable pour stocker le KV cache 128k en VRAM
-        "--enable-auto-tool-choice",
-        "--tool-call-parser", "hermes"
+        "--kv-cache-dtype", "fp8"           # Indispensable pour stocker le KV cache 128k en VRAM
     ]
     
     # Configuration Tensor Parallel si multi-GPU
