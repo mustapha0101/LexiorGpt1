@@ -72,9 +72,8 @@ def main():
         "HF_HUB_ENABLE_HF_TRANSFER": "1" # Accélérer drastiquement le téléchargement du modèle
     }
     
-    # Argument de commande pour vLLM
+    # Argument de commande pour vLLM (l'image Docker a déjà l'entrypoint vllm serve)
     vllm_cmd = [
-        "python3", "-m", "vllm.entrypoints.openai.api_server",
         "--model", args.model_id,
         "--port", "8000",
         "--host", "0.0.0.0",
