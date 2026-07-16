@@ -227,7 +227,7 @@ def main():
         try:
             from huggingface_hub import HfApi
             api = HfApi()
-            api.create_repo(repo_id=args.repo_id, token=args.hf_token, exist_ok=True, private=True)
+            api.create_repo(repo_id=args.repo_id, token=args.hf_token, exist_ok=True, private=False)
             api.upload_folder(
                 folder_path=args.quant_path,
                 repo_id=args.repo_id,
