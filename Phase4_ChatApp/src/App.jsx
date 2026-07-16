@@ -109,9 +109,9 @@ export default function App() {
   const [isShaking, setIsShaking] = useState(false);
 
   // Connection Config State
-  const [apiUrl, setApiUrl] = useState(import.meta.env.VITE_API_URL || 'https://6eys2nzfy3u10a-8000.proxy.runpod.net/v1');
+  const [apiUrl, setApiUrl] = useState(import.meta.env.VITE_API_URL || 'https://yicboytd0i8qx8-8000.proxy.runpod.net/v1');
   const [apiKey, setApiKey] = useState(import.meta.env.VITE_API_KEY || 'none');
-  const [modelId, setModelId] = useState(import.meta.env.VITE_MODEL_ID || 'intelliwork/LexiorGpt1-merged');
+  const [modelId, setModelId] = useState(import.meta.env.VITE_MODEL_ID || 'intelliwork/LexiorGpt1-merged-AWQ');
   const [systemPrompt, setSystemPrompt] = useState(
     'Tu es un assistant juridique Lexior, spécialisé en droit canadien et québécois. Raisonne en français et anglais. Tu dois obligatoirement baser tes analyses sur la législation et la jurisprudence canadienne/québécoise (ex: Code civil du Québec, CanLII).'
   );
