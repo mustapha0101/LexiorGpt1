@@ -516,6 +516,12 @@ export default function App() {
             >
               <BookOpen style={{ width: '16px', height: '16px' }} /> Méthode & Dataset
             </button>
+            <button 
+              onClick={() => setActiveTab('report')} 
+              className={`glass-button ${activeTab === 'report' ? 'active' : ''}`}
+            >
+              <FileText style={{ width: '16px', height: '16px' }} /> Rapport d'Expérimentation
+            </button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -862,6 +868,96 @@ export default function App() {
                 Pour garantir une vitesse d'exécution de production optimale et adaptée aux analyses juridiques en temps réel, LexiorGPT-32B est servi via le moteur **vLLM (v0.25.1)**. 
                 Ce moteur utilise des mécanismes avancés de gestion de la mémoire comme **PagedAttention** et le noyau **FlashAttention-2** pour exécuter le modèle en précision FP16 native sans goulot d'étranglement de VRAM, assurant un débit d'inférence moyen de 50+ tokens/seconde par utilisateur.
               </p>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'report' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+            {/* Main Header */}
+            <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '8px', borderLeft: '4px solid #818cf8' }}>
+              <span style={{ fontSize: '11px', color: '#818cf8', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>Rapport R&D Technique</span>
+              <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'white', margin: 0 }}>Distillation et Alignement de LexiorGPT-32B</h2>
+              <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0 }}>Équipe de Recherche & Développement, intelliwork | Date : 15 Juillet 2026</p>
+            </div>
+
+            {/* Content Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
+              {/* Left Column: Abstract, Intro, Methodology */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#818cf8', margin: 0 }}>1. Résumé (Abstract)</h3>
+                  <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
+                    Ce rapport présente la méthodologie et les résultats empiriques de la conception de <strong>LexiorGPT-32B</strong>, un modèle de langage souverain spécialisé dans le raisonnement juridique canadien et québécois. En utilisant un processus d'<strong>auto-distillation (self-distillation)</strong> sur le modèle de base <em>Qwen-2.5-32B-Instruct</em>, nous avons entraîné des adaptateurs de bas rang (<strong>LoRA</strong>) sur un corpus aligné de <strong>69 369 cas pratiques</strong> structurés selon le formalisme <strong>IRAC</strong>.
+                  </p>
+                </div>
+
+                <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#818cf8', margin: 0 }}>2. Introduction & Contexte</h3>
+                  <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <span>Les modèles de fond généralistes échouent fréquemment à structurer leur raisonnement logique et souffrent d'hallucinations normatives lorsqu'ils traitent de législations régionales spécifiques telles que le droit fédéral canadien et le droit civil québécois.</span>
+                    <span>De plus, les architectures performantes de taille intermédiaire (ex. Qwen-2.5-32B) présentent des dérives multilingues (notamment vers le chinois) lorsque le contexte initial est pauvre. Ce projet documente la spécialisation de l'architecture par auto-distillation afin d'ancrer le modèle dans la langue française et de forcer la génération systématique de chaînes de pensée (Chain-of-Thought) via des balises de réflexion <code>&lt;thinking&gt;...&lt;/thinking&gt;</code>.</span>
+                  </p>
+                </div>
+
+                <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#818cf8', margin: 0 }}>3. Méthodologie d'Entraînement</h3>
+                  <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
+                    Nous avons utilisé une méthode d'auto-distillation. Un modèle de base <strong>Qwen-2.5-32B-Instruct</strong> (AWQ sur vLLM) a servi de <strong>Teacher</strong> pour générer les chaînes de pensée du jeu de données. Ce même modèle (Student) a ensuite été entraîné en utilisant la méthode de Fine-Tuning de précision <strong>LoRA</strong> pour minimiser le coût en calcul tout en préservant ses capacités cognitives générales.
+                  </p>
+                  <ul style={{ margin: '10px 0 0 0', paddingLeft: '16px', fontSize: '12px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <li><strong>Rank LoRA (r) / Alpha LoRA</strong> : 16 / 32</li>
+                    <li><strong>Modules ciblés</strong> : q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj</li>
+                    <li><strong>Taille de séquence max</strong> : 4 096 tokens</li>
+                    <li><strong>Optimiseur / Epochs</strong> : AdamW 8-bit / 3 Époques</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Right Column: Loss Curves, W&B Metrics */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#818cf8', margin: 0 }}>4. Courbes de Perte (Weights & Biases)</h3>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                      <span style={{ fontSize: '11px', color: '#a78bfa', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Courbe de validation (eval/loss) :</span>
+                      <img 
+                        src="/eval_loss.png" 
+                        alt="Courbe eval/loss" 
+                        style={{ width: '100%', height: 'auto', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }} 
+                      />
+                      <span style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginTop: '6px', textAlign: 'center' }}>
+                        Perte de validation finale (Étape 1500) : <strong>0.29225</strong>
+                      </span>
+                    </div>
+
+                    <div style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                      <span style={{ fontSize: '11px', color: '#34d399', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Courbe d'entraînement (train/loss) :</span>
+                      <img 
+                        src="/train_loss.png" 
+                        alt="Courbe train/loss" 
+                        style={{ width: '100%', height: 'auto', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }} 
+                      />
+                      <span style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginTop: '6px', textAlign: 'center' }}>
+                        Perte d'entraînement finale : <strong>~0.25</strong>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#818cf8', margin: 0 }}>5. Performance en Production</h3>
+                  <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <span>Grâce à la détection automatique du format <code>&lt;thinking&gt;</code> et des optimisations de vLLM (PagedAttention, FlashAttention-2), LexiorGPT-32B répond en production avec les métriques suivantes :</span>
+                  </p>
+                  <ul style={{ margin: '8px 0 0 0', paddingLeft: '16px', fontSize: '12px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <li><strong>Time-To-First-Token (TTFT)</strong> : 220 à 380 ms</li>
+                    <li><strong>Débit d'inférence moyen</strong> : 50+ tokens/seconde</li>
+                    <li><strong>Dérive linguistique corrigée</strong> via repetition_penalty</li>
+                  </ul>
+                </div>
+              </div>
             </div>
           </div>
         )}
