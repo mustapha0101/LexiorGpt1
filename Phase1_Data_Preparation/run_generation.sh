@@ -49,7 +49,7 @@ if [ -z "$OPENAI_API_KEY" ]; then
     exit 1
 fi
 
-python3 resume_from_hf.py \
+python3 utils/resume_from_hf.py \
     --dataset "$DATASET" \
     --limit "$LIMIT" \
     --workers "$WORKERS" \
@@ -62,22 +62,22 @@ if [ $? -ne 0 ]; then
 fi
 
 echo -e "\n${YELLOW}[2b/3] Génération de cas pratiques basés sur le Code civil du Québec (CCQ)...${NC}"
-python3 generate_ccq_data.py \
+python3 provincial_quebec/generate_ccq_data.py \
     --model "$MODEL" \
     --scenarios_per_article 10 \
     --output_file "data/processed/generated_ccq_cot.jsonl"
 
 echo -e "\n${YELLOW}[2c/3] Exécution du scraper LégisQuébec et Fédéral pour extraire les articles à jour...${NC}"
-python3 legisquebec_scraper.py
+python3 provincial_quebec/legisquebec_scraper.py
 
 echo -e "\n${YELLOW}[2d/3] Génération du jeu d'alignement d'identité (LexiorGPT Branding & DPO)...${NC}"
-python3 generate_identity_data.py
+python3 identity/generate_identity_data.py
 
 echo -e "\n${YELLOW}[2e/3] Génération du jeu d'appels d'outils (Tool Calling / MCP)...${NC}"
-python3 generate_tool_calling_data.py
+python3 tool_calling/generate_tool_calling_data.py
 
 echo -e "\n${YELLOW}[2f/3] Génération du jeu de citations exactes du Code civil du Québec (CCQ)...${NC}"
-python3 generate_ccq_citations_dataset.py
+python3 provincial_quebec/generate_ccq_citations_dataset.py
 
 # Concaténer les fichiers de génération
 echo -e "\n${YELLOW}[2g/3] Fusion des datasets (A2AJ + CCQ + Identité SFT + Outils + Citations CCQ)...${NC}"
@@ -98,7 +98,7 @@ if [ $? -eq 0 ]; then
     # Étape facultative : Pousser sur Hugging Face Hub si la variable est configurée
     if [ -n "$HF_DATASET_REPO_ID" ]; then
         echo -e "\n${YELLOW}[Facultatif] Téléversement du dataset sur Hugging Face Hub...${NC}"
-        python3 push_to_hf.py
+        python3 utils/push_to_hf.py
     fi
 else
     echo -e "${RED}Erreur pendant le formatage des données.${NC}"
