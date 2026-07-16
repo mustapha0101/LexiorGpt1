@@ -100,9 +100,9 @@ def main():
         "--push_to_hub "
         f"--repo_id {args.repo_id_awq} "
         f"--hf_token {args.hf_token}; "
-        "echo \"==================================================\"; "
-        "echo \" QUANTIFICATION AWQ TERMINÉE ET ENVOYÉE SUR HF !\"; "
-        "echo \"==================================================\"; "
+        "echo ==================================================; "
+        "echo QUANTIFICATION-AWQ-TERMINEE-ET-ENVOYEE-SUR-HF; "
+        "echo ==================================================; "
         "sleep infinity'"
     )
     
