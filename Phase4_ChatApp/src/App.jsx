@@ -912,6 +912,13 @@ export default function App() {
                     <li><strong>Optimiseur / Epochs</strong> : AdamW 8-bit / 3 Époques</li>
                   </ul>
                 </div>
+
+                <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#818cf8', margin: 0 }}>6. Perspectives : Framework d'Auto-Fine-Tuning</h3>
+                  <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
+                    Les travaux futurs s'orienteront vers la mise en place d'un <strong>framework d'auto-fine-tuning continu et de mise à jour automatisée</strong>. Ce système permettra de maintenir le modèle à jour de façon autonome en l'entraînant progressivement sur de nouveaux domaines juridiques (jurisprudence, lois fédérales et provinciales) pour étendre son raisonnement au plus grand nombre de cas possible, tout en validant systématiquement son évolution via des benchmarks automatisés.
+                  </p>
+                </div>
               </div>
 
               {/* Right Column: Loss Curves, W&B Metrics */}
