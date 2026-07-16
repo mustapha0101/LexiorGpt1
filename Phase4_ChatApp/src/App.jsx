@@ -809,7 +809,7 @@ export default function App() {
                 </h3>
                 
                 <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
-                  LexiorGPT-1 est un modèle distillé à partir de **DeepSeek-R1** (modèle enseignant) vers **Qwen-2.5-32B-Instruct** (modèle étudiant) à l'aide de la méthode de Fine-Tuning de précision **LoRA (Low-Rank Adaptation)**.
+                  LexiorGPT-32B est un modèle distillé à partir de **GPT-4o** (modèle enseignant) vers **Qwen-2.5-32B-Instruct** (modèle étudiant) à l'aide de la méthode de Fine-Tuning de précision **LoRA (Low-Rank Adaptation)**.
                 </p>
 
                 <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
@@ -825,7 +825,7 @@ export default function App() {
                 </div>
 
                 <p style={{ fontSize: '12px', color: '#9ca3af', lineHeight: '1.5', margin: 0 }}>
-                  La distillation LoRA permet de transférer la structure de raisonnement **Chain of Thought (CoT)** et la rigueur d'analyse logique de DeepSeek-R1 tout en conservant l'efficacité multilingue et le format d'instruction natif de Qwen-2.5.
+                  La distillation LoRA permet de transférer la structure de raisonnement **Chain of Thought (CoT)** et la rigueur d'analyse logique de GPT-4o tout en conservant l'efficacité multilingue et le format d'instruction natif de Qwen-2.5.
                 </p>
               </div>
 
@@ -836,7 +836,7 @@ export default function App() {
                 </h3>
 
                 <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
-                  Le modèle a été spécialisé sur un corpus de 293 cas d'entraînement ciblant les **Lois et Règlements Fédéraux du Canada** extraits de CanLII et de Justice Canada.
+                  Le modèle a été spécialisé sur un corpus de près de **70 000 cas d'entraînement (exactement 69 369 cas)** ciblant les **Lois et Règlements Fédéraux du Canada** extraits de CanLII et de Justice Canada.
                 </p>
 
                 <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
@@ -860,7 +860,7 @@ export default function App() {
                 <Activity style={{ width: '18px', height: '18px', color: '#6366f1' }} /> Moteur d'Inférence vLLM
               </h3>
               <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
-                Pour garantir une vitesse d'exécution de production compatible avec les playbooks SOAR, LexiorGPT-1 est servi via le moteur **vLLM (v0.25.1)**. 
+                Pour garantir une vitesse d'exécution de production optimale et adaptée aux analyses juridiques en temps réel, LexiorGPT-32B est servi via le moteur **vLLM (v0.25.1)**. 
                 Ce moteur utilise des mécanismes avancés de gestion de la mémoire comme **PagedAttention** et le noyau **FlashAttention-2** pour exécuter le modèle en précision FP16 native sans goulot d'étranglement de VRAM, assurant un débit d'inférence moyen de 50+ tokens/seconde par utilisateur.
               </p>
             </div>
