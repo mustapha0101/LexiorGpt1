@@ -76,9 +76,12 @@ python3 generate_identity_data.py
 echo -e "\n${YELLOW}[2e/3] Génération du jeu d'appels d'outils (Tool Calling / MCP)...${NC}"
 python3 generate_tool_calling_data.py
 
+echo -e "\n${YELLOW}[2f/3] Génération du jeu de citations exactes du Code civil du Québec (CCQ)...${NC}"
+python3 generate_ccq_citations_dataset.py
+
 # Concaténer les fichiers de génération
-echo -e "\n${YELLOW}[2f/3] Fusion des datasets (A2AJ + CCQ + Identité SFT + Outils)...${NC}"
-cat data/processed/generated_a2aj_cot.jsonl data/processed/generated_ccq_cot.jsonl data/processed/generated_identity_cot.jsonl data/processed/generated_tool_calling_cot.jsonl > data/processed/combined_raw_cot.jsonl
+echo -e "\n${YELLOW}[2g/3] Fusion des datasets (A2AJ + CCQ + Identité SFT + Outils + Citations CCQ)...${NC}"
+cat data/processed/generated_a2aj_cot.jsonl data/processed/generated_ccq_cot.jsonl data/processed/generated_identity_cot.jsonl data/processed/generated_tool_calling_cot.jsonl data/processed/ccq_citations_sft.jsonl > data/processed/combined_raw_cot.jsonl
 
 # 3. Exécution du formatage de chat
 echo -e "\n${YELLOW}[3/3] Application du template conversationnel sur le corpus combiné...${NC}"
