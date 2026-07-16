@@ -11,7 +11,9 @@ import {
   RefreshCw, 
   Check, 
   Star,
-  BookOpen
+  BookOpen,
+  Lock,
+  Unlock
 } from 'lucide-react';
 
 // Custom Markdown-like Renderer to handle legal CoT formatting cleanly without dependencies
@@ -37,7 +39,7 @@ const formatMarkdown = (text) => {
     if (!trimmed) {
       return <div key={idx} style={{ height: '8px' }}></div>;
     }
-    return <p key={idx} style={{ margin: '8px 0', lineHighlight: '1.6', color: '#e5e7eb' }}>{parseInline(line)}</p>;
+    return <p key={idx} style={{ margin: '8px 0', lineHeight: '1.6', color: '#e5e7eb' }}>{parseInline(line)}</p>;
   });
 };
 
@@ -98,6 +100,14 @@ const LEGAL_SCENARIOS = [
 ];
 
 export default function App() {
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return sessionStorage.getItem('lexior_auth') === 'true';
+  });
+  const [passcode, setPasscode] = useState('');
+  const [authError, setAuthError] = useState(false);
+  const [isShaking, setIsShaking] = useState(false);
+
   // Connection Config State
   const [apiUrl, setApiUrl] = useState(import.meta.env.VITE_API_URL || 'https://6eys2nzfy3u10a-8000.proxy.runpod.net/v1');
   const [apiKey, setApiKey] = useState(import.meta.env.VITE_API_KEY || 'none');
@@ -138,6 +148,22 @@ export default function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Handle Passcode Unlock
+  const handleUnlock = (e) => {
+    e.preventDefault();
+    const correctPasscode = import.meta.env.VITE_APP_PASSWORD || 'Lexior2026';
+    if (passcode === correctPasscode) {
+      sessionStorage.setItem('lexior_auth', 'true');
+      setIsAuthenticated(true);
+      setAuthError(false);
+    } else {
+      setAuthError(true);
+      setIsShaking(true);
+      setPasscode('');
+      setTimeout(() => setIsShaking(false), 400);
+    }
+  };
 
   // Handle Test Connection
   const testConnection = async () => {
@@ -297,18 +323,58 @@ export default function App() {
     return (total / keys.length).toFixed(1) + ' / 5.0';
   };
 
+  // --- RENDER SECURE GATE ---
+  if (!isAuthenticated) {
+    return (
+      <div className="auth-overlay">
+        <div className={`glass-panel auth-card ${isShaking ? 'auth-shake' : ''}`}>
+          <img src="/logo.png" className="auth-logo" alt="Logo LexiorGPT" />
+          <h2 className="auth-title">LexiorGPT Console</h2>
+          <p className="auth-subtitle">Veuillez entrer la clé d'accès pour déverrouiller la console d'évaluation.</p>
+          
+          <form onSubmit={handleUnlock} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="form-group" style={{ textAlign: 'left' }}>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Lock style={{ width: '12px', height: '12px' }} /> Clé d'accès
+              </label>
+              <input 
+                type="password" 
+                className="glass-input" 
+                placeholder="••••••••"
+                style={{ textAlign: 'center', fontSize: '16px', letterSpacing: '0.1em' }}
+                value={passcode}
+                onChange={(e) => setPasscode(e.target.value)}
+              />
+            </div>
+            
+            {authError && (
+              <span style={{ color: '#ef4444', fontSize: '11px', fontWeight: '500' }}>
+                Clé d'accès incorrecte. Veuillez réessayer.
+              </span>
+            )}
+            
+            <button type="submit" className="glass-button primary" style={{ height: '44px', width: '100%', fontWeight: '600' }}>
+              <Unlock style={{ width: '16px', height: '16px' }} /> Déverrouiller la Session
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // --- RENDER MAIN APPLICATION ---
   return (
     <div className="app-container">
       {/* 1. LEFT COLUMN: Configuration Sidebar */}
       <aside className="sidebar-panel">
         <div className="sidebar-header">
-          <Sparkles style={{ color: '#10b981', width: '24px', height: '24px' }} />
+          <img src="/logo.png" className="sidebar-logo" alt="Logo LexiorGPT" />
           <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, color: 'white' }}>LexiorGPT Console</h1>
         </div>
 
         {/* API connection parameters */}
         <div className="sidebar-section">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'between', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
             <h3 className="sidebar-section-title" style={{ flex: 1, margin: 0 }}>
               <Settings style={{ width: '14px', height: '14px', marginRight: '6px', verticalAlign: 'middle' }} /> Paramètres d'API
             </h3>
