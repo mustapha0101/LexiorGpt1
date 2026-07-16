@@ -22,22 +22,22 @@ const formatMarkdown = (text) => {
     const trimmed = line.trim();
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
       const content = trimmed.substring(2);
-      return <li key={idx} className="ml-5 list-disc pl-1 my-1 text-gray-300">{parseInline(content)}</li>;
+      return <li key={idx} style={{ marginLeft: '20px', listStyleType: 'disc', paddingLeft: '4px', margin: '4px 0', color: '#d1d5db' }}>{parseInline(content)}</li>;
     }
     const numMatch = trimmed.match(/^(\d+)\.\s(.*)/);
     if (numMatch) {
-      return <li key={idx} className="ml-5 list-decimal pl-1 my-1 text-gray-300">{parseInline(numMatch[2])}</li>;
+      return <li key={idx} style={{ marginLeft: '20px', listStyleType: 'decimal', paddingLeft: '4px', margin: '4px 0', color: '#d1d5db' }}>{parseInline(numMatch[2])}</li>;
     }
     if (trimmed.startsWith("### ")) {
-      return <h4 key={idx} className="text-lg font-semibold text-indigo-300 mt-4 mb-2">{parseInline(trimmed.substring(4))}</h4>;
+      return <h4 key={idx} style={{ fontSize: '15px', fontWeight: '600', color: '#818cf8', marginTop: '16px', marginBottom: '8px' }}>{parseInline(trimmed.substring(4))}</h4>;
     }
     if (trimmed.startsWith("## ")) {
-      return <h3 key={idx} className="text-xl font-bold text-emerald-400 mt-5 mb-3">{parseInline(trimmed.substring(3))}</h3>;
+      return <h3 key={idx} style={{ fontSize: '18px', fontWeight: '700', color: '#34d399', marginTop: '20px', marginBottom: '12px' }}>{parseInline(trimmed.substring(3))}</h3>;
     }
     if (!trimmed) {
-      return <div key={idx} className="h-2"></div>;
+      return <div key={idx} style={{ height: '8px' }}></div>;
     }
-    return <p key={idx} className="my-2 leading-relaxed text-gray-200">{parseInline(line)}</p>;
+    return <p key={idx} style={{ margin: '8px 0', lineHighlight: '1.6', color: '#e5e7eb' }}>{parseInline(line)}</p>;
   });
 };
 
@@ -45,13 +45,12 @@ const parseInline = (text) => {
   const parts = text.split(/\*\*([^*]+)\*\*/g);
   return parts.map((part, i) => {
     if (i % 2 === 1) {
-      return <strong key={i} className="text-emerald-400 font-semibold">{part}</strong>;
+      return <strong key={i} style={{ color: '#34d399', fontWeight: '600' }}>{part}</strong>;
     }
-    // Check for code blocks in line
     const codeParts = part.split(/`([^`]+)`/g);
     return codeParts.map((subPart, j) => {
       if (j % 2 === 1) {
-        return <code key={j} className="bg-gray-800 text-pink-400 px-1 py-0.5 rounded font-mono text-sm">{subPart}</code>;
+        return <code key={j} style={{ backgroundColor: '#1f2937', color: '#f472b6', padding: '2px 4px', borderRadius: '4px', fontFamily: 'monospace', fontSize: '13px' }}>{subPart}</code>;
       }
       return subPart;
     });
@@ -300,92 +299,101 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* 1. LEFT COLUMN: Configuration Sidebar (350px) */}
-      <aside className="w-[350px] glass-panel border-r border-gray-800 flex flex-col h-full overflow-y-auto">
-        <div className="p-5 border-b border-gray-800 flex items-center gap-3">
-          <Sparkles className="text-emerald-400 w-6 h-6 animate-pulse" />
-          <h1 className="text-lg font-bold tracking-tight text-white">LexiorGPT Console</h1>
+      {/* 1. LEFT COLUMN: Configuration Sidebar */}
+      <aside className="sidebar-panel">
+        <div className="sidebar-header">
+          <Sparkles style={{ color: '#10b981', width: '24px', height: '24px' }} />
+          <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, color: 'white' }}>LexiorGPT Console</h1>
         </div>
 
         {/* API connection parameters */}
-        <div className="p-5 border-b border-gray-800 flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-              <Settings className="w-4 h-4" /> Paramètres d'API
+        <div className="sidebar-section">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'between', width: '100%' }}>
+            <h3 className="sidebar-section-title" style={{ flex: 1, margin: 0 }}>
+              <Settings style={{ width: '14px', height: '14px', marginRight: '6px', verticalAlign: 'middle' }} /> Paramètres d'API
             </h3>
-            <span className={`w-2.5 h-2.5 rounded-full ${
-              connectionStatus === 'ready' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' :
-              connectionStatus === 'testing' ? 'bg-indigo-500 animate-pulse' :
-              connectionStatus === 'error' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-gray-500'
-            }`}></span>
+            <span style={{
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              display: 'inline-block',
+              backgroundColor: connectionStatus === 'ready' ? '#10b981' :
+                               connectionStatus === 'testing' ? '#6366f1' :
+                               connectionStatus === 'error' ? '#ef4444' : '#6b7280',
+              boxShadow: connectionStatus === 'ready' ? '0 0 10px #10b981' : 
+                         connectionStatus === 'error' ? '0 0 10px #ef4444' : 'none'
+            }}></span>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-gray-400">Endpoint URL (RunPod vLLM)</label>
+          <div className="form-group">
+            <label className="form-label">Endpoint URL (RunPod vLLM)</label>
             <input 
               type="text" 
-              className="glass-input text-xs" 
+              className="glass-input" 
+              style={{ fontSize: '12px' }}
               value={apiUrl} 
               onChange={(e) => setApiUrl(e.target.value)} 
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-gray-400">Hugging Face Token / API Key</label>
+          <div className="form-group">
+            <label className="form-label">Hugging Face Token</label>
             <input 
               type="password" 
-              className="glass-input text-xs" 
+              className="glass-input" 
+              style={{ fontSize: '12px' }}
               value={apiKey} 
               onChange={(e) => setApiKey(e.target.value)} 
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-gray-400">Model ID</label>
+          <div className="form-group">
+            <label className="form-label">Model ID</label>
             <input 
               type="text" 
-              className="glass-input text-xs" 
+              className="glass-input" 
+              style={{ fontSize: '12px' }}
               value={modelId} 
               onChange={(e) => setModelId(e.target.value)} 
             />
           </div>
 
-          <button onClick={testConnection} className="glass-button w-full text-xs justify-center active">
-            <RefreshCw className="w-3.5 h-3.5" /> Tester la Connexion
+          <button onClick={testConnection} className="glass-button" style={{ fontSize: '12px', width: '100%' }}>
+            <RefreshCw style={{ width: '14px', height: '14px' }} /> Tester la Connexion
           </button>
         </div>
 
         {/* Hyperparameters Config */}
-        <div className="p-5 border-b border-gray-800 flex flex-col gap-4">
-          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Configuration Inférence</h3>
+        <div className="sidebar-section">
+          <h3 className="sidebar-section-title">Configuration Inférence</h3>
           
-          <div className="flex flex-col gap-1.5">
-            <div className="flex justify-between text-xs">
-              <span className="text-gray-400">Température</span>
-              <span className="text-emerald-400 font-semibold">{temperature}</span>
+          <div className="form-group">
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+              <span style={{ color: '#9ca3af' }}>Température</span>
+              <span style={{ color: '#10b981', fontWeight: 'bold' }}>{temperature}</span>
             </div>
             <input 
               type="range" 
               min="0" 
               max="1" 
               step="0.05"
-              className="accent-emerald-500" 
+              style={{ accentColor: '#10b981', cursor: 'pointer' }}
               value={temperature}
               onChange={(e) => setTemperature(parseFloat(e.target.value))}
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <div className="flex justify-between text-xs">
-              <span className="text-gray-400">Max Tokens</span>
-              <span className="text-indigo-400 font-semibold">{maxTokens}</span>
+          <div className="form-group">
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+              <span style={{ color: '#9ca3af' }}>Max Tokens</span>
+              <span style={{ color: '#6366f1', fontWeight: 'bold' }}>{maxTokens}</span>
             </div>
             <input 
               type="range" 
               min="100" 
               max="4096" 
               step="50"
-              className="accent-indigo-500" 
+              style={{ accentColor: '#6366f1', cursor: 'pointer' }}
               value={maxTokens}
               onChange={(e) => setMaxTokens(parseInt(e.target.value))}
             />
@@ -393,10 +401,11 @@ export default function App() {
         </div>
 
         {/* System Prompt Config */}
-        <div className="p-5 flex-1 flex flex-col gap-2">
-          <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">System Prompt (Instructions)</label>
+        <div className="sidebar-section" style={{ flex: 1, borderBottom: 'none' }}>
+          <label className="form-label" style={{ fontWeight: '600', marginBottom: '8px' }}>System Prompt (Instructions)</label>
           <textarea 
-            className="glass-input flex-1 resize-none text-xs leading-relaxed" 
+            className="glass-input" 
+            style={{ flex: 1, resize: 'none', fontSize: '12px', lineHeight: '1.5' }} 
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
           />
@@ -404,62 +413,62 @@ export default function App() {
       </aside>
 
       {/* 2. RIGHT COLUMN: Interactive Workspaces */}
-      <main className="flex-1 flex flex-col h-full">
+      <main className="main-workspace">
         {/* Top Header Navigation Tabs */}
-        <header className="h-[60px] glass-panel border-b border-gray-800 px-6 flex items-center justify-between">
-          <div className="flex gap-4">
+        <header className="workspace-header">
+          <div style={{ display: 'flex', gap: '12px' }}>
             <button 
               onClick={() => setActiveTab('chat')} 
-              className={`glass-button text-sm ${activeTab === 'chat' ? 'active' : ''}`}
+              className={`glass-button ${activeTab === 'chat' ? 'active' : ''}`}
             >
-              <Activity className="w-4 h-4" /> Playground & Performance
+              <Activity style={{ width: '16px', height: '16px' }} /> Playground & Performance
             </button>
             <button 
               onClick={() => setActiveTab('bench')} 
-              className={`glass-button text-sm ${activeTab === 'bench' ? 'active' : ''}`}
+              className={`glass-button ${activeTab === 'bench' ? 'active' : ''}`}
             >
-              <FileText className="w-4 h-4" /> Benchmark d'Évaluation CoT
+              <FileText style={{ width: '16px', height: '16px' }} /> Benchmark d'Évaluation CoT
             </button>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-400">Note Générale Session :</span>
-            <span className="bg-emerald-500/10 text-emerald-400 font-bold px-3 py-1 rounded-full border border-emerald-500/20 text-xs">
-              {getAverageScore()}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '12px', color: '#9ca3af' }}>Note Session :</span>
+            <span style={{
+              backgroundColor: 'rgba(16, 185, 129, 0.1)',
+              color: '#10b981',
+              fontWeight: 'bold',
+              padding: '4px 12px',
+              borderRadius: '9999px',
+              border: '1px solid rgba(16, 185, 129, 0.2)',
+              fontSize: '12px'
+            }}>{getAverageScore()}</span>
           </div>
         </header>
 
         {/* WORKSPACE 1: CHAT & PERFORMANCE WORKSPACE */}
         {activeTab === 'chat' && (
-          <div className="flex-1 flex overflow-hidden">
+          <div className="workspace-body">
             {/* Chat Feed Column (60%) */}
-            <div className="flex-1 flex flex-col border-r border-gray-800 h-full bg-black/10">
-              <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
+            <div className="chat-column">
+              <div className="chat-messages-area">
                 {messages.map((msg, i) => (
                   <div 
                     key={i} 
-                    className={`flex flex-col max-w-[80%] animate-slide-in ${
-                      msg.role === 'user' ? 'self-end items-end' : 'self-start items-start'
-                    }`}
+                    className={`message-bubble ${msg.role === 'user' ? 'user' : 'assistant'}`}
                   >
-                    <span className="text-[10px] text-gray-400 mb-1 px-1">
+                    <span className="message-bubble-header">
                       {msg.role === 'user' ? 'Utilisateur' : 'LexiorGPT (vLLM)'}
                     </span>
-                    <div className={`p-4 rounded-2xl ${
-                      msg.role === 'user' 
-                        ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-br-none shadow-lg' 
-                        : 'glass-panel border border-gray-800 text-gray-100 rounded-bl-none shadow-xl'
-                    }`}>
+                    <div className="message-text-content">
                       {formatMarkdown(msg.content)}
                     </div>
                   </div>
                 ))}
                 
                 {isStreaming && (
-                  <div className="flex flex-col max-w-[80%] self-start items-start animate-slide-in">
-                    <span className="text-[10px] text-gray-400 mb-1 px-1">LexiorGPT (vLLM)</span>
-                    <div className="p-4 rounded-2xl glass-panel border border-gray-800 text-gray-100 rounded-bl-none flex items-center gap-1.5">
+                  <div className="message-bubble assistant">
+                    <span className="message-bubble-header">LexiorGPT (vLLM)</span>
+                    <div className="message-text-content" style={{ display: 'flex', gap: '4px', padding: '14px 18px', width: 'fit-content' }}>
                       <div className="dot"></div>
                       <div className="dot"></div>
                       <div className="dot"></div>
@@ -470,10 +479,11 @@ export default function App() {
               </div>
 
               {/* Chat Input Bar */}
-              <div className="p-4 border-t border-gray-800 flex gap-3 bg-black/25">
+              <div className="chat-input-bar">
                 <input 
                   type="text" 
-                  className="glass-input flex-1 text-sm py-3" 
+                  className="glass-input" 
+                  style={{ flex: 1, height: '44px', fontSize: '13px' }}
                   placeholder="Posez votre question juridique (Ex: Règle d'indemnité de préavis...)" 
                   value={currentInput}
                   onChange={(e) => setCurrentInput(e.target.value)}
@@ -482,85 +492,82 @@ export default function App() {
                 />
                 <button 
                   onClick={() => handleSend()} 
-                  className="glass-button primary py-3 px-5" 
+                  className="glass-button primary" 
+                  style={{ height: '44px', width: '50px' }}
                   disabled={isStreaming}
                 >
-                  <Send className="w-4 h-4" />
+                  <Send style={{ width: '16px', height: '16px' }} />
                 </button>
               </div>
             </div>
 
             {/* Performance Panel Column (40%) */}
-            <div className="w-[380px] p-6 flex flex-col gap-6 overflow-y-auto h-full">
-              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                <Activity className="w-4 h-4 text-indigo-400" /> Télémétrie en Temps Réel
+            <div className="telemetry-column">
+              <h3 style={{ fontSize: '13px', fontWeight: 'bold', color: '#9ca3af', textTransform: 'uppercase', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Activity style={{ width: '16px', height: '16px', color: '#6366f1' }} /> Télémétrie en Temps Réel
               </h3>
 
               {/* Grid Widgets */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="glass-panel p-4 rounded-xl flex flex-col">
-                  <span className="text-xs text-gray-400">Latence Premier Token</span>
-                  <span className="text-2xl font-bold text-white mt-1">
-                    {latency > 0 ? `${latency} ms` : '-'}
-                  </span>
-                  <span className="text-[10px] text-indigo-400 mt-0.5">Calculé sur l'API vLLM</span>
+              <div className="telemetry-grid">
+                <div className="glass-panel widget-card">
+                  <span className="widget-title">Latence Premier Token</span>
+                  <span className="widget-value">{latency > 0 ? `${latency} ms` : '-'}</span>
+                  <span className="widget-subtext" style={{ color: '#6366f1' }}>Calculé sur l'API vLLM</span>
                 </div>
 
-                <div className="glass-panel p-4 rounded-xl flex flex-col">
-                  <span className="text-xs text-gray-400">Vitesse Génération</span>
-                  <span className="text-2xl font-bold text-white mt-1">
-                    {tokensPerSec > 0 ? `${tokensPerSec} t/s` : '-'}
-                  </span>
-                  <span className="text-[10px] text-emerald-400 mt-0.5">Vitesse de streaming</span>
+                <div className="glass-panel widget-card">
+                  <span className="widget-title">Vitesse Inférence</span>
+                  <span className="widget-value">{tokensPerSec > 0 ? `${tokensPerSec} t/s` : '-'}</span>
+                  <span className="widget-subtext" style={{ color: '#10b981' }}>Vitesse de génération</span>
                 </div>
               </div>
 
               {/* Token Usage Widget */}
-              <div className="glass-panel p-4 rounded-xl flex flex-col gap-2">
-                <span className="text-xs text-gray-400">Consommation des Tokens</span>
-                <div className="flex justify-between items-center mt-1 border-b border-gray-800/50 pb-2">
-                  <span className="text-xs text-gray-400">Tokens d'Entrée (Prompt) :</span>
-                  <span className="text-sm font-semibold text-gray-200">{inputTokens}</span>
+              <div className="glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <span className="widget-title">Consommation des Tokens</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                  <span style={{ color: '#9ca3af' }}>Tokens d'Entrée (Prompt) :</span>
+                  <span style={{ color: 'white', fontWeight: '500' }}>{inputTokens}</span>
                 </div>
-                <div className="flex justify-between items-center border-b border-gray-800/50 pb-2">
-                  <span className="text-xs text-gray-400">Tokens de Sortie (Générés) :</span>
-                  <span className="text-sm font-semibold text-gray-200">{outputTokens}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                  <span style={{ color: '#9ca3af' }}>Tokens de Sortie (Générés) :</span>
+                  <span style={{ color: 'white', fontWeight: '500' }}>{outputTokens}</span>
                 </div>
-                <div className="flex justify-between items-center pt-1">
-                  <span className="text-xs font-bold text-gray-300">Total :</span>
-                  <span className="text-sm font-bold text-indigo-400">{inputTokens + outputTokens}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', paddingTop: '4px' }}>
+                  <span style={{ color: '#e5e7eb', fontWeight: '600' }}>Total :</span>
+                  <span style={{ color: '#6366f1', fontWeight: 'bold' }}>{inputTokens + outputTokens}</span>
                 </div>
               </div>
 
               {/* Performance SVG Line Chart */}
-              <div className="glass-panel p-4 rounded-xl flex flex-col gap-2">
-                <span className="text-xs text-gray-400 mb-2">Historique de Vitesse (tokens/sec)</span>
-                <div className="w-full h-[120px] bg-black/20 rounded-lg flex items-end p-2 relative overflow-hidden">
-                  <svg className="w-full h-full" viewBox="0 0 100 50" preserveAspectRatio="none">
+              <div className="glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <span className="widget-title">Historique de Vitesse (tokens/sec)</span>
+                <div style={{ width: '100%', height: '120px', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '8px', display: 'flex', alignItems: 'end', padding: '8px', position: 'relative', overflow: 'hidden' }}>
+                  <svg style={{ width: '100%', height: '100%' }} viewBox="0 0 100 50" preserveAspectRatio="none">
                     <polyline
                       fill="none"
                       stroke="#6366f1"
                       strokeWidth="2"
                       points={speedHistory.map((val, idx) => {
                         const x = (idx / (speedHistory.length - 1)) * 100;
-                        const y = 50 - (val / 100) * 50; // Normalize relative to 100 max speed
+                        const y = 50 - (val / 100) * 50; 
                         return `${x},${y}`;
                       }).join(' ')}
                     />
                   </svg>
-                  <div className="absolute right-2 top-2 bg-indigo-500/10 text-[9px] text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-500/20">
+                  <div style={{ position: 'absolute', right: '8px', top: '8px', backgroundColor: 'rgba(99,102,241,0.1)', color: '#6366f1', fontSize: '9px', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(99,102,241,0.2)' }}>
                     Max: 100 t/s
                   </div>
                 </div>
               </div>
 
               {/* Hardware diagnostics */}
-              <div className="glass-panel p-4 rounded-xl flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 text-indigo-400" />
-                <div className="flex flex-col">
-                  <span className="text-xs font-semibold text-white">Modèle Qwen-32B non quantifié</span>
-                  <span className="text-[10px] text-gray-400 leading-relaxed">
-                    Exécution en FP16 natif. Nécessite 80 Go de VRAM. KV Cache optimisé par vLLM.
+              <div className="glass-panel" style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <AlertCircle style={{ width: '20px', height: '20px', color: '#6366f1', minWidth: '20px' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: '600', color: 'white' }}>Modèle Qwen-32B non quantifié</span>
+                  <span style={{ fontSize: '10px', color: '#9ca3af', lineHeight: '1.4' }}>
+                    Exécution en FP16 natif sur A100. Vitesse et cache d'attention flash (FlashAttention-2) optimisés.
                   </span>
                 </div>
               </div>
@@ -570,93 +577,87 @@ export default function App() {
 
         {/* WORKSPACE 2: BENCHMARK EVALUATION WORKSPACE */}
         {activeTab === 'bench' && (
-          <div className="flex-1 flex overflow-hidden">
+          <div className="benchmark-layout">
             {/* Scenarios Panel (30%) */}
-            <div className="w-[320px] border-r border-gray-800 h-full flex flex-col bg-black/10">
-              <div className="p-4 border-b border-gray-800">
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-emerald-400" /> Scénarios de Test
+            <aside className="scenarios-sidebar">
+              <div style={{ padding: '16px', borderBottom: '1px solid var(--glass-border)' }}>
+                <h3 style={{ fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', uppercase: 'true', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BookOpen style={{ width: '16px', height: '16px', color: '#10b981' }} /> Scénarios de Test
                 </h3>
               </div>
-              <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+              <div className="scenarios-list">
                 {scenarios.map((sc, idx) => (
                   <button
                     key={idx}
                     onClick={() => setSelectedScenarioIdx(idx)}
-                    className={`text-left p-4 rounded-xl transition-all border ${
-                      selectedScenarioIdx === idx 
-                        ? 'glass-panel border-emerald-500/30 bg-emerald-500/5' 
-                        : 'border-transparent hover:bg-white/5'
-                    }`}
+                    className={`scenario-button ${selectedScenarioIdx === idx ? 'active' : ''}`}
                   >
-                    <h4 className={`text-xs font-bold ${selectedScenarioIdx === idx ? 'text-emerald-400' : 'text-gray-200'}`}>
+                    <h4 style={{ fontSize: '12px', fontWeight: 'bold', margin: 0, color: selectedScenarioIdx === idx ? '#10b981' : 'white' }}>
                       {sc.title}
                     </h4>
-                    <p className="text-[10px] text-gray-400 mt-1 line-clamp-2 leading-relaxed">
+                    <p style={{ fontSize: '10px', color: '#9ca3af', marginTop: '6px', margin: 0, lineHeight: '1.4' }}>
                       {sc.description}
                     </p>
                   </button>
                 ))}
               </div>
-            </div>
+            </aside>
 
             {/* Run & Verification Workspace (70%) */}
-            <div className="flex-1 flex flex-col h-full overflow-y-auto p-6 gap-6">
-              <div className="glass-panel p-6 rounded-2xl flex flex-col gap-4">
-                <div className="flex justify-between items-start gap-4">
+            <div className="evaluation-workspace">
+              <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px' }}>
                   <div>
-                    <h2 className="text-xl font-bold text-white">{scenarios[selectedScenarioIdx].title}</h2>
-                    <p className="text-xs text-gray-400 mt-1">{scenarios[selectedScenarioIdx].description}</p>
+                    <h2 style={{ fontSize: '18px', fontWeight: 'bold', color: 'white', margin: 0 }}>{scenarios[selectedScenarioIdx].title}</h2>
+                    <p style={{ fontSize: '12px', color: '#9ca3af', margin: '4px 0 0 0' }}>{scenarios[selectedScenarioIdx].description}</p>
                   </div>
                   <button 
                     onClick={() => handleSend(scenarios[selectedScenarioIdx].prompt)}
                     className="glass-button primary" 
+                    style={{ whiteSpace: 'nowrap' }}
                     disabled={isStreaming}
                   >
-                    <Play className="w-4 h-4" /> Lancer l'Évaluation
+                    <Play style={{ width: '14px', height: '14px' }} /> Lancer l'Évaluation
                   </button>
                 </div>
                 
-                <div className="bg-black/25 p-4 rounded-lg border border-gray-800/80">
-                  <span className="text-[10px] text-emerald-400 uppercase font-bold tracking-wider">Prompt envoyé :</span>
-                  <p className="text-xs text-gray-300 mt-1 leading-relaxed">{scenarios[selectedScenarioIdx].prompt}</p>
+                <div style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Prompt envoyé :</span>
+                  <p style={{ fontSize: '12px', color: '#d1d5db', margin: '6px 0 0 0', lineHeight: '1.5' }}>{scenarios[selectedScenarioIdx].prompt}</p>
                 </div>
               </div>
 
               {/* Grid for criteria checklist & grading */}
-              <div className="grid grid-cols-5 gap-6">
+              <div className="evaluation-grid">
                 
                 {/* Criteria checklist (3 columns) */}
-                <div className="col-span-3 glass-panel p-5 rounded-2xl flex flex-col gap-4">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <CheckCircle className="w-4.5 h-4.5 text-emerald-400" /> Critères de CoT Attendus
+                <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: 'white', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CheckCircle style={{ width: '16px', height: '16px', color: '#10b981' }} /> Critères de CoT Attendus
                   </h3>
-                  <div className="flex flex-col gap-3">
+                  <div className="checklist-container">
                     {scenarios[selectedScenarioIdx].criteria.map((crit, cIdx) => (
-                      <label 
+                      <div 
                         key={cIdx} 
-                        className={`flex items-start gap-3 p-3 rounded-lg border transition-all cursor-pointer ${
-                          crit.met 
-                            ? 'bg-emerald-500/5 border-emerald-500/20 text-gray-200' 
-                            : 'border-gray-800 hover:border-gray-700 text-gray-400'
-                        }`}
+                        onClick={() => toggleCriterion(selectedScenarioIdx, cIdx)}
+                        className={`checklist-item ${crit.met ? 'checked' : ''}`}
                       >
                         <input 
                           type="checkbox" 
                           checked={crit.met} 
-                          onChange={() => toggleCriterion(selectedScenarioIdx, cIdx)}
-                          className="mt-0.5 accent-emerald-500"
+                          readOnly
+                          style={{ marginTop: '3px', accentColor: '#10b981', cursor: 'pointer' }}
                         />
-                        <span className="text-xs leading-relaxed">{crit.text}</span>
-                      </label>
+                        <span style={{ fontSize: '12px', lineHeight: '1.5' }}>{crit.text}</span>
+                      </div>
                     ))}
                   </div>
                 </div>
 
                 {/* Performance score grading (2 columns) */}
-                <div className="col-span-2 glass-panel p-5 rounded-2xl flex flex-col gap-4">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Star className="w-4.5 h-4.5 text-yellow-400" /> Évaluation Qualitative
+                <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: 'white', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Star style={{ width: '16px', height: '16px', color: '#f59e0b' }} /> Évaluation Qualitative
                   </h3>
                   
                   <GradeSlider 
@@ -686,10 +687,10 @@ export default function App() {
                     })}
                   />
 
-                  <div className="bg-yellow-500/5 border border-yellow-500/10 p-3 rounded-lg flex items-start gap-2.5 mt-2">
-                    <AlertCircle className="w-4 h-4 text-yellow-500 mt-0.5" />
-                    <span className="text-[10px] text-yellow-500/80 leading-relaxed">
-                      L'évaluation qualitative permet de mesurer la pertinence des explications étape par étape et l'alignement sur les politiques de l'entreprise.
+                  <div style={{ backgroundColor: 'rgba(245,158,11,0.03)', border: '1px solid rgba(245,158,11,0.1)', padding: '12px', borderRadius: '8px', display: 'flex', alignItems: 'start', gap: '10px', marginTop: '8px' }}>
+                    <AlertCircle style={{ width: '16px', height: '16px', color: '#f59e0b', minWidth: '16px', marginTop: '2px' }} />
+                    <span style={{ fontSize: '10px', color: '#f59e0b', lineHeight: '1.4' }}>
+                      L'évaluation qualitative permet de mesurer la pertinence des explications étape par étape et l'alignement sur les politiques de l'organisation.
                     </span>
                   </div>
                 </div>
@@ -705,21 +706,26 @@ export default function App() {
 // Simple internal helper component for star rating / slider
 function GradeSlider({ label, value, onChange }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex justify-between text-xs">
-        <span className="text-gray-400">{label}</span>
-        <span className="text-yellow-400 font-bold">{value} / 5</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+        <span style={{ color: '#9ca3af' }}>{label}</span>
+        <span style={{ color: '#f59e0b', fontWeight: 'bold' }}>{value} / 5</span>
       </div>
-      <div className="flex gap-1.5 mt-1">
+      <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
         {[1, 2, 3, 4, 5].map((star) => (
           <button
             key={star}
             onClick={() => onChange(star)}
-            className={`p-1 rounded transition-all ${
-              star <= value ? 'text-yellow-400' : 'text-gray-600'
-            }`}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '2px',
+              color: star <= value ? '#f59e0b' : '#4b5563',
+              transition: 'all 0.15s ease-in-out'
+            }}
           >
-            <Star className="w-5 h-5 fill-current" />
+            <Star style={{ width: '18px', height: '18px', fill: star <= value ? 'currentColor' : 'none' }} />
           </button>
         ))}
       </div>
