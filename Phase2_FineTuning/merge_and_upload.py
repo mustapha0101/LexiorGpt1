@@ -13,8 +13,9 @@ from peft import PeftModel
 
 def main():
     # Définition des chemins et dépôts
-    lora_dir = "outputs/final_model/lora_adapters"
-    merged_dir = "outputs/final_model/merged_16bit"
+    volume_path = "/runpod-volume" if os.path.exists("/runpod-volume") else "/workspace"
+    lora_dir = os.path.join(volume_path, "outputs/final_model/lora_adapters")
+    merged_dir = os.path.join(volume_path, "outputs/final_model/merged_16bit")
     
     hf_token = os.environ.get("HF_TOKEN")
     repo_id = os.environ.get("HF_REPO_ID", "intelliwork/LexiorGpt1")
