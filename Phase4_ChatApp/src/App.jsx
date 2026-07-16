@@ -1018,6 +1018,23 @@ export default function App() {
               <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0 }}>Objectif : Faire évoluer le raisonnement juridique de LexiorGPT et intégrer des mises à jour autonomes.</p>
             </div>
 
+            {/* Architecture Blueprint Image Panel */}
+            <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', margin: 0 }}>
+                Blueprint d'Architecture Modulaire : LexiorGPT Framework
+              </h3>
+              <p style={{ fontSize: '13px', color: '#d1d5db', margin: 0 }}>
+                Notre framework adapte le paradigme de découplage de FinGPT au domaine juridique : les données CanLII, CCQ et la jurisprudence sont servies via RAG en temps réel, tandis que le modèle (fine-tuné par LoRA) est exclusivement dédié à l'application de la méthode IRAC et à la chaîne de pensée logique.
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.15)', padding: '20px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                <img 
+                  src="/lexiorgpt_architecture.png" 
+                  alt="LexiorGPT Architecture Diagram" 
+                  style={{ maxWidth: '100%', maxHeight: '550px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)' }} 
+                />
+              </div>
+            </div>
+
             {/* Grid Layout */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
               {/* Box 1: Continuous Fine-Tuning Strategy */}
