@@ -813,14 +813,13 @@ export default function App() {
                 </p>
 
                 <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span style={{ fontSize: '11px', color: '#818cf8', fontWeight: 'bold' }}>Hyperparamètres d'entraînement :</span>
+                  <span style={{ fontSize: '11px', color: '#818cf8', fontWeight: 'bold' }}>Hyperparamètres & Métriques W&B :</span>
                   <ul style={{ margin: '8px 0 0 0', paddingLeft: '16px', fontSize: '12px', color: '#9ca3af', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <li><strong>Rank LoRA (r)</strong> : 16</li>
-                    <li><strong>Alpha LoRA</strong> : 32</li>
+                    <li><strong>Rank / Alpha LoRA</strong> : 16 / 32</li>
                     <li><strong>Modules ciblés</strong> : q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj</li>
-                    <li><strong>Époques</strong> : 3</li>
-                    <li><strong>Taille de batch</strong> : 16 (avec accumulation de gradient)</li>
-                    <li><strong>Loss finale</strong> : ~0.05 (convergence optimale)</li>
+                    <li><strong>Époques / Steps</strong> : 3 / 1500</li>
+                    <li><strong>Perte d'entraînement finale</strong> : ~0.25</li>
+                    <li><strong>Perte de validation finale (eval/loss)</strong> : 0.29225 (Étape 1500)</li>
                   </ul>
                 </div>
 
