@@ -95,7 +95,7 @@ def main():
                 
     ssh_setup = ""
     if pub_key:
-        ssh_setup = f"mkdir -p ~/.ssh && echo \"{pub_key}\" > ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys; "
+        ssh_setup = f"mkdir -p ~/.ssh && echo {pub_key} > ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys; "
 
     container_command = (
         "bash -c '"
