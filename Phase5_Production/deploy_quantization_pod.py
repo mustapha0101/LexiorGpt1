@@ -73,7 +73,7 @@ def main():
     runpod.api_key = args.api_key
     
     # Image PyTorch officielle sur RunPod contenant CUDA 12.4 et PyTorch >= 2.4
-    docker_image = "runpod/pytorch:2.4.0-py3.10-cuda12.4.1-devel-ubuntu22.04"
+    docker_image = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
     
     # Injection des tokens nécessaires dans les variables d'environnement du pod
     env_vars = {
