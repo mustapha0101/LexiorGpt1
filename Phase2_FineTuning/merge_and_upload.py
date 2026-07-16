@@ -9,6 +9,7 @@ os.makedirs(os.environ["HF_HOME"], exist_ok=True)
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
+from huggingface_hub import HfApi
 
 
 def main():
