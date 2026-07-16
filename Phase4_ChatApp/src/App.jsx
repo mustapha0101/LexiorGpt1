@@ -836,7 +836,7 @@ export default function App() {
                 </h3>
 
                 <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
-                  Le modèle a été spécialisé sur un corpus de près de **70 000 cas d'entraînement (exactement 69 369 cas)** ciblant les **Lois et Règlements Fédéraux du Canada** extraits de CanLII et de Justice Canada.
+                  Le modèle a été spécialisé sur un corpus de **69 369 cas d'entraînement** ciblant les **Lois et Règlements Fédéraux du Canada** extraits de CanLII et de Justice Canada.
                 </p>
 
                 <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
