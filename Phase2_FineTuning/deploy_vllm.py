@@ -67,10 +67,10 @@ def main():
     docker_image = "vllm/vllm-openai:latest"
     
     # Injection des variables d'environnement
-    # Rediriger le cache HF sur le grand volume /workspace (100 Go)
+    # Rediriger le cache HF sur le grand volume /runpod-volume (150 Go)
     env_vars = {
         "HF_TOKEN": args.hf_token,
-        "HF_HOME": "/workspace/hf_cache",
+        "HF_HOME": "/runpod-volume/hf_cache",
         "HF_HUB_ENABLE_HF_TRANSFER": "1" # Accélérer drastiquement le téléchargement du modèle
     }
     
@@ -96,7 +96,7 @@ def main():
             image_name=docker_image,
             gpu_type_id=args.gpu_type,
             gpu_count=1,
-            volume_in_gb=100, # Espace suffisant pour stocker les 65 Go du modèle
+            volume_in_gb=150, # Espace suffisant pour stocker les 65 Go du modèle + marge
             container_disk_in_gb=40,
             ports="8000/http,22/tcp",
             env=env_vars,
