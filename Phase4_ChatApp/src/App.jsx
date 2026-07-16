@@ -809,7 +809,7 @@ export default function App() {
                 </h3>
                 
                 <p style={{ fontSize: '13px', color: '#d1d5db', lineHeight: '1.6', margin: 0 }}>
-                  LexiorGPT-32B est un modèle distillé à partir de **GPT-4o** (modèle enseignant) vers **Qwen-2.5-32B-Instruct** (modèle étudiant) à l'aide de la méthode de Fine-Tuning de précision **LoRA (Low-Rank Adaptation)**.
+                  LexiorGPT-32B est issu d'une **Auto-Distillation (Self-Distillation)** du modèle de base **Qwen-2.5-32B-Instruct** (utilisé en version quantifiée AWQ sur un pod d'inférence vLLM pour générer les réponses structurées) vers lui-même sous forme d'adapters **LoRA (Low-Rank Adaptation)**.
                 </p>
 
                 <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
@@ -825,7 +825,7 @@ export default function App() {
                 </div>
 
                 <p style={{ fontSize: '12px', color: '#9ca3af', lineHeight: '1.5', margin: 0 }}>
-                  La distillation LoRA permet de transférer la structure de raisonnement **Chain of Thought (CoT)** et la rigueur d'analyse logique de GPT-4o tout en conservant l'efficacité multilingue et le format d'instruction natif de Qwen-2.5.
+                  Ce processus permet de spécialiser et d'aligner le modèle sur la structure de raisonnement **Chain of Thought (CoT)** et la rigueur d'analyse logique requise par les lois canadiennes.
                 </p>
               </div>
 
