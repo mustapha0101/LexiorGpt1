@@ -652,7 +652,7 @@ export default function App() {
               <div className="glass-panel" style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <AlertCircle style={{ width: '20px', height: '20px', color: '#6366f1', minWidth: '20px' }} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: '600', color: 'white' }}>Modèle Qwen-32B non quantifié</span>
+                  <span style={{ fontSize: '12px', fontWeight: '600', color: 'white' }}>LexiorGPT-32B non quantifié</span>
                   <span style={{ fontSize: '10px', color: '#9ca3af', lineHeight: '1.4' }}>
                     Exécution en FP16 natif sur A100. Vitesse et cache d'attention flash (FlashAttention-2) optimisés.
                   </span>
