@@ -113,7 +113,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState(import.meta.env.VITE_API_KEY || 'none');
   const [modelId, setModelId] = useState(import.meta.env.VITE_MODEL_ID || 'intelliwork/LexiorGpt1-merged');
   const [systemPrompt, setSystemPrompt] = useState(
-    'You are LexiorGpt, a specialized legal AI assistant. Provide structured, step-by-step reasoning (Chain of Thought) in French.'
+    'Tu es un assistant juridique Lexior, spécialisé en droit canadien et québécois. Raisonne en français selon le format IRAC. Tu dois obligatoirement baser tes analyses sur la législation et la jurisprudence canadienne/québécoise (ex: Code civil du Québec, CanLII).'
   );
   
   // Model Parameters State
