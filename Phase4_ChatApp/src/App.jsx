@@ -115,7 +115,7 @@ export default function App() {
   const [systemPrompt, setSystemPrompt] = useState(
     'Tu es un assistant juridique Lexior, spécialisé en droit canadien et québécois. Raisonne en français et anglais. Tu dois obligatoirement baser tes analyses sur la législation et la jurisprudence canadienne/québécoise (ex: Code civil du Québec, CanLII).'
   );
-  const [useSystemPrompt, setUseSystemPrompt] = useState(true);
+  const [useSystemPrompt, setUseSystemPrompt] = useState(false);
   
   // Model Parameters State
   const [temperature, setTemperature] = useState(0.3);
