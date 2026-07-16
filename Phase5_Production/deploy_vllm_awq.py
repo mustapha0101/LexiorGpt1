@@ -76,10 +76,11 @@ def main():
     env_vars = {
         "HF_TOKEN": args.hf_token,
         "HF_HOME": "/runpod-volume/hf_cache",
-        "HF_HUB_ENABLE_HF_TRANSFER": "1"
+        "HF_HUB_ENABLE_HF_TRANSFER": "1",
+        "VLLM_ALLOW_LONG_MAX_MODEL_LEN": "1" # Autorise à dépasser la longueur de contexte de base dans vLLM
     }
     
-    # Arguments optimisés pour le modèle AWQ avec contexte dynamique
+    # Arguments optimisés pour le modèle AWQ avec contexte dynamique de 128k
     vllm_cmd = [
         "--model", args.model_id,
         "--port", "8000",
@@ -87,7 +88,8 @@ def main():
         "--quantization", "awq",
         "--max-model-len", str(args.max_model_len),
         "--gpu-memory-utilization", "0.90", # Conserve 10% pour les activations de contexte
-        "--kv-cache-dtype", "fp8"           # Indispensable pour stocker le KV cache 128k en VRAM
+        "--kv-cache-dtype", "fp8",          # Indispensable pour stocker le KV cache 128k en VRAM
+        "--hf-overrides", '{"rope_scaling": {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768}}'
     ]
     
     # Configuration Tensor Parallel si multi-GPU
