@@ -89,7 +89,7 @@ def main():
         "--max-model-len", str(args.max_model_len),
         "--gpu-memory-utilization", "0.90", # Conserve 10% pour les activations de contexte
         "--kv-cache-dtype", "fp8",          # Indispensable pour stocker le KV cache 128k en VRAM
-        "--hf-overrides", '{"rope_scaling": {"rope_type": "yarn", "factor": 4.0, "original_max_position_embeddings": 32768}}'
+        "--hf-overrides", '{\\"rope_scaling\\": {\\"rope_type\\": \\"yarn\\", \\"factor\\": 4.0, \\"original_max_position_embeddings\\": 32768}}'
     ]
     
     # Configuration Tensor Parallel si multi-GPU
