@@ -99,9 +99,9 @@ const LEGAL_SCENARIOS = [
 
 export default function App() {
   // Connection Config State
-  const [apiUrl, setApiUrl] = useState('https://6eys2nzfy3u10a-8000.proxy.runpod.net/v1');
-  const [apiKey, setApiKey] = useState('none');
-  const [modelId, setModelId] = useState('intelliwork/LexiorGpt1-merged');
+  const [apiUrl, setApiUrl] = useState(import.meta.env.VITE_API_URL || 'https://6eys2nzfy3u10a-8000.proxy.runpod.net/v1');
+  const [apiKey, setApiKey] = useState(import.meta.env.VITE_API_KEY || 'none');
+  const [modelId, setModelId] = useState(import.meta.env.VITE_MODEL_ID || 'intelliwork/LexiorGpt1-merged');
   const [systemPrompt, setSystemPrompt] = useState(
     'You are LexiorGpt, a specialized legal AI assistant. Provide structured, step-by-step reasoning (Chain of Thought) in French.'
   );
