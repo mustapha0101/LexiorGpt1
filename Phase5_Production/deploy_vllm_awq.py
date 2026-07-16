@@ -57,6 +57,19 @@ def parse_args():
         default=1,
         help="Nombre de GPU à allouer (nécessaire >1 pour les contextes très longs comme 128k sur des GPU de 24G/48G)."
     )
+    parser.add_argument(
+        "--docker_image",
+        type=str,
+        default="vllm/vllm-openai:v0.5.2",
+        help="Image Docker officielle vLLM à utiliser."
+    )
+    parser.add_argument(
+        "--tokenizer_mode",
+        type=str,
+        default="slow",
+        choices=["auto", "slow"],
+        help="Mode du tokenizer (slow recommandé pour v0.5.2 pour éviter les incompatibilités Rust/fast)."
+    )
     return parser.parse_args()
 
 
@@ -69,8 +82,8 @@ def main():
         
     runpod.api_key = args.api_key
     
-    # Image officielle vLLM (v0.5.2 utilise CUDA 12.1, ce qui évite les erreurs CUDA 13 incompatibles)
-    docker_image = "vllm/vllm-openai:v0.5.2"
+    # Image officielle vLLM (configurable via arguments)
+    docker_image = args.docker_image
     
     # Cache HF sur le grand volume persistant /runpod-volume
     env_vars = {
@@ -90,7 +103,7 @@ def main():
         "--gpu-memory-utilization", "0.90", # Conserve 10% pour les activations de contexte
         "--kv-cache-dtype", "fp8",          # Indispensable pour stocker le KV cache 128k en VRAM
         "--rope-scaling", "'{\\\"type\\\":\\\"yarn\\\",\\\"factor\\\":4.0,\\\"original_max_position_embeddings\\\":32768}'",
-        "--tokenizer-mode", "slow"
+        "--tokenizer-mode", args.tokenizer_mode
     ]
     
     # Configuration Tensor Parallel si multi-GPU
