@@ -51,6 +51,12 @@ def parse_args():
         default=32768,
         help="Longueur maximale du contexte (ex: 32768, 65536, 131072)."
     )
+    parser.add_argument(
+        "--gpu_count",
+        type=int,
+        default=1,
+        help="Nombre de GPU à allouer (nécessaire >1 pour les contextes très longs comme 128k sur des GPU de 24G/48G)."
+    )
     return parser.parse_args()
 
 
@@ -84,15 +90,21 @@ def main():
         "--enable-auto-tool-choice",
         "--tool-call-parser", "hermes"
     ]
+    
+    # Configuration Tensor Parallel si multi-GPU
+    if args.gpu_count > 1:
+        vllm_cmd.extend(["--tensor-parallel-size", str(args.gpu_count)])
         
     container_command = " ".join(vllm_cmd)
     
     print("==================================================")
     print(" DÉPLOIEMENT DU POD DE PRODUCTION LEXIORGPT AWQ")
     print("==================================================")
-    print(f"GPU Cible       : {args.gpu_type}")
+    print(f"GPU Cible       : {args.gpu_type} (x{args.gpu_count})")
     print(f"Modèle AWQ      : {args.model_id}")
     print(f"Longueur Max    : {args.max_model_len} tokens")
+    if args.gpu_count > 1:
+        print(f"Tensor Parallel : {args.gpu_count}")
     print("==================================================")
     
     try:
@@ -100,7 +112,7 @@ def main():
             name="lexior-vllm-prod-awq",
             image_name=docker_image,
             gpu_type_id=args.gpu_type,
-            gpu_count=1,
+            gpu_count=args.gpu_count,
             volume_in_gb=150, # 150 Go pour être totalement à l'aise (modèle de 18 Go + KV cache)
             container_disk_in_gb=50,
             ports="8000/http,22/tcp",
