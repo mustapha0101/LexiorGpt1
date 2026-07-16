@@ -18,6 +18,8 @@ export_keys.sh
 
 # Datasets & Local Cache
 data/formatted_dataset.jsonl
+data/*.json
+data/law_corpus/
 *.jsonl
 *.csv
 *.parquet
