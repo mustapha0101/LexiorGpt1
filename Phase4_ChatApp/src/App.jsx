@@ -115,7 +115,7 @@ export default function App() {
   const [systemPrompt, setSystemPrompt] = useState(
     'Tu es un assistant juridique Lexior, spécialisé en droit canadien et québécois. Raisonne en français et anglais. Tu dois obligatoirement baser tes analyses sur la législation et la jurisprudence canadienne/québécoise (ex: Code civil du Québec, CanLII).'
   );
-  const [useSystemPrompt, setUseSystemPrompt] = useState(false);
+  const [useSystemPrompt, setUseSystemPrompt] = useState(true);
   
   // Model Parameters State
   const [temperature, setTemperature] = useState(0.3);
@@ -482,8 +482,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* System Prompt Config */}
-        <div className="sidebar-section" style={{ flex: 1, borderBottom: 'none', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {/* System Prompt Config (Hidden to keep UI clean, active in background) */}
+        <div className="sidebar-section" style={{ display: 'none', flex: 1, borderBottom: 'none', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <label className="form-label" style={{ fontWeight: '600', margin: 0 }}>System Prompt</label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#9ca3af', cursor: 'pointer', userSelect: 'none' }}>
