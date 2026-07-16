@@ -69,8 +69,8 @@ def main():
         
     runpod.api_key = args.api_key
     
-    # Image officielle vLLM
-    docker_image = "vllm/vllm-openai:latest"
+    # Image officielle vLLM (v0.5.2 utilise CUDA 12.1, ce qui évite les erreurs CUDA 13 incompatibles)
+    docker_image = "vllm/vllm-openai:v0.5.2"
     
     # Cache HF sur le grand volume persistant /runpod-volume
     env_vars = {
@@ -87,6 +87,7 @@ def main():
         "--quantization", "awq",
         "--max-model-len", str(args.max_model_len),
         "--gpu-memory-utilization", "0.90", # Conserve 10% pour les activations de contexte
+        "--kv-cache-dtype", "fp8",          # Indispensable pour stocker le KV cache 128k en VRAM
         "--enable-auto-tool-choice",
         "--tool-call-parser", "hermes"
     ]
