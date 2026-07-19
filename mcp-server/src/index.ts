@@ -162,8 +162,46 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
+function translateToolCall(name: string, args: any) {
+  let targetName = name;
+  const normalizedArgs = { ...args };
+  
+  if (name === "legal_text_lookup") {
+    const citation = args?.citation || "";
+    const isCpc = citation.toUpperCase().includes("CPC");
+    targetName = isCpc ? "get_cpc_articles" : "get_ccq_articles";
+    const articleMatch = citation.match(/\d+/);
+    if (articleMatch) {
+      normalizedArgs.start_article = Number(articleMatch[0]);
+    }
+  } else if (name === "legal_keyword_search" || name === "ccq_keyword_search" || name === "search_ccq_keywords") {
+    targetName = "search_ccq_keywords";
+  } else if (name === "ccq_search" || name === "get_ccq_articles") {
+    targetName = "get_ccq_articles";
+  } else if (name === "cpc_keyword_search" || name === "search_cpc_keywords") {
+    targetName = "search_cpc_keywords";
+  } else if (name === "cpc_search" || name === "get_cpc_articles") {
+    targetName = "get_cpc_articles";
+  } else if (name === "doc_similarity_search" || name === "a2aj_search_legal_documents" || name === "search_quebec_jurisprudence") {
+    targetName = "search_quebec_jurisprudence";
+  }
+
+  // Normalisation des arguments
+  const queryText = args?.keywords || args?.keyword || args?.query || args?.text || "";
+  if (!normalizedArgs.keyword) normalizedArgs.keyword = queryText;
+  if (!normalizedArgs.query) normalizedArgs.query = queryText;
+  if (args?.start_article && !normalizedArgs.start_article) {
+    normalizedArgs.start_article = Number(args.start_article);
+  }
+  if (args?.end_article && !normalizedArgs.end_article) {
+    normalizedArgs.end_article = Number(args.end_article);
+  }
+
+  return { name: targetName, arguments: normalizedArgs };
+}
+
 mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
-  console.log('--- 📩 NOUVEL APPEL D\'OUTIL ---');
+  console.log('--- 📩 NOUVEL APPEL D\'OUTIL (MCP) ---');
   console.log(`Outil demandé : ${request.params.name}`);
   console.log(`Arguments :`, request.params.arguments);
 
@@ -175,73 +213,79 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
-  const { name, arguments: args } = request.params;
+  let { name, arguments: args } = request.params;
+  const translated = translateToolCall(name, args);
+  const targetName = translated.name;
+  const normalizedArgs = translated.arguments;
+  console.log(`Outil traduit : ${targetName}`, normalizedArgs);
 
   try {
-    switch (name) {
+    switch (targetName) {
       case "get_ccq_articles": {
-        const { start_article, end_article } = args as any;
-        if (typeof start_article !== 'number') {
+        const start = Number(normalizedArgs.start_article);
+        if (isNaN(start)) {
           return { content: [{ type: "text", text: "Erreur : start_article doit être un nombre." }], isError: true };
         }
-        const articles = getArticles(start_article, end_article);
+        const end = normalizedArgs.end_article ? Number(normalizedArgs.end_article) : undefined;
+        const articles = getArticles(start, end);
         if (articles.length === 0) {
-          return { content: [{ type: "text", text: `Aucun article trouvé pour la plage CCQ ${start_article} à ${end_article || start_article}.` }] };
+          return { content: [{ type: "text", text: `Aucun article trouvé pour la plage CCQ ${start} à ${end || start}.` }] };
         }
         const formattedText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         return { content: [{ type: "text", text: formattedText }] };
       }
 
       case "search_ccq_keywords": {
-        const { keyword } = args as any;
-        if (typeof keyword !== 'string' || !keyword) {
+        const kw = normalizedArgs.keyword;
+        if (typeof kw !== 'string' || !kw) {
           return { content: [{ type: "text", text: "Erreur : keyword doit être une chaîne de caractères." }], isError: true };
         }
-        const articles = searchArticlesByKeyword(keyword);
+        const articles = searchArticlesByKeyword(kw);
         if (articles.length === 0) {
-          return { content: [{ type: "text", text: `Aucun article CCQ trouvé pour le mot-clé: "${keyword}".` }] };
+          return { content: [{ type: "text", text: `Aucun article CCQ trouvé pour le mot-clé: "${kw}".` }] };
         }
         const formattedText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         return { content: [{ type: "text", text: formattedText }] };
       }
 
       case "get_cpc_articles": {
-        const { start_article, end_article } = args as any;
-        if (typeof start_article !== 'number') {
+        const start = Number(normalizedArgs.start_article);
+        if (isNaN(start)) {
           return { content: [{ type: "text", text: "Erreur : start_article doit être un nombre." }], isError: true };
         }
-        const articles = getCpcArticles(start_article, end_article);
+        const end = normalizedArgs.end_article ? Number(normalizedArgs.end_article) : undefined;
+        const articles = getCpcArticles(start, end);
         if (articles.length === 0) {
-          return { content: [{ type: "text", text: `Aucun article CPC trouvé pour la plage CPC ${start_article} à ${end_article || start_article}.` }] };
+          return { content: [{ type: "text", text: `Aucun article CPC trouvé pour la plage CPC ${start} à ${end || start}.` }] };
         }
         const formattedText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         return { content: [{ type: "text", text: formattedText }] };
       }
 
       case "search_cpc_keywords": {
-        const { keyword } = args as any;
-        if (typeof keyword !== 'string' || !keyword) {
+        const kw = normalizedArgs.keyword;
+        if (typeof kw !== 'string' || !kw) {
           return { content: [{ type: "text", text: "Erreur : keyword doit être une chaîne de caractères." }], isError: true };
         }
-        const articles = searchCpcArticlesByKeyword(keyword);
+        const articles = searchCpcArticlesByKeyword(kw);
         if (articles.length === 0) {
-          return { content: [{ type: "text", text: `Aucun article CPC trouvé pour le mot-clé: "${keyword}".` }] };
+          return { content: [{ type: "text", text: `Aucun article CPC trouvé pour le mot-clé: "${kw}".` }] };
         }
         const formattedText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         return { content: [{ type: "text", text: formattedText }] };
       }
 
       case "search_quebec_regulations": {
-        const { keyword } = args as any;
-        if (typeof keyword !== 'string' || !keyword) {
+        const kw = normalizedArgs.keyword;
+        if (typeof kw !== 'string' || !kw) {
           return { content: [{ type: "text", text: "Erreur : keyword doit être une chaîne." }], isError: true };
         }
-        const text = await searchQuebecRegulations(keyword);
+        const text = await searchQuebecRegulations(kw);
         return { content: [{ type: "text", text }] };
       }
 
       case "get_quebec_regulation": {
-        const { url } = args as any;
+        const url = normalizedArgs.url;
         if (typeof url !== 'string' || !url) {
           return { content: [{ type: "text", text: "Erreur : url doit être une chaîne." }], isError: true };
         }
@@ -250,7 +294,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_quebec_legal_info": {
-        const { type } = args as any;
+        const type = normalizedArgs.type;
         if (typeof type !== 'string' || !type) {
           return { content: [{ type: "text", text: "Erreur : type doit être une chaîne." }], isError: true };
         }
@@ -259,11 +303,11 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "search_quebec_jurisprudence": {
-        const { query } = args as any;
-        if (typeof query !== 'string' || !query) {
+        const q = normalizedArgs.query;
+        if (typeof q !== 'string' || !q) {
           return { content: [{ type: "text", text: "Erreur : query doit être une chaîne." }], isError: true };
         }
-        const text = await searchQuebecJurisprudence(query);
+        const text = await searchQuebecJurisprudence(q);
         return { content: [{ type: "text", text }] };
       }
 
@@ -335,7 +379,10 @@ let transport: SSEServerTransport | null = null;
 
 app.post('/api/call-tool', async (req, res) => {
   const { name, arguments: args } = req.body;
-  console.log(`--- [HTTP API] Appel d'outil direct : ${name} ---`, args);
+  const translated = translateToolCall(name, args);
+  const targetName = translated.name;
+  const normalizedArgs = translated.arguments;
+  console.log(`--- [HTTP API] Appel d'outil direct : ${name} (traduit en ${targetName}) ---`, normalizedArgs);
   
   if (!isDbLoaded) {
     res.status(503).json({ error: "Bases de données non chargées." });
@@ -344,58 +391,60 @@ app.post('/api/call-tool', async (req, res) => {
 
   try {
     let resultText = "";
-    switch (name) {
+    switch (targetName) {
       case "get_ccq_articles": {
-        const { start_article, end_article } = args;
-        if (typeof start_article !== 'number') {
+        const start = Number(normalizedArgs.start_article);
+        if (isNaN(start)) {
           res.status(400).json({ error: "start_article doit être un nombre." });
           return;
         }
-        const articles = getArticles(start_article, end_article);
+        const end = normalizedArgs.end_article ? Number(normalizedArgs.end_article) : undefined;
+        const articles = getArticles(start, end);
         resultText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         break;
       }
       case "search_ccq_keywords": {
-        const { keyword } = args;
-        if (typeof keyword !== 'string' || !keyword) {
+        const kw = normalizedArgs.keyword;
+        if (typeof kw !== 'string' || !kw) {
           res.status(400).json({ error: "keyword doit être une chaîne." });
           return;
         }
-        const articles = searchArticlesByKeyword(keyword);
+        const articles = searchArticlesByKeyword(kw);
         resultText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         break;
       }
       case "get_cpc_articles": {
-        const { start_article, end_article } = args;
-        if (typeof start_article !== 'number') {
+        const start = Number(normalizedArgs.start_article);
+        if (isNaN(start)) {
           res.status(400).json({ error: "start_article doit être un nombre." });
           return;
         }
-        const articles = getCpcArticles(start_article, end_article);
+        const end = normalizedArgs.end_article ? Number(normalizedArgs.end_article) : undefined;
+        const articles = getCpcArticles(start, end);
         resultText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         break;
       }
       case "search_cpc_keywords": {
-        const { keyword } = args;
-        if (typeof keyword !== 'string' || !keyword) {
+        const kw = normalizedArgs.keyword;
+        if (typeof kw !== 'string' || !kw) {
           res.status(400).json({ error: "keyword doit être une chaîne." });
           return;
         }
-        const articles = searchCpcArticlesByKeyword(keyword);
+        const articles = searchCpcArticlesByKeyword(kw);
         resultText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         break;
       }
       case "search_quebec_regulations": {
-        const { keyword } = args;
-        if (typeof keyword !== 'string' || !keyword) {
+        const kw = normalizedArgs.keyword;
+        if (typeof kw !== 'string' || !kw) {
           res.status(400).json({ error: "keyword doit être une chaîne." });
           return;
         }
-        resultText = await searchQuebecRegulations(keyword);
+        resultText = await searchQuebecRegulations(kw);
         break;
       }
       case "get_quebec_regulation": {
-        const { url } = args;
+        const url = normalizedArgs.url;
         if (typeof url !== 'string' || !url) {
           res.status(400).json({ error: "url doit être une chaîne." });
           return;
@@ -404,7 +453,7 @@ app.post('/api/call-tool', async (req, res) => {
         break;
       }
       case "get_quebec_legal_info": {
-        const { type } = args;
+        const type = normalizedArgs.type;
         if (typeof type !== 'string' || !type) {
           res.status(400).json({ error: "type doit être une chaîne." });
           return;
@@ -413,12 +462,12 @@ app.post('/api/call-tool', async (req, res) => {
         break;
       }
       case "search_quebec_jurisprudence": {
-        const { query } = args;
-        if (typeof query !== 'string' || !query) {
+        const q = normalizedArgs.query;
+        if (typeof q !== 'string' || !q) {
           res.status(400).json({ error: "query doit être une chaîne." });
           return;
         }
-        resultText = await searchQuebecJurisprudence(query);
+        resultText = await searchQuebecJurisprudence(q);
         break;
       }
       default:
@@ -467,4 +516,3 @@ Promise.all([loadCcqDb(), loadCpcDb()]).then(async () => {
   console.error('❌ Erreur lors du chargement des bases de données:', err);
   process.exit(1);
 });
-
