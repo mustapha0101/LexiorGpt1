@@ -64,9 +64,12 @@ LR=${TRAIN_LR:-2e-4}
 echo -e "\n${YELLOW}Recherche de checkpoints existants sur Hugging Face...${NC}"
 python3 -c "
 import os
+import json
+import shutil
 from huggingface_hub import HfApi, snapshot_download
 repo_id = os.environ.get('HF_REPO_ID')
 token = os.environ.get('HF_TOKEN')
+current_model = os.environ.get('MODEL_NAME', 'unsloth/Qwen2.5-32B-Instruct-bnb-4bit')
 if repo_id and token:
     try:
         api = HfApi(token=token)
@@ -79,6 +82,28 @@ if repo_id and token:
             print('Checkpoints trouvés sur Hugging Face :', list(checkpoints))
             os.makedirs('outputs/checkpoints', exist_ok=True)
             for cp in checkpoints:
+                config_path = f'{cp}/adapter_config.json'
+                try:
+                    snapshot_download(
+                        repo_id=repo_id,
+                        allow_patterns=config_path,
+                        local_dir='outputs/checkpoints',
+                        token=token
+                    )
+                    local_config = os.path.join('outputs/checkpoints', config_path)
+                    with open(local_config, 'r') as f:
+                        config_data = json.load(f)
+                    base_model_in_cp = config_data.get('base_model_name_or_path', '')
+                    def get_model_id(name):
+                        return name.split('/')[-1].replace('-bnb-4bit', '').replace('-Instruct', '').lower()
+                    if get_model_id(base_model_in_cp) != get_model_id(current_model):
+                        print(f'Ignoré {cp} : Incompatibilité du modèle de base ({base_model_in_cp} vs {current_model})')
+                        shutil.rmtree(os.path.join('outputs/checkpoints', cp), ignore_errors=True)
+                        continue
+                except Exception as ex:
+                    print(f'Erreur de vérification de config pour {cp} : {ex}')
+                    continue
+
                 print(f'Téléchargement de {cp}...')
                 snapshot_download(
                     repo_id=repo_id,
@@ -86,7 +111,7 @@ if repo_id and token:
                     local_dir='outputs/checkpoints',
                     token=token
                 )
-            print('Téléchargement des checkpoints terminé !')
+            print('Téléchargement des checkpoints validés terminé !')
         else:
             print('Aucun checkpoint trouvé sur le Hub.')
     except Exception as e:
@@ -96,8 +121,6 @@ if repo_id and token:
 python3 train_hf.py \
     --model_name "$MODEL_BASE" \
     --train_file "$DATASET_PATH" \
-
-
     --epochs "$EPOCHS" \
     --batch_size "$BATCH_SIZE" \
     --grad_accum "$GRAD_ACCUM" \
