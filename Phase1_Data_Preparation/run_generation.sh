@@ -100,9 +100,12 @@ python3 identity/generate_sherlock_data.py
 echo -e "\n${YELLOW}[2f-3/3] Génération du jeu Graphe & Ontologies (Insights)...${NC}"
 python3 identity/generate_graph_data.py
 
+echo -e "\n${YELLOW}[2f-4/3] Génération du jeu Droit Civil Quotidien (Bon Sens)...${NC}"
+python3 identity/generate_commonsense_data.py
+
 # Concaténer les fichiers de génération
-echo -e "\n${YELLOW}[2g/3] Fusion des datasets (A2AJ + CCQ + Identité SFT + Outils + Citations CCQ + Sherlock + Graphes)...${NC}"
-cat data/processed/generated_a2aj_cot.jsonl data/processed/generated_ccq_cot.jsonl data/processed/generated_identity_cot.jsonl data/processed/generated_tool_calling_cot.jsonl data/processed/ccq_citations_sft.jsonl data/processed/generated_sherlock_cot.jsonl data/processed/generated_graph_cot.jsonl > data/processed/combined_raw_cot.jsonl
+echo -e "\n${YELLOW}[2g/3] Fusion des datasets (A2AJ + CCQ + Identité SFT + Outils + Citations CCQ + Sherlock + Graphes + Bon Sens)...${NC}"
+cat data/processed/generated_a2aj_cot.jsonl data/processed/generated_ccq_cot.jsonl data/processed/generated_identity_cot.jsonl data/processed/generated_tool_calling_cot.jsonl data/processed/ccq_citations_sft.jsonl data/processed/generated_sherlock_cot.jsonl data/processed/generated_graph_cot.jsonl data/processed/generated_commonsense_cot.jsonl > data/processed/combined_raw_cot.jsonl
 
 # 3. Exécution du formatage de chat
 echo -e "\n${YELLOW}[3/3] Application du template conversationnel sur le corpus combiné...${NC}"
