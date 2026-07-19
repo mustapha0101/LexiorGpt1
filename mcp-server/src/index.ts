@@ -8,7 +8,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { loadCcqDb, loadCpcDb, getArticles, searchArticlesByKeyword, getCpcArticles, searchCpcArticlesByKeyword } from './db';
-import { searchQuebecRegulations, searchQuebecJurisprudence, scrapeQuebecLegalInfo } from './scraper';
+import { searchQuebecRegulations, searchQuebecJurisprudence, scrapeQuebecLegalInfo, searchCanadianLegalDocuments } from './scraper';
 
 dotenv.config();
 
@@ -37,6 +37,108 @@ const mcpServer = new Server({
 mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
+      {
+        name: "ccq_search",
+        description: "Récupère le texte officiel d'un ou plusieurs articles du Code civil du Québec (CCQ).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            start_article: {
+              type: "number",
+              description: "Le numéro de l'article de départ (ex: 1371)"
+            },
+            end_article: {
+              type: "number",
+              description: "Le numéro de l'article de fin (optionnel)."
+            }
+          },
+          required: ["start_article"]
+        }
+      },
+      {
+        name: "ccq_keyword_search",
+        description: "Recherche par mots-clés dans les articles du Code civil du Québec (CCQ).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            keyword: {
+              type: "string",
+              description: "Le mot-clé à rechercher"
+            }
+          },
+          required: ["keyword"]
+        }
+      },
+      {
+        name: "cpc_search",
+        description: "Récupère le texte officiel d'un ou plusieurs articles du Code de procédure civile du Québec (CPC).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            start_article: {
+              type: "number",
+              description: "Le numéro de l'article de départ"
+            },
+            end_article: {
+              type: "number",
+              description: "Le numéro de l'article de fin (optionnel)"
+            }
+          },
+          required: ["start_article"]
+        }
+      },
+      {
+        name: "cpc_keyword_search",
+        description: "Recherche par mots-clés dans les articles du Code de procédure civile du Québec (CPC).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            keyword: {
+              type: "string",
+              description: "Le mot-clé à rechercher"
+            }
+          },
+          required: ["keyword"]
+        }
+      },
+      {
+        name: "a2aj_search_legal_documents",
+        description: "Recherche de la jurisprudence et des lois fédérales ou provinciales canadiennes sur CanLII.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "La question de droit ou les mots-clés"
+            },
+            doc_type: {
+              type: "string",
+              enum: ["laws", "decisions", "all"],
+              description: "Type de documents (lois, décisions, tout)"
+            },
+            search_language: {
+              type: "string",
+              enum: ["fr", "en"],
+              description: "Langue de recherche"
+            }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "a2aj_fetch_document",
+        description: "Récupère le contenu complet d'une loi ou d'un jugement CanLII à partir de son URL ou de sa citation.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description: "L'URL complète du document ou la citation CanLII"
+            }
+          },
+          required: ["url"]
+        }
+      },
       {
         name: "get_ccq_articles",
         description: "Récupère le texte officiel d'un ou plusieurs articles du Code civil du Québec (CCQ).",
@@ -253,6 +355,15 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 function translateToolCall(name: string, args: any) {
+  const standardNames = [
+    "ccq_search", "ccq_keyword_search", 
+    "cpc_search", "cpc_keyword_search", 
+    "a2aj_search_legal_documents", "a2aj_fetch_document"
+  ];
+  if (standardNames.includes(name)) {
+    return { name, arguments: args };
+  }
+
   let targetName = name;
   const normalizedArgs = { ...args };
   
@@ -263,18 +374,18 @@ function translateToolCall(name: string, args: any) {
   if (isLegalSearch && articleMatch) {
     // Si c'est une recherche légale ciblant un numéro d'article, on va directement chercher l'article correspondant
     const isCpc = citation.toUpperCase().includes("CPC");
-    targetName = isCpc ? "get_cpc_articles" : "get_ccq_articles";
+    targetName = isCpc ? "cpc_search" : "ccq_search";
     normalizedArgs.start_article = Number(articleMatch[0]);
   } else if (name === "legal_search" || name === "doc_similarity_search" || name === "a2aj_search_legal_documents" || name === "search_quebec_jurisprudence") {
-    targetName = "search_quebec_jurisprudence";
+    targetName = "a2aj_search_legal_documents";
   } else if (name === "legal_keyword_search" || name === "ccq_keyword_search" || name === "search_ccq_keywords") {
-    targetName = "search_ccq_keywords";
+    targetName = "ccq_keyword_search";
   } else if (name === "ccq_search" || name === "get_ccq_articles") {
-    targetName = "get_ccq_articles";
+    targetName = "ccq_search";
   } else if (name === "cpc_keyword_search" || name === "search_cpc_keywords") {
-    targetName = "search_cpc_keywords";
+    targetName = "cpc_keyword_search";
   } else if (name === "cpc_search" || name === "get_cpc_articles") {
-    targetName = "get_cpc_articles";
+    targetName = "cpc_search";
   }
 
   // Normalisation des arguments
@@ -312,6 +423,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (targetName) {
+      case "ccq_search":
       case "get_ccq_articles": {
         const start = Number(normalizedArgs.start_article);
         if (isNaN(start)) {
@@ -326,6 +438,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: formattedText }] };
       }
 
+      case "ccq_keyword_search":
       case "search_ccq_keywords": {
         const kw = normalizedArgs.keyword;
         if (typeof kw !== 'string' || !kw) {
@@ -339,6 +452,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: formattedText }] };
       }
 
+      case "cpc_search":
       case "get_cpc_articles": {
         const start = Number(normalizedArgs.start_article);
         if (isNaN(start)) {
@@ -353,6 +467,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: formattedText }] };
       }
 
+      case "cpc_keyword_search":
       case "search_cpc_keywords": {
         const kw = normalizedArgs.keyword;
         if (typeof kw !== 'string' || !kw) {
@@ -390,6 +505,39 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: "Erreur : type doit être une chaîne." }], isError: true };
         }
         const text = await scrapeQuebecLegalInfo(type);
+        return { content: [{ type: "text", text }] };
+      }
+
+      case "a2aj_search_legal_documents": {
+        const q = normalizedArgs.query;
+        if (typeof q !== 'string' || !q) {
+          return { content: [{ type: "text", text: "Erreur : query doit être une chaîne." }], isError: true };
+        }
+        const docType = normalizedArgs.doc_type;
+        const text = await searchCanadianLegalDocuments(q, docType);
+        return { content: [{ type: "text", text }] };
+      }
+
+      case "a2aj_fetch_document": {
+        const url = normalizedArgs.url;
+        if (typeof url !== 'string' || !url) {
+          return { content: [{ type: "text", text: "Erreur : url doit être une chaîne." }], isError: true };
+        }
+        let targetUrl = url;
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+          console.log(`[Fetch Citation] Resolving citation via Exa: "${url}"`);
+          const citationSearch = await exa.search(url, {
+            includeDomains: ['canlii.org'],
+            numResults: 1
+          });
+          if (citationSearch.results && citationSearch.results.length > 0) {
+            targetUrl = citationSearch.results[0].url;
+            console.log(`[Fetch Citation] Citation resolved to URL: ${targetUrl}`);
+          } else {
+            return { content: [{ type: "text", text: `Erreur : citation CanLII introuvable : "${url}".` }], isError: true };
+          }
+        }
+        const text = await fetchDocumentContent(targetUrl);
         return { content: [{ type: "text", text }] };
       }
 
@@ -569,6 +717,7 @@ app.post('/api/call-tool', async (req, res) => {
   try {
     let resultText = "";
     switch (targetName) {
+      case "ccq_search":
       case "get_ccq_articles": {
         const start = Number(normalizedArgs.start_article);
         if (isNaN(start)) {
@@ -580,6 +729,7 @@ app.post('/api/call-tool', async (req, res) => {
         resultText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         break;
       }
+      case "ccq_keyword_search":
       case "search_ccq_keywords": {
         const kw = normalizedArgs.keyword;
         if (typeof kw !== 'string' || !kw) {
@@ -590,6 +740,7 @@ app.post('/api/call-tool', async (req, res) => {
         resultText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         break;
       }
+      case "cpc_search":
       case "get_cpc_articles": {
         const start = Number(normalizedArgs.start_article);
         if (isNaN(start)) {
@@ -601,6 +752,7 @@ app.post('/api/call-tool', async (req, res) => {
         resultText = articles.map((a: any) => `Article ${a.numero}\n${a.texte}`).join('\n\n');
         break;
       }
+      case "cpc_keyword_search":
       case "search_cpc_keywords": {
         const kw = normalizedArgs.keyword;
         if (typeof kw !== 'string' || !kw) {
@@ -636,6 +788,40 @@ app.post('/api/call-tool', async (req, res) => {
           return;
         }
         resultText = await scrapeQuebecLegalInfo(type);
+        break;
+      }
+      case "a2aj_search_legal_documents": {
+        const q = normalizedArgs.query;
+        if (typeof q !== 'string' || !q) {
+          res.status(400).json({ error: "query doit être une chaîne." });
+          return;
+        }
+        const docType = normalizedArgs.doc_type;
+        resultText = await searchCanadianLegalDocuments(q, docType);
+        break;
+      }
+      case "a2aj_fetch_document": {
+        const url = normalizedArgs.url;
+        if (typeof url !== 'string' || !url) {
+          res.status(400).json({ error: "url doit être une chaîne." });
+          return;
+        }
+        let targetUrl = url;
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+          console.log(`[Fetch Citation HTTP] Resolving citation via Exa: "${url}"`);
+          const citationSearch = await exa.search(url, {
+            includeDomains: ['canlii.org'],
+            numResults: 1
+          });
+          if (citationSearch.results && citationSearch.results.length > 0) {
+            targetUrl = citationSearch.results[0].url;
+            console.log(`[Fetch Citation HTTP] Citation resolved to URL: ${targetUrl}`);
+          } else {
+            res.status(404).json({ error: `Citation CanLII introuvable : "${url}"` });
+            return;
+          }
+        }
+        resultText = await fetchDocumentContent(targetUrl);
         break;
       }
       case "search_quebec_jurisprudence": {

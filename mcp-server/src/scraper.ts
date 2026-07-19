@@ -198,3 +198,47 @@ export async function scrapeQuebecLegalInfo(type: string): Promise<string> {
     throw new Error(`Impossible de récupérer les informations LégisQuébec pour ${type}. Détails : ${err.message}`);
   }
 }
+
+/**
+ * Searches Canadian case law and statutes using Exa restricted to CanLII (pancanadian).
+ */
+export async function searchCanadianLegalDocuments(
+  query: string,
+  docType?: 'laws' | 'decisions' | 'all' | string,
+  size: number = 8
+): Promise<string> {
+  console.log(`[CanLII Search] Querying Canadian documents for: "${query}" (type: ${docType || 'all'})`);
+
+  const includeDomains = ['canlii.org'];
+  
+  // Refine domains depending on docType if needed
+  // e.g. /fr/doc/ for legislation, /fr/csc/ for Supreme Court decisions, etc.
+  // Standard canlii.org domain covers all.
+  
+  const result = await exa.search(query, {
+    includeDomains,
+    contents: {
+      summary: true
+    },
+    numResults: size
+  });
+
+  if (!result.results || result.results.length === 0) {
+    return `Aucun document juridique trouvé sur CanLII pour la recherche "${query}".`;
+  }
+
+  const validResults = result.results.filter((res: any) => {
+    const title = (res.title || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return !title.includes('404') && !title.includes('non trouve') && !title.includes('erreur');
+  });
+
+  if (validResults.length === 0) {
+    return `Aucun document CanLII valide trouvé pour "${query}" (résultats en erreur 404).`;
+  }
+
+  return validResults.map((res: any) => `
+### [${res.title || 'Document CanLII'}](${res.url})
+**Résumé :** ${res.summary || 'Aucun résumé disponible.'}
+  `).join('\n\n');
+}
+
