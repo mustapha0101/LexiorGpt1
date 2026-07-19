@@ -119,7 +119,7 @@ def main():
             gpu_type_id=args.gpu_type,
             gpu_count=1,
             volume_in_gb=volume_size,
-            container_disk_in_gb=40,
+            container_disk_in_gb=100,
             ports="8888/http,22/tcp",
             env=env_vars,
             docker_args=container_command
