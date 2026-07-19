@@ -58,12 +58,18 @@ def parse_args():
         help="Clé API Weights & Biases."
     )
     parser.add_argument(
+        "--model_name",
+        type=str,
+        default="unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+        help="Nom du modèle de base à fine-tuner."
+    )
+    parser.add_argument(
         "--only_merge",
         action="store_true",
         help="Déployer uniquement pour exécuter le script de fusion et d'upload."
     )
     return parser.parse_args()
-
+ 
 def main():
     args = parse_args()
     
@@ -84,7 +90,8 @@ def main():
         "WANDB_PROJECT": "huggingface",
         "WANDB_ENTITY": "lexiorgpt-intelliwork",
         "TRACKING_REPORT_TO": "wandb" if args.wandb_key else "none",
-        "TRACKING_RUN_NAME": "qwen25-canadian-cot"
+        "TRACKING_RUN_NAME": "qwen25-canadian-cot",
+        "MODEL_NAME": args.model_name
     }
 
     # Ajustement des configurations selon le mode (entraînement ou fusion simple)
