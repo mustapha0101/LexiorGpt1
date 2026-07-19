@@ -64,6 +64,12 @@ def parse_args():
         help="Nom du modèle de base à fine-tuner."
     )
     parser.add_argument(
+        "--branch",
+        type=str,
+        default="refactoring",
+        help="Branche Git à cloner sur RunPod."
+    )
+    parser.add_argument(
         "--only_merge",
         action="store_true",
         help="Déployer uniquement pour exécuter le script de fusion et d'upload."
@@ -93,14 +99,14 @@ def main():
         "TRACKING_RUN_NAME": "qwen25-canadian-cot",
         "MODEL_NAME": args.model_name
     }
-
+ 
     # Ajustement des configurations selon le mode (entraînement ou fusion simple)
     if args.only_merge:
-        container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && pip uninstall -y torchvision torchaudio && pip install --no-cache-dir huggingface_hub transformers peft accelerate bitsandbytes sentencepiece protobuf && python3 merge_and_upload.py; sleep infinity'"
+        container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone -b {args.branch} {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && pip uninstall -y torchvision torchaudio && pip install --no-cache-dir huggingface_hub transformers peft accelerate bitsandbytes sentencepiece protobuf && python3 merge_and_upload.py; sleep infinity'"
         volume_size = 300
         pod_name = "lexior-phase2-merge"
     else:
-        container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh; sleep infinity'"
+        container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone -b {args.branch} {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase2_FineTuning && chmod +x run_training.sh && ./run_training.sh; sleep infinity'"
         volume_size = 300
         pod_name = "lexior-phase2-finetuning"
     
