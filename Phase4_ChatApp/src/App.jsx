@@ -109,16 +109,16 @@ export default function App() {
   const [isShaking, setIsShaking] = useState(false);
 
   // Connection Config State
-  const [apiUrl, setApiUrl] = useState(import.meta.env.VITE_API_URL || 'https://yicboytd0i8qx8-8000.proxy.runpod.net/v1');
+  const [apiUrl, setApiUrl] = useState(import.meta.env.VITE_API_URL || 'https://nyi0l63untj7zy-8000.proxy.runpod.net/v1');
   const [apiKey, setApiKey] = useState(import.meta.env.VITE_API_KEY || 'none');
-  const [modelId, setModelId] = useState(import.meta.env.VITE_MODEL_ID || 'intelliwork/LexiorGpt1-merged-AWQ');
+  const [modelId, setModelId] = useState(import.meta.env.VITE_MODEL_ID || 'intelliwork/LexiorGpt1-merged');
   const [systemPrompt, setSystemPrompt] = useState(
-    'Tu es un assistant juridique Lexior, spécialisé en droit canadien et québécois. Raisonne en français et anglais. Tu dois obligatoirement baser tes analyses sur la législation et la jurisprudence canadienne/québécoise (ex: Code civil du Québec, CanLII).'
+    "Tu es un assistant juridique Lexior, spécialisé en droit canadien et québécois. Raisonne en français selon le format IRAC. Tu dois obligatoirement baser tes analyses sur la législation et la jurisprudence canadienne/québécoise (ex: Code civil du Québec, CanLII). Lorsque tu as fini de raisonner dans tes balises <thinking>, formate tes citations de bas de page strictement sous la forme [^1]:{\"type\":\"url\",\"url\":\"https://www.canlii.org/...\",\"title\":\"Titre\"}."
   );
   const [useSystemPrompt, setUseSystemPrompt] = useState(true);
   
   // Model Parameters State
-  const [temperature, setTemperature] = useState(0.3);
+  const [temperature, setTemperature] = useState(0.0);
   const [maxTokens, setMaxTokens] = useState(1200);
 
   // Layout Tab State
@@ -295,6 +295,153 @@ export default function App() {
       setInputTokens(Math.round(promptText.length / 3.8));
       setOutputTokens(tokenCount);
       setConnectionStatus('ready');
+
+      // --- AGENTIC MCP REACT LOOP ---
+      const toolCallRegex = /<tool_call>(.*?)<\/tool_call>/s;
+      const match = assistantContent.match(toolCallRegex);
+      
+      if (match) {
+        try {
+          const toolCallData = JSON.parse(match[1].trim());
+          const { name, arguments: toolArgs } = toolCallData;
+          
+          console.log(`[MCP Agent] Détection d'un appel d'outil : ${name}`, toolArgs);
+          
+          // Ajouter un message système dans l'interface pour indiquer l'exécution de l'outil
+          setMessages(prev => [
+            ...prev,
+            { 
+              role: 'system', 
+              content: `⚙️ **Exécution de l'outil MCP** : \`${name}\` avec les arguments \`${JSON.stringify(toolArgs)}\`...` 
+            }
+          ]);
+          
+          // Appel à l'API locale du serveur MCP
+          const mcpResponse = await fetch('http://localhost:3001/api/call-tool', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name, arguments: toolArgs })
+          });
+          
+          if (!mcpResponse.ok) {
+            throw new Error(`Le serveur MCP a retourné une erreur HTTP ${mcpResponse.status}`);
+          }
+          
+          const mcpResult = await mcpResponse.json();
+          const toolOutputText = mcpResult.content[0].text;
+          
+          // Ajouter le résultat de l'outil dans l'historique d'interface
+          setMessages(prev => [
+            ...prev,
+            { 
+              role: 'system', 
+              content: `📥 **Résultat de l'outil reçu** (CCQ/CPC MCP) : \n\`\`\`text\n${toolOutputText.substring(0, 500)}${toolOutputText.length > 500 ? '...' : ''}\n\`\`\`` 
+            }
+          ]);
+          
+          // Lancer le second tour de génération pour finaliser la réponse
+          setConnectionStatus('loading');
+          
+          // Préparer les messages pour le vLLM.
+          const secondTurnMessages = [];
+          if (useSystemPrompt) {
+            secondTurnMessages.push({ role: 'system', content: systemPrompt });
+          }
+          secondTurnMessages.push(...newMessages);
+          secondTurnMessages.push({ role: 'assistant', content: assistantContent });
+          secondTurnMessages.push({ 
+            role: 'user', 
+            content: `<tool_response>\n${toolOutputText}\n</tool_response>` 
+          });
+          
+          // Ajouter le conteneur pour la réponse finale de l'assistant dans l'interface
+          setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+          
+          const secondStartTime = Date.now();
+          let secondFirstTokenTime = 0;
+          let secondTokenCount = 0;
+          let finalAssistantContent = '';
+          
+          const secondResponse = await fetch(`${apiUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model: modelId,
+              messages: secondTurnMessages,
+              temperature: temperature,
+              max_tokens: maxTokens,
+              repetition_penalty: 1.05,
+              stream: true
+            })
+          });
+          
+          if (!secondResponse.ok) {
+            throw new Error("L'API vLLM a échoué au second tour de génération.");
+          }
+          
+          const secondReader = secondResponse.body.getReader();
+          
+          while (true) {
+            const { done, value } = await secondReader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            
+            for (const line of lines) {
+              const cleanedLine = line.trim();
+              if (cleanedLine.startsWith('data: ')) {
+                if (cleanedLine.includes('[DONE]')) break;
+                try {
+                  const data = JSON.parse(cleanedLine.slice(6));
+                  const textChunk = data.choices[0]?.delta?.content || '';
+                  
+                  if (textChunk) {
+                    if (secondTokenCount === 0) {
+                      secondFirstTokenTime = Date.now();
+                      setLatency(secondFirstTokenTime - secondStartTime);
+                    }
+                    secondTokenCount += 1;
+                    finalAssistantContent += textChunk;
+                    
+                    setMessages(prev => {
+                      const updated = [...prev];
+                      updated[updated.length - 1] = { role: 'assistant', content: finalAssistantContent };
+                      return updated;
+                    });
+                    
+                    const elapsedSec = (Date.now() - secondFirstTokenTime) / 1000;
+                    if (elapsedSec > 0.1) {
+                      const speed = Math.round(secondTokenCount / elapsedSec);
+                      setTokensPerSec(speed);
+                    }
+                  }
+                } catch (e) {
+                  // Ignore JSON parse errors
+                }
+              }
+            }
+          }
+          
+          setOutputTokens(secondTokenCount);
+          setConnectionStatus('ready');
+          
+        } catch (mcpErr) {
+          console.error("[MCP Loop Error] :", mcpErr);
+          setMessages(prev => [
+            ...prev,
+            { 
+              role: 'assistant', 
+              content: `❌ **Erreur d'agent MCP** : Échec lors de l'exécution de la boucle ReAct ou de l'appel d'outil. Détails : ${mcpErr.message}` 
+            }
+          ]);
+        }
+      }
 
     } catch (err) {
       console.error(err);

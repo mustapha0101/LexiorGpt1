@@ -1,0 +1,7 @@
+Lecture de la base de données CCQ...
+Indexation des articles...
+✅ Extraction terminée : 3471 articles indexés.
+🚀 Serveur MCP CCQ démarré sur le port 3001
+🌐 URL de connexion MCP (SSE) : http://localhost:3001/sse
+✅ Base de données CCQ chargée avec succès.
+🔗 Nouvelle connexion SSE entrante.
