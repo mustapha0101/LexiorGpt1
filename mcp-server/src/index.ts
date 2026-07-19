@@ -166,8 +166,8 @@ function translateToolCall(name: string, args: any) {
   let targetName = name;
   const normalizedArgs = { ...args };
   
-  if (name === "legal_text_lookup") {
-    const citation = args?.citation || "";
+  if (name === "legal_text_lookup" || name === "search_cite" || name === "get_article" || name === "cite_search") {
+    const citation = args?.citation || args?.query || args?.keyword || "";
     const isCpc = citation.toUpperCase().includes("CPC");
     targetName = isCpc ? "get_cpc_articles" : "get_ccq_articles";
     const articleMatch = citation.match(/\d+/);
