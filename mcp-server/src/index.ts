@@ -157,6 +157,96 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["query"]
         }
+      },
+      {
+        name: "search_educaloi",
+        description: "Recherche des articles de vulgarisation juridique sur Éducaloi (droit québécois). Retourne des résumés clairs et des URLs.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Le sujet de recherche (ex: 'reprise de logement par le propriétaire')"
+            },
+            language: {
+              type: "string",
+              enum: ["fr", "en"],
+              default: "fr",
+              description: "Langue de recherche (fr ou en)"
+            }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "get_educaloi_article",
+        description: "Récupère le texte complet d'un article spécifique d'Éducaloi à partir de son URL.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description: "L'URL de l'article Éducaloi"
+            }
+          },
+          required: ["url"]
+        }
+      },
+      {
+        name: "search_cai",
+        description: "Recherche dans les directives de conformité, guides sur la Loi 25 (protection des renseignements personnels) et décisions de la Commission d'accès à l'information (CAI) du Québec.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Le sujet (ex: 'nomination responsable protection renseignements personnels Loi 25')"
+            }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "get_cai_document",
+        description: "Récupère le contenu complet d'un guide, d'une décision ou d'un document de la CAI du Québec.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description: "L'URL du document CAI"
+            }
+          },
+          required: ["url"]
+        }
+      },
+      {
+        name: "search_barreau_deontology",
+        description: "Recherche dans les règles déontologiques, le Code de déontologie des avocats et les directives de rigueur professionnelle du Barreau du Québec.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Le concept déontologique (ex: 'secret professionnel conflit interets')"
+            }
+          },
+          required: ["query"]
+        }
+      },
+      {
+        name: "get_barreau_document",
+        description: "Récupère le texte complet d'un guide de pratique, directive ou document de déontologie du Barreau du Québec.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: {
+              type: "string",
+              description: "L'URL du document du Barreau"
+            }
+          },
+          required: ["url"]
+        }
       }
     ]
   };
@@ -166,7 +256,7 @@ function translateToolCall(name: string, args: any) {
   let targetName = name;
   const normalizedArgs = { ...args };
   
-  const isLegalSearch = (name === "legal_search" || name === "legal_text_lookup" || name === "search_cite" || name === "get_article" || name === "cite_search" || name === "search_cai");
+  const isLegalSearch = (name === "legal_search" || name === "legal_text_lookup" || name === "search_cite" || name === "get_article" || name === "cite_search");
   const citation = args?.citation || args?.query || args?.keyword || "";
   const articleMatch = citation.match(/\d+/);
 
@@ -312,6 +402,45 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text }] };
       }
 
+      case "search_educaloi": {
+        const q = normalizedArgs.query;
+        if (typeof q !== 'string' || !q) {
+          return { content: [{ type: "text", text: "Erreur : query doit être une chaîne." }], isError: true };
+        }
+        const domain = normalizedArgs.language === 'en' ? 'educaloi.qc.ca/en' : 'educaloi.qc.ca';
+        const text = await searchDomain(q, domain);
+        return { content: [{ type: "text", text }] };
+      }
+
+      case "get_educaloi_article":
+      case "get_cai_document":
+      case "get_barreau_document": {
+        const url = normalizedArgs.url;
+        if (typeof url !== 'string' || !url) {
+          return { content: [{ type: "text", text: "Erreur : url doit être une chaîne." }], isError: true };
+        }
+        const text = await fetchDocumentContent(url);
+        return { content: [{ type: "text", text }] };
+      }
+
+      case "search_cai": {
+        const q = normalizedArgs.query;
+        if (typeof q !== 'string' || !q) {
+          return { content: [{ type: "text", text: "Erreur : query doit être une chaîne." }], isError: true };
+        }
+        const text = await searchDomain(q, 'cai.gouv.qc.ca');
+        return { content: [{ type: "text", text }] };
+      }
+
+      case "search_barreau_deontology": {
+        const q = normalizedArgs.query;
+        if (typeof q !== 'string' || !q) {
+          return { content: [{ type: "text", text: "Erreur : query doit être une chaîne." }], isError: true };
+        }
+        const text = await searchDomain(q, 'barreau.qc.ca');
+        return { content: [{ type: "text", text }] };
+      }
+
       default:
         throw new Error(`Outil non trouvé: ${name}`);
     }
@@ -323,6 +452,53 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 });
+
+/**
+ * Helper de recherche sémantique avec Exa filtrée par domaine
+ */
+async function searchDomain(query: string, domain: string): Promise<string> {
+  console.log(`[Exa Search] Query: "${query}" sur ${domain}`);
+  try {
+    const result = await exa.search(query, {
+      includeDomains: [domain],
+      contents: {
+        summary: true,
+      },
+      numResults: 8,
+    });
+
+    if (!result.results || result.results.length === 0) {
+      return `Aucun résultat trouvé pour la recherche "${query}" sur le domaine ${domain}.`;
+    }
+
+    const validResults = result.results.filter((res: any) => {
+      const title = (res.title || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      return (
+        !title.includes('404') &&
+        !title.includes('non trouve') &&
+        !title.includes('introuvable') &&
+        !title.includes('not found') &&
+        !title.includes('erreur')
+      );
+    });
+
+    if (validResults.length === 0) {
+      return `Aucun résultat valide trouvé pour la recherche "${query}" sur le domaine ${domain}.`;
+    }
+
+    return validResults
+      .map(
+        (res: any) => `### [${res.title || 'Sans titre'}](${res.url})\n**Résumé :** ${res.summary || 'Aucun résumé disponible.'}\n`
+      )
+      .join('\n');
+  } catch (err: any) {
+    console.error(`[Exa Search] Erreur sur ${domain}:`, err);
+    return `Erreur lors de la recherche sur le domaine ${domain}: ${err.message}`;
+  }
+}
 
 /**
  * Clean fetch utility for regulation HTML pages using Exa Crawl / Axios fallback
@@ -469,6 +645,45 @@ app.post('/api/call-tool', async (req, res) => {
           return;
         }
         resultText = await searchQuebecJurisprudence(q);
+        break;
+      }
+      case "search_educaloi": {
+        const q = normalizedArgs.query;
+        if (typeof q !== 'string' || !q) {
+          res.status(400).json({ error: "query doit être une chaîne." });
+          return;
+        }
+        const domain = normalizedArgs.language === 'en' ? 'educaloi.qc.ca/en' : 'educaloi.qc.ca';
+        resultText = await searchDomain(q, domain);
+        break;
+      }
+      case "get_educaloi_article":
+      case "get_cai_document":
+      case "get_barreau_document": {
+        const url = normalizedArgs.url;
+        if (typeof url !== 'string' || !url) {
+          res.status(400).json({ error: "url doit être une chaîne." });
+          return;
+        }
+        resultText = await fetchDocumentContent(url);
+        break;
+      }
+      case "search_cai": {
+        const q = normalizedArgs.query;
+        if (typeof q !== 'string' || !q) {
+          res.status(400).json({ error: "query doit être une chaîne." });
+          return;
+        }
+        resultText = await searchDomain(q, 'cai.gouv.qc.ca');
+        break;
+      }
+      case "search_barreau_deontology": {
+        const q = normalizedArgs.query;
+        if (typeof q !== 'string' || !q) {
+          res.status(400).json({ error: "query doit être une chaîne." });
+          return;
+        }
+        resultText = await searchDomain(q, 'barreau.qc.ca');
         break;
       }
       default:
