@@ -77,7 +77,7 @@ def clean_and_align_dataset():
                         {
                             "role": "assistant",
                             "content": f"<tool_call>{json.dumps({'name': 'a2aj_search_legal_documents', 'arguments': {'query': clean_query}}, ensure_ascii=False)}</tool_call>",
-                            "thinking": f"L'utilisateur pose une question de droit canadien/fédéral sur '{clean_query}'. Pour éviter d'halluciner, je dois faire une recherche de documents juridiques sur CanLII."
+                            "thinking": f"L'utilisateur pose une question sur le droit canadien/fédéral. Je dois faire une recherche de jurisprudence et de législation avec l'outil a2aj_search_legal_documents."
                         },
                         {
                             "role": "tool",
@@ -87,7 +87,7 @@ def clean_and_align_dataset():
                         {
                             "role": "assistant",
                             "content": assistant_content,
-                            "thinking": "J'ai récupéré le texte et les règles applicables depuis CanLII. Je formule maintenant la synthèse finale sous forme de raisonnement IRAC propre."
+                            "thinking": "J'ai récupéré les sources officielles et la jurisprudence à l'aide de l'outil a2aj_search_legal_documents. Je rédige maintenant l'analyse IRAC correspondante."
                         }
                     ]
                     
