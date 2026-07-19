@@ -12,13 +12,11 @@ echo -e "${GREEN}===============================================================
 echo -e "${GREEN}    Phase 2 : Fine-Tuning QLoRA avec Unsloth (RunPod)                 ${NC}"
 echo -e "${GREEN}======================================================================${NC}"
 
-# Configurer le répertoire de cache Hugging Face sur le volume workspace
-VOLUME_PATH="/workspace"
-if [ -d "/runpod-volume" ]; then
-    VOLUME_PATH="/runpod-volume"
-fi
-mkdir -p "$VOLUME_PATH/hf_cache"
-export HF_HOME="$VOLUME_PATH/hf_cache"
+# Configurer le répertoire de cache Hugging Face sur le disque conteneur local (/workspace)
+# pour éviter les erreurs d'I/O et de verrous réseau (Errno 5) sur le volume partagé
+mkdir -p "/workspace/hf_cache"
+export HF_HOME="/workspace/hf_cache"
+
 
 
 # 1. Installation des dépendances standard de Hugging Face
