@@ -178,7 +178,8 @@ def main():
             output_dir=args.output_dir,
             report_to=args.report_to,
             run_name=args.run_name if args.report_to != "none" else None,
-            logging_dir="outputs/logs"
+            logging_dir="outputs/logs",
+            gradient_checkpointing=True
         ),
     )
     
