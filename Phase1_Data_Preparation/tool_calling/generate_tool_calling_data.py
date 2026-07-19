@@ -161,6 +161,18 @@ TOOLS_DEFINITION = [
             },
             "required": ["query"]
         }
+    },
+    {
+        "name": "studio_actions",
+        "description": "Permet de lancer des analyses approfondies en arrière-plan via le module Studio (actions standards: 'flow_chart' / 'flowchart' / 'logigramme' pour générer un logigramme ou flowchart, 'mindmap' pour une carte mentale, 'legal_timeline' pour une chronologie, 'presentation' pour une présentation, 'validate_contract', 'analyze_risks', 'global_synthesis', 'contradiction_detector', 'import_and_classify'). L'action sera traitée de manière asynchrone.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "actionType": {"type": "string", "description": "L'identifiant de l'action à lancer. Exemples standard : 'flow_chart', 'mindmap', 'legal_timeline', 'presentation', 'global_synthesis', 'validate_contract', 'contradiction_detector', 'lexior_skill:calc_delais_cpc'."},
+                "scope": {"type": "string", "enum": ["document", "workspace"], "default": "workspace", "description": "L'étendue de l'analyse : 'document' pour le document actuel, 'workspace' pour l'ensemble du dossier."}
+            },
+            "required": ["actionType"]
+        }
     }
 ]
 
@@ -305,6 +317,46 @@ TOOL_CALLING_SAMPLES = [
         "tool_output": "Conclusions du rapport d'expertise technique : Les fissures sur la façade ouest sont dues à un affaissement des fondations suite à une infiltration d'eau souterraine causée par un drain français obstrué.",
         "thinking_2": "L'outil d'analyse a extrait les conclusions du rapport d'expertise. Je vais en faire la synthèse claire pour l'utilisateur.",
         "final_assistant_response": "D'après l'analyse de la pièce jointe *att-rapport-expertise*, l'expert conclut que les fissures de la façade ouest résultent d'un affaissement des fondations provoqué par une infiltration d'eau due à l'obstruction du drain français."
+    },
+    # 15. studio_actions (Deadline calculator)
+    {
+        "user_query": "Lance le calculateur de délais CPC pour ce dossier.",
+        "thinking_1": "L'utilisateur me demande de lancer le calculateur de délais de procédure civile (CPC) pour ce dossier. C'est une compétence du Lexior Store / Playbook. Je dois appeler l'outil studio_actions avec actionType='lexior_skill:calc_delais_cpc'.",
+        "tool_name": "studio_actions",
+        "tool_args": {"actionType": "lexior_skill:calc_delais_cpc", "scope": "workspace"},
+        "tool_output": "{\"success\":true,\"message\":\"Calculateur de délais CPC lancé en tâche de fond pour l'espace de travail.\"}",
+        "thinking_2": "L'action studio a été lancée avec succès en tâche de fond. Je réponds à l'utilisateur.",
+        "final_assistant_response": "J'ai lancé le **Calculateur de Délais CPC** pour votre espace de travail. L'analyse des délais de procédure civile se poursuit en tâche de fond."
+    },
+    # 16. studio_actions (Contradiction detector)
+    {
+        "user_query": "Peux-tu lancer l'analyse de contradictions sur le document actuel ?",
+        "thinking_1": "L'utilisateur demande de lancer l'analyse de contradictions sur le document actuel. C'est une action standard du Studio. Je dois appeler l'outil studio_actions avec actionType='contradiction_detector' et scope='document'.",
+        "tool_name": "studio_actions",
+        "tool_args": {"actionType": "contradiction_detector", "scope": "document"},
+        "tool_output": "{\"success\":true,\"message\":\"Analyse de contradictions lancée pour le document actuel.\"}",
+        "thinking_2": "L'action standard de détection de contradictions a été lancée avec succès pour le document. J'en informe l'utilisateur.",
+        "final_assistant_response": "L'analyse de détection des contradictions a été lancée pour le document actuel. Les résultats s'afficheront directement dans le Studio sous peu."
+    },
+    # 17. workspace_insights_query (Knowledge Graph)
+    {
+        "user_query": "Montre-moi les connexions et relations dans mon graphe pour Hydro-Québec.",
+        "thinking_1": "L'utilisateur demande les relations ou connexions du graphe de connaissances relatives à 'Hydro-Québec'. Je dois interroger le graphe via l'outil workspace_insights_query.",
+        "tool_name": "workspace_insights_query",
+        "tool_args": {"query": "Hydro-Québec"},
+        "tool_output": "{\"nodes\": [{\"id\": \"node1\", \"label\": \"Hydro-Québec\"}], \"relationships\": [{\"source\": \"node1\", \"target\": \"node2\", \"type\": \"PARTNER\"}]}",
+        "thinking_2": "J'ai obtenu les relations du graphe. Je vais les résumer clairement.",
+        "final_assistant_response": "Voici les connexions trouvées dans le graphe pour **Hydro-Québec** : elle possède une relation de partenariat (PARTNER) avec l'entité liée."
+    },
+    # 18. workspace_read_all (Global synthesis)
+    {
+        "user_query": "Fais-moi un bilan global de mes dossiers et de tous les documents.",
+        "thinking_1": "L'utilisateur demande une synthèse globale ou de faire le point sur tous les documents. Je dois lire l'intégralité du workspace en appelant workspace_read_all.",
+        "tool_name": "workspace_read_all",
+        "tool_args": {},
+        "tool_output": "[Doc 1: Contrat de bail] Bail signé le 1er mai...\n[Doc 2: Mise en demeure] Envoyée le 10 juin...",
+        "thinking_2": "J'ai lu tous les documents du workspace. Je fais le bilan global.",
+        "final_assistant_response": "Voici le bilan global de vos documents : vous avez un contrat de bail signé le 1er mai et une mise en demeure envoyée le 10 juin."
     }
 ]
 
