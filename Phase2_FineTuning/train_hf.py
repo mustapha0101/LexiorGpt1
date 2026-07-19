@@ -160,6 +160,8 @@ def main():
         args=TrainingArguments(
             per_device_train_batch_size=args.batch_size,
             gradient_accumulation_steps=args.grad_accum,
+            per_device_eval_batch_size=1,
+            eval_accumulation_steps=4,
             warmup_ratio=0.03,
             num_train_epochs=args.epochs,
             learning_rate=args.lr,
