@@ -166,14 +166,17 @@ function translateToolCall(name: string, args: any) {
   let targetName = name;
   const normalizedArgs = { ...args };
   
-  if (name === "legal_text_lookup" || name === "search_cite" || name === "get_article" || name === "cite_search") {
-    const citation = args?.citation || args?.query || args?.keyword || "";
+  const isLegalSearch = (name === "legal_search" || name === "legal_text_lookup" || name === "search_cite" || name === "get_article" || name === "cite_search" || name === "search_cai");
+  const citation = args?.citation || args?.query || args?.keyword || "";
+  const articleMatch = citation.match(/\d+/);
+
+  if (isLegalSearch && articleMatch) {
+    // Si c'est une recherche légale ciblant un numéro d'article, on va directement chercher l'article correspondant
     const isCpc = citation.toUpperCase().includes("CPC");
     targetName = isCpc ? "get_cpc_articles" : "get_ccq_articles";
-    const articleMatch = citation.match(/\d+/);
-    if (articleMatch) {
-      normalizedArgs.start_article = Number(articleMatch[0]);
-    }
+    normalizedArgs.start_article = Number(articleMatch[0]);
+  } else if (name === "legal_search" || name === "doc_similarity_search" || name === "a2aj_search_legal_documents" || name === "search_quebec_jurisprudence") {
+    targetName = "search_quebec_jurisprudence";
   } else if (name === "legal_keyword_search" || name === "ccq_keyword_search" || name === "search_ccq_keywords") {
     targetName = "search_ccq_keywords";
   } else if (name === "ccq_search" || name === "get_ccq_articles") {
@@ -182,8 +185,6 @@ function translateToolCall(name: string, args: any) {
     targetName = "search_cpc_keywords";
   } else if (name === "cpc_search" || name === "get_cpc_articles") {
     targetName = "get_cpc_articles";
-  } else if (name === "doc_similarity_search" || name === "a2aj_search_legal_documents" || name === "search_quebec_jurisprudence") {
-    targetName = "search_quebec_jurisprudence";
   }
 
   // Normalisation des arguments
