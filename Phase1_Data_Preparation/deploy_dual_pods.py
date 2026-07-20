@@ -1,17 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""
-Script de déploiement automatique de la Phase 1 en mode Dual-Pod sur RunPod.
-Il installe :
-1. Un pod d'inférence rapide exécutant vLLM (sur RTX 4090 ou RTX 3090) avec le modèle Qwen 2.5 32B AWQ.
-2. Un pod coordinateur de génération (sur GPU RTX 3070 / RTX 3060 économique) connecté à l'API vLLM du premier pod.
+"""Mode LEGACY/optionnel dual-pod.
+
+Le Teacher vLLM est déployé et vérifié par HTTP. Le coordinateur GPU n'est
+créé que si `--deploy-coordinator` est fourni; l'architecture recommandée est
+le Teacher seul, avec l'orchestrateur sur une machine locale ou CPU.
 """
 
 import os
 import sys
 import time
 import argparse
+import json
+import urllib.request
 
 try:
     import runpod
@@ -21,7 +23,7 @@ except ImportError:
     sys.exit(1)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Déploiement de la génération dual-pod sur RunPod.")
+    parser = argparse.ArgumentParser(description="LEGACY/optionnel : déploiement dual-pod sur RunPod.")
     parser.add_argument(
         "--api_key",
         type=str,
@@ -70,6 +72,10 @@ def parse_args():
         default="NVIDIA GeForce RTX 3070",
         help="Type de GPU économique pour le coordinateur (ex: 'NVIDIA GeForce RTX 3070', 'NVIDIA GeForce RTX 3060')."
     )
+    parser.add_argument("--server-api-key", default=os.environ.get("VLLM_API_KEY", ""))
+    parser.add_argument("--ready-timeout", type=int, default=900)
+    parser.add_argument("--deploy-coordinator", action="store_true",
+                        help="Créer explicitement le second pod legacy. Sans ce drapeau, seul le Teacher est créé.")
     return parser.parse_args()
 
 def main():
@@ -151,7 +157,7 @@ def main():
                     container_disk_in_gb=20,
                     ports="8000/http,22/tcp",
                     env={"HF_TOKEN": args.hf_token},
-                    docker_args=cmd
+                    docker_args=cmd + ((" --api-key " + args.server_api_key) if args.server_api_key else "")
                 )
                 print(f"Succès ! Serveur alloué sur GPU : {gpu_type}", flush=True)
                 break
@@ -170,7 +176,11 @@ def main():
     # ----------------------------------------------------
     print("\n--- ÉTAPE 2 : ATTENTE DE LA MISE EN LIGNE DU SERVEUR D'INFÉRENCE ---")
     openai_url = f"https://{pod_id_inf}-8000.proxy.runpod.net/v1"
+    ready_deadline = time.monotonic() + args.ready_timeout
     while True:
+        if time.monotonic() >= ready_deadline:
+            print(f"Erreur: /v1/models indisponible après {args.ready_timeout}s.", flush=True)
+            sys.exit(1)
         time.sleep(10)
         try:
             status_data = runpod.get_pod(pod_id_inf)
@@ -181,13 +191,26 @@ def main():
             runtime = status_data.get("runtime")
             print(f"Statut actuel - desiredStatus: {desired_status}, runtime: {bool(runtime)} (attente du démarrage...)", flush=True)
             if desired_status == "RUNNING" and runtime is not None:
-                print("Le serveur vLLM est en ligne et initialisé !", flush=True)
-                break
+                try:
+                    request = urllib.request.Request(openai_url + "/models")
+                    if args.server_api_key:
+                        request.add_header("Authorization", "Bearer " + args.server_api_key)
+                    with urllib.request.urlopen(request, timeout=10) as response:
+                        models = json.loads(response.read().decode("utf-8")).get("data", [])
+                    if models:
+                        print("Le serveur vLLM répond réellement sur /v1/models.", flush=True)
+                        break
+                except Exception as health_error:
+                    print(f"Runtime présent, endpoint HTTP pas prêt: {type(health_error).__name__}", flush=True)
         except Exception as e:
             print(f"Erreur de suivi : {e}", flush=True)
             
-    # Laisser 10 secondes supplémentaires pour s'assurer que le port proxy est mappé au niveau réseau
-    time.sleep(10)
+    if not args.deploy_coordinator:
+        print("Mode recommandé: exécutez l'orchestrateur localement/CPU.")
+        print(f"TEACHER_BASE_URL={openai_url}")
+        print("TEACHER_MODEL=Qwen/Qwen2.5-32B-Instruct-AWQ")
+        print("TEACHER_API_KEY=<VLLM_API_KEY ou valeur factice sans authentification>")
+        return
     
     # ----------------------------------------------------
     # ÉTAPE 3 : DÉPLOIEMENT DU POD GENERATION (CLIENT)
@@ -196,7 +219,10 @@ def main():
     docker_image_gen = "runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04"
     
     env_vars_gen = {
-        "OPENAI_API_KEY": "vllm-key",
+        "TEACHER_API_KEY": args.server_api_key or "not-needed",
+        "TEACHER_BASE_URL": openai_url,
+        "TEACHER_MODEL": "Qwen/Qwen2.5-32B-Instruct-AWQ",
+        "OPENAI_API_KEY": args.server_api_key or "not-needed",
         "OPENAI_BASE_URL": openai_url,
         "GEN_MODEL": "Qwen/Qwen2.5-32B-Instruct-AWQ",
         "HF_TOKEN": args.hf_token,

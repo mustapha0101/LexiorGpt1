@@ -80,9 +80,7 @@ def main():
         "--port", "8000",
         "--host", "0.0.0.0",
         "--dtype", "float16",
-        "--max-model-len", "16384", # Taille maximale du contexte (ajustable)
-        "--enable-auto-tool-choice",
-        "--tool-call-parser", "hermes"
+        "--max-model-len", "16384" # Taille maximale du contexte (ajustable)
     ]
     
     if args.quantization:

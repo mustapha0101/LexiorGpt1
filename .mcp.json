@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "lexior-ccq": {
+      "type": "sse",
+      "url": "https://lexior-ccq-mcp.onrender.com/sse"
+    },
+    "a2aj": {
+      "type": "streamable-http",
+      "url": "https://mcp.a2aj.ca/mcp"
+    }
+  }
+}

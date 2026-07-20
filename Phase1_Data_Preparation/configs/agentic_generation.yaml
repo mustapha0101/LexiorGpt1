@@ -1,0 +1,98 @@
+generation:
+  seed: 3407
+  language: fr
+  target_accepted: 100
+  max_tool_calls: 4
+  max_tool_response_chars: 6000
+  max_doc_fetch_chars: 12000
+  near_duplicate_jaccard: 0.90
+  prompt_version: agentic-1.8-grounded-rag
+
+teacher:
+  base_url: ""
+  model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
+  timeout: 120
+  max_retries: 3
+  concurrency: 4
+  temperature: 0.3
+
+critic:
+  base_url: ""
+  model: ""
+  temperature: 0.0
+
+# Index local des articles CCQ/CPC. Les embeddings sont calculés une fois,
+# puis chaque recherche utilise la question complète et un reranking hybride.
+rag:
+  enabled: true
+  index_dir: data/agentic/rag_index
+  dataset_name: intelliwork/canadian-quebec-law-corpus
+  dataset_split: train
+  embedding_base_url: https://api.openai.com/v1
+  embedding_model: text-embedding-3-small
+  embedding_batch_size: 128
+  embedding_price_per_1m_usd: 0.02
+  top_k: 8
+  candidate_k: 40
+  dense_weight: 0.60
+  llm_rerank_enabled: true
+  llm_rerank_k: 10
+
+critics:
+  legal_min_score: 0.70
+  agentic_min_score: 0.70
+  max_repairs: 1
+
+paths:
+  data_root: data/agentic
+  catalog: ../docs/mcp_tools_catalog.json
+  mcp_config: ../.mcp.json
+
+taxonomy:
+  proportions:
+    article_ccq_precis: 2.0
+    article_cpc_precis: 1.5
+    explication_article: 1.5
+    recherche_theme_ccq: 2.0
+    recherche_theme_cpc: 1.5
+    cas_civil_quebecois: 2.0
+    cas_procedure_quebecoise: 1.0
+    reglement_quebecois_connu: 1.0
+    reglement_quebecois_inconnu: 1.0
+    jurisprudence_quebecoise: 1.0
+    loi_federale: 1.5
+    jurisprudence_federale: 1.0
+    cas_federal_concret: 1.0
+    comparaison_quebec_federal: 0.7
+    juridiction_ambigue: 1.0
+    question_incomplete: 1.0
+    verification_entree_en_vigueur: 0.7
+    couverture_dataset: 0.5
+    question_non_juridique: 0.7
+    panne_mcp: 0.5
+    resultat_vide: 0.5
+    source_trop_longue: 0.5
+    clarification_puis_recherche: 1.0
+
+mix:
+  include_agentic_legal: true
+  include_identity_data: true
+  include_legacy_legal: false
+  agentic_ratio: 0.95
+  identity_ratio: 0.05
+
+split:
+  train: 0.90
+  validation: 0.05
+  test: 0.05
+  group_by:
+    - scenario_family_id
+    - source_id
+    - citations
+    - primary_article
+    - fact_template
+    - question_family
+  separate_agentic_evaluation: true
+
+hf:
+  dataset_repo_id: intelliwork/agentic_cot_data

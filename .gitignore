@@ -22,6 +22,8 @@ data/formatted_dataset.jsonl
 *.csv
 *.parquet
 .cache/
+Phase1_Data_Preparation/data/agentic/rag_index/
+Phase1_Data_Preparation/data/
 
 # Training Outputs & Checkpoints
 outputs/

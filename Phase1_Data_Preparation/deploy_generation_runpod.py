@@ -34,15 +34,15 @@ def parse_args():
         help="URL de votre dépôt Git contenant le pipeline."
     )
     parser.add_argument(
-        "--openai_key",
+        "--teacher_key", "--openai_key",
         type=str,
-        default=os.environ.get("OPENAI_API_KEY", "ollama"),
+        default=os.environ.get("TEACHER_API_KEY", os.environ.get("OPENAI_API_KEY", "ollama")),
         help="Clé API du modèle Teacher."
     )
     parser.add_argument(
-        "--openai_url",
+        "--teacher_url", "--openai_url",
         type=str,
-        default=os.environ.get("OPENAI_BASE_URL", "http://localhost:11434/v1"),
+        default=os.environ.get("TEACHER_BASE_URL", os.environ.get("OPENAI_BASE_URL", "http://localhost:11434/v1")),
         help="URL de base de l'API Teacher (local Ollama par défaut)."
     )
     parser.add_argument(
@@ -75,6 +75,11 @@ def parse_args():
         default=8,
         help="Nombre de threads parallèles d'appels API (8-10 max pour Ollama en local)."
     )
+    parser.add_argument(
+        "--start-generation",
+        action="store_true",
+        help="Lancer explicitement le pipeline legacy. Sans ce drapeau, le pod reste inactif."
+    )
     return parser.parse_args()
 
 def main():
@@ -91,8 +96,11 @@ def main():
     
     # Définition des variables d'environnement pour le conteneur
     env_vars = {
-        "OPENAI_API_KEY": args.openai_key,
-        "OPENAI_BASE_URL": args.openai_url,
+        "TEACHER_API_KEY": args.teacher_key,
+        "TEACHER_BASE_URL": args.teacher_url,
+        "TEACHER_MODEL": args.teacher_model,
+        "OPENAI_API_KEY": args.teacher_key,
+        "OPENAI_BASE_URL": args.teacher_url,
         "GEN_MODEL": args.teacher_model,
         "HF_TOKEN": args.hf_token,
         "HF_DATASET_REPO_ID": args.hf_dataset_repo,
@@ -101,15 +109,13 @@ def main():
         "USE_LOCAL_OLLAMA": "true"
     }
     
-    # Commande de démarrage (installe git/curl, nettoie et clone le repo)
-    container_command = f"bash -c 'apt-get update && apt-get install -y git curl && rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase1_Data_Preparation && chmod +x run_generation.sh && ./run_generation.sh'"
-    
     # Ordre de préférence des GPU : RTX 4090 pour la vitesse, puis RTX 3090, puis A40
     gpu_preferences = ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 3090", "NVIDIA A40"]
     pod = None
     
     # Commande de démarrage (démarre SSH, clone le repo via token et lance le script principal de génération)
-    container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase1_Data_Preparation && chmod +x run_generation.sh && ./run_generation.sh; sleep infinity'"
+    launch = "chmod +x run_generation.sh && ./run_generation.sh; " if args.start_generation else ""
+    container_command = f"bash -c 'ssh-keygen -A && service ssh start || true; /usr/sbin/sshd || true; rm -rf /workspace/DistillationModeles && git clone {args.git_repo} /workspace/DistillationModeles && cd /workspace/DistillationModeles/Phase1_Data_Preparation && {launch}sleep infinity'"
     
     for gpu_type in gpu_preferences:
         print(f"Tentative de création du pod sur RunPod avec le GPU : {gpu_type}...")
@@ -140,7 +146,10 @@ def main():
         
     print(f"Pod de génération créé avec succès ! ID : {pod['id']}")
     print(f"Vous pouvez suivre les logs de génération sur : https://www.runpod.io/console/pods")
-    print(f"Une fois terminé, le dataset sera poussé sur Hugging Face : {args.hf_dataset_repo}")
+    if args.start_generation:
+        print("Le pipeline legacy a été lancé explicitement (--start-generation).")
+    else:
+        print("Aucune génération lancée. Ce script est legacy; préférez deploy_teacher_runpod.py.")
 
 if __name__ == "__main__":
     main()

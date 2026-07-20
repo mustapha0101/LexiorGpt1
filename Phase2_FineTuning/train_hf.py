@@ -10,9 +10,9 @@ import os
 import argparse
 import torch
 from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
+from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
+from assistant_loss import AssistantOnlyDataCollator, STRICT_CHATML_TEMPLATE, encode_example_assistant_only
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Entraînement QLoRA standard avec Hugging Face.")
@@ -114,6 +114,7 @@ def main():
     
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     tokenizer.padding_side = "right"
+    tokenizer.chat_template = STRICT_CHATML_TEMPLATE
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         
@@ -147,16 +148,19 @@ def main():
             print(f"Chargement des données de test depuis {args.test_file}...")
             dataset_dict["test"] = load_dataset("json", data_files=args.test_file, split="train")
             
-    print("Initialisation du SFTTrainer...")
-    trainer = SFTTrainer(
+    print("Construction explicite des labels assistant-only...")
+    for split_name, split in list(dataset_dict.items()):
+        dataset_dict[split_name] = split.map(
+            lambda row: encode_example_assistant_only(row, tokenizer, args.max_seq_length),
+            remove_columns=split.column_names,
+            desc=f"Assistant-only labels ({split_name})",
+        )
+    print("Initialisation du Trainer avec labels explicites...")
+    trainer = Trainer(
         model=model,
-        tokenizer=tokenizer,
         train_dataset=dataset_dict["train"],
-
         eval_dataset=dataset_dict.get("test"),
-        dataset_text_field="text",
-        max_seq_length=args.max_seq_length,
-        packing=False,
+        data_collator=AssistantOnlyDataCollator(tokenizer),
         args=TrainingArguments(
             per_device_train_batch_size=args.batch_size,
             gradient_accumulation_steps=args.grad_accum,

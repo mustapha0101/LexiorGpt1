@@ -10,8 +10,8 @@ des adapters LoRA et du modèle au format GGUF ou fusionné 16-bit.
 import os
 import argparse
 from datasets import load_dataset
-from transformers import TrainingArguments
-from trl import SFTTrainer
+from transformers import Trainer, TrainingArguments
+from assistant_loss import AssistantOnlyDataCollator, STRICT_CHATML_TEMPLATE, encode_example_assistant_only
 
 # Importations Unsloth
 try:
@@ -120,6 +120,7 @@ def main():
     )
     
     tokenizer.padding_side = "right"
+    tokenizer.chat_template = STRICT_CHATML_TEMPLATE
 
     print("Configuration des modules LoRA...")
     model = FastLanguageModel.get_peft_model(
@@ -149,14 +150,19 @@ def main():
             print(f"Chargement des données de test depuis {args.test_file}...")
             dataset_dict["test"] = load_dataset("json", data_files=args.test_file, split="train")
     
-    print("Initialisation du SFTTrainer...")
-    trainer = SFTTrainer(
+    print("Construction explicite des labels assistant-only...")
+    for split_name, split in list(dataset_dict.items()):
+        dataset_dict[split_name] = split.map(
+            lambda row: encode_example_assistant_only(row, tokenizer, args.max_seq_length),
+            remove_columns=split.column_names,
+            desc=f"Assistant-only labels ({split_name})",
+        )
+    print("Initialisation du Trainer avec labels explicites...")
+    trainer = Trainer(
         model=model,
         train_dataset=dataset_dict["train"],
         eval_dataset=dataset_dict.get("test"),
-        dataset_text_field="text",
-        max_seq_length=args.max_seq_length,
-        packing=False,
+        data_collator=AssistantOnlyDataCollator(tokenizer),
         args=TrainingArguments(
             per_device_train_batch_size=args.batch_size,
             gradient_accumulation_steps=args.grad_accum,

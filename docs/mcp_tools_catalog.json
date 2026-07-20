@@ -1,0 +1,449 @@
+{
+  "generatedAt": "2026-07-19",
+  "workspace": "c:\\Users\\imenb\\Desktop\\Lexior\\LexiorGpt1",
+  "servers": [
+    {
+      "name": "lexior-legisquebec-mcp",
+      "observedAs": "lexior-ccq",
+      "type": "sse",
+      "url": "https://lexior-ccq-mcp.onrender.com/sse"
+    },
+    {
+      "name": "Canadian Legal Data / a2aj",
+      "observedAs": "a2aj",
+      "type": "streamable-http",
+      "url": "https://mcp.a2aj.ca/mcp"
+    },
+    {
+      "name": "local-rag",
+      "observedAs": "local-rag",
+      "type": "local",
+      "description": "Index local CCQ/CPC; aucune vérification MCP distante."
+    }
+  ],
+  "tools": [
+    {
+      "canonicalName": "semantic_search_ccq",
+      "server": "local-rag",
+      "description": "Recherche sémantique hybride dans le CCQ avec la question complète; retourne des articles candidats à vérifier ensuite par get_ccq_articles.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "top_k": { "type": "integer", "default": 8 }
+        },
+        "required": ["query"]
+      },
+      "minimalValidExample": {
+        "query": "Mon voisin a déplacé la clôture sur mon terrain; quels articles encadrent mes recours?",
+        "top_k": 8
+      },
+      "responseStructure": {
+        "type": "json",
+        "shape": "{ query, code, retrieval, results: [{ rank, article, article_number, score, dense_score, lexical_score, excerpt, source_url }] }"
+      }
+    },
+    {
+      "canonicalName": "semantic_search_cpc",
+      "server": "local-rag",
+      "description": "Recherche sémantique hybride dans le CPC avec la question complète; retourne des articles candidats à vérifier ensuite par get_cpc_articles.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "top_k": { "type": "integer", "default": 8 }
+        },
+        "required": ["query"]
+      },
+      "minimalValidExample": {
+        "query": "Comment assigner un témoin à comparaître dans une instance civile?",
+        "top_k": 8
+      },
+      "responseStructure": {
+        "type": "json",
+        "shape": "{ query, code, retrieval, results: [{ rank, article, article_number, score, dense_score, lexical_score, excerpt, source_url }] }"
+      }
+    },
+    {
+      "canonicalName": "get_ccq_articles",
+      "server": "lexior-legisquebec-mcp",
+      "vscodeObservedName": "mcp_lexior-legisq_get_ccq_articles",
+      "description": "Récupère le texte officiel d'un ou plusieurs articles du Code civil du Québec (CCQ).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_article": { "type": "number" },
+          "end_article": { "type": "number" }
+        },
+        "required": ["start_article"]
+      },
+      "schemaDetails": {
+        "properties": ["start_article", "end_article"],
+        "types": {
+          "start_article": "number",
+          "end_article": "number"
+        },
+        "enumValues": {},
+        "required": ["start_article"],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": { "start_article": 1457 },
+      "responseStructure": {
+        "type": "text",
+        "shape": "article heading followed by one or more article paragraphs",
+        "representativeResponse": "Article 1457\nToute personne a le devoir de respecter les règles de conduite qui, suivant les circonstances, les usages ou la loi, s’imposent à elle, de manière à ne pas causer de préjudice à autrui."
+      }
+    },
+    {
+      "canonicalName": "search_ccq_keywords",
+      "server": "lexior-legisquebec-mcp",
+      "vscodeObservedName": "mcp_lexior-legisq_search_ccq_keywords",
+      "description": "Recherche par mots-clés dans le texte des articles du Code civil du Québec (CCQ).",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "keyword": { "type": "string" } },
+        "required": ["keyword"]
+      },
+      "schemaDetails": {
+        "properties": ["keyword"],
+        "types": { "keyword": "string" },
+        "enumValues": {},
+        "required": ["keyword"],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": { "keyword": "contrat" },
+      "responseStructure": {
+        "type": "text",
+        "shape": "ranked list of matching articles and excerpts",
+        "representativeResponse": "Article 320 ...\nArticle 326 ...\nArticle 381 ..."
+      }
+    },
+    {
+      "canonicalName": "search_cpc_keywords",
+      "server": "lexior-legisquebec-mcp",
+      "vscodeObservedName": "mcp_lexior-legisq_search_cpc_keywords",
+      "description": "Recherche par mots-clés dans le texte des articles du Code de procédure civile du Québec (CPC / C-25.01).",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "keyword": { "type": "string" } },
+        "required": ["keyword"]
+      },
+      "schemaDetails": {
+        "properties": ["keyword"],
+        "types": { "keyword": "string" },
+        "enumValues": {},
+        "required": ["keyword"],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": { "keyword": "signification" },
+      "responseStructure": {
+        "type": "text",
+        "shape": "ranked list of matching CPC articles and excerpts",
+        "representativeResponse": "Article 78 ...\nArticle 110 ...\nArticle 116 ..."
+      }
+    },
+    {
+      "canonicalName": "get_cpc_articles",
+      "server": "lexior-legisquebec-mcp",
+      "vscodeObservedName": "mcp_lexior-legisq_get_cpc_articles",
+      "description": "Récupère le texte officiel d'un ou plusieurs articles du Code de procédure civile du Québec (CPC / C-25.01).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "start_article": { "type": "number" },
+          "end_article": { "type": "number" }
+        },
+        "required": ["start_article"]
+      },
+      "schemaDetails": {
+        "properties": ["start_article", "end_article"],
+        "types": {
+          "start_article": "number",
+          "end_article": "number"
+        },
+        "enumValues": {},
+        "required": ["start_article"],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": { "start_article": 1 },
+      "responseStructure": {
+        "type": "text",
+        "shape": "article heading followed by one or more article paragraphs",
+        "representativeResponse": "Article 1\nLes modes privés de prévention et de règlement des différends sont choisis d’un commun accord par les parties intéressées..."
+      }
+    },
+    {
+      "canonicalName": "get_quebec_legal_info",
+      "server": "lexior-legisquebec-mcp",
+      "vscodeObservedName": "mcp_lexior-legisq_get_quebec_legal_info",
+      "description": "Récupère des métadonnées et tableaux de modifications, entrées en vigueur et dispositions non en vigueur de LégisQuébec.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["modlois", "modreg", "nevlois", "eevlois", "loisann", "regann", "decision"]
+          }
+        },
+        "required": ["type"]
+      },
+      "schemaDetails": {
+        "properties": ["type"],
+        "types": { "type": "string" },
+        "enumValues": { "type": ["modlois", "modreg", "nevlois", "eevlois", "loisann", "regann", "decision"] },
+        "required": ["type"],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": { "type": "decision" },
+      "responseStructure": {
+        "type": "text",
+        "shape": "informational page with headings and explanatory paragraphs",
+        "representativeResponse": "# Informations LégisQuébec - DECISION\nSource officielle : https://www.legisquebec.gouv.qc.ca/fr/contenu/decision\n\nDécisions des tribunaux"
+      }
+    },
+    {
+      "canonicalName": "search_quebec_regulations",
+      "server": "lexior-legisquebec-mcp",
+      "vscodeObservedName": "mcp_lexior-legisq_search_quebec_regulations",
+      "description": "Recherche sémantique parmi les règlements du Québec sur LégisQuébec.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "keyword": { "type": "string" } },
+        "required": ["keyword"]
+      },
+      "schemaDetails": {
+        "properties": ["keyword"],
+        "types": { "keyword": "string" },
+        "enumValues": {},
+        "required": ["keyword"],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": { "keyword": "environnement" },
+      "responseStructure": {
+        "type": "text",
+        "shape": "search results list with regulation title, link, and summary",
+        "representativeResponse": "Q-2, r. 17.1 - Règlement sur l’encadrement d’activités en fonction de leur impact sur l’environnement\nRésumé: Le règlement encadre les activités selon leur impact sur l’environnement..."
+      }
+    },
+    {
+      "canonicalName": "get_quebec_regulation",
+      "server": "lexior-legisquebec-mcp",
+      "vscodeObservedName": "mcp_lexior-legisq_get_quebec_regulation",
+      "description": "Récupère le contenu complet d'un règlement spécifique ou d'un acte législatif sur LégisQuébec à partir de son URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "url": { "type": "string" } },
+        "required": ["url"]
+      },
+      "schemaDetails": {
+        "properties": ["url"],
+        "types": { "url": "string" },
+        "enumValues": {},
+        "required": ["url"],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": { "url": "https://www.legisquebec.gouv.qc.ca/fr/document/rc/Q-2,%20r.%2017.1" },
+      "responseStructure": {
+        "type": "text",
+        "shape": "official regulation page with title, habilitating laws table, and numbered articles",
+        "representativeResponse": "### Q-2, r. 17.1 - Règlement sur l’encadrement d’activités en fonction de leur impact sur l’environnement\nTexte complet\nArticle 1. Le présent règlement prévoit l’encadrement d’activités..."
+      }
+    },
+    {
+      "canonicalName": "search_quebec_jurisprudence",
+      "server": "lexior-legisquebec-mcp",
+      "vscodeObservedName": "mcp_lexior-legisq_search_quebec_jurisprudence",
+      "description": "Recherche de la jurisprudence (décisions de justice) québécoise sur CanLII et SOQUIJ.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "query": { "type": "string" } },
+        "required": ["query"]
+      },
+      "schemaDetails": {
+        "properties": ["query"],
+        "types": { "query": "string" },
+        "enumValues": {},
+        "required": ["query"],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": { "query": "responsabilité civile" },
+      "responseStructure": {
+        "type": "text",
+        "shape": "search results with case titles, links, and summaries",
+        "representativeResponse": "Code de procédure civile, RLRQ c C-25.01\nRésumé concis: Code de procédure civile, RLRQ c C-25.01 (Québec)\n\nCode civil du Québec, RLRQ c CCQ-1991\nRésumé: Summary:"
+      }
+    },
+    {
+      "canonicalName": "coverage",
+      "server": "Canadian Legal Data / a2aj",
+      "vscodeObservedName": "mcp_canadian_lega_coverage",
+      "description": "Get dataset coverage for Canadian case law and legislation showing earliest/latest dates and document counts.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "doc_type": {
+            "type": "string",
+            "enum": ["cases", "laws"],
+            "default": "cases"
+          }
+        }
+      },
+      "schemaDetails": {
+        "properties": ["doc_type"],
+        "types": { "doc_type": "string" },
+        "enumValues": { "doc_type": ["cases", "laws"] },
+        "required": [],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": {},
+      "responseStructure": {
+        "type": "json",
+        "shape": "{ results: [ { dataset, description_en, description_fr, earliest_document_date, latest_document_date, number_of_documents } ] }",
+        "representativeResponse": {
+          "results": [
+            {
+              "dataset": "SCC",
+              "description_en": "Supreme Court of Canada",
+              "description_fr": "Cour suprême du Canada",
+              "earliest_document_date": "1877-01-15",
+              "latest_document_date": "2026-07-17",
+              "number_of_documents": 10888
+            }
+          ]
+        }
+      }
+    },
+    {
+      "canonicalName": "fetch_document",
+      "server": "Canadian Legal Data / a2aj",
+      "vscodeObservedName": "mcp_canadian_lega_fetch_document",
+      "description": "Retrieve full text of Canadian legal documents by citation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "citation": { "type": "string" },
+          "doc_type": { "type": "string", "enum": ["cases", "laws"], "default": "cases" },
+          "output_language": { "type": "string", "enum": ["en", "fr", "both"], "default": "en" },
+          "section": { "type": "string", "default": "" },
+          "start_char": { "type": "integer", "default": 0 },
+          "end_char": { "type": "integer", "default": -1 }
+        },
+        "required": ["citation"]
+      },
+      "schemaDetails": {
+        "properties": ["citation", "doc_type", "output_language", "section", "start_char", "end_char"],
+        "types": {
+          "citation": "string",
+          "doc_type": "string",
+          "output_language": "string",
+          "section": "string",
+          "start_char": "integer",
+          "end_char": "integer"
+        },
+        "enumValues": {
+          "doc_type": ["cases", "laws"],
+          "output_language": ["en", "fr", "both"]
+        },
+        "required": ["citation"],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": {
+        "citation": "2020 SCC 5",
+        "doc_type": "cases",
+        "output_language": "en"
+      },
+      "responseStructure": {
+        "type": "json",
+        "shape": "{ results: [ { dataset, citation_en, citation2_en, name_en, document_date_en, url_en, scraped_timestamp_en, unofficial_text_en, citing_cases_count, upstream_license } ] }",
+        "representativeResponse": {
+          "results": [
+            {
+              "dataset": "SCC",
+              "citation_en": "2020 SCC 5",
+              "citation2_en": "[2020] 1 SCR 166",
+              "name_en": "Nevsun Resources Ltd. v. Araya",
+              "document_date_en": "2020-02-28T00:00:00",
+              "url_en": "https://decisions.scc-csc.ca/scc-csc/scc-csc/en/item/18169/index.do",
+              "scraped_timestamp_en": "2023-04-13T15:24:45.124000",
+              "citing_cases_count": 190
+            }
+          ]
+        }
+      }
+    },
+    {
+      "canonicalName": "search_legal_documents",
+      "server": "Canadian Legal Data / a2aj",
+      "vscodeObservedName": "mcp_canadian_lega_search_legal_documents",
+      "description": "Search Canadian case law and legislation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "search_type": { "type": "string", "enum": ["full_text", "name"], "default": "full_text" },
+          "doc_type": { "type": "string", "enum": ["cases", "laws"], "default": "cases" },
+          "size": { "type": "integer", "default": 10 },
+          "search_language": { "type": "string", "enum": ["en", "fr"], "default": "en" },
+          "sort_results": { "type": "string", "enum": ["default", "newest_first", "oldest_first"], "default": "default" },
+          "dataset": { "type": "string", "default": "" },
+          "start_date": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null },
+          "end_date": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null }
+        },
+        "required": ["query"]
+      },
+      "schemaDetails": {
+        "properties": ["query", "search_type", "doc_type", "size", "search_language", "sort_results", "dataset", "start_date", "end_date"],
+        "types": {
+          "query": "string",
+          "search_type": "string",
+          "doc_type": "string",
+          "size": "integer",
+          "search_language": "string",
+          "sort_results": "string",
+          "dataset": "string",
+          "start_date": ["string", "null"],
+          "end_date": ["string", "null"]
+        },
+        "enumValues": {
+          "search_type": ["full_text", "name"],
+          "doc_type": ["cases", "laws"],
+          "search_language": ["en", "fr"],
+          "sort_results": ["default", "newest_first", "oldest_first"]
+        },
+        "required": ["query"],
+        "additionalProperties": "not specified"
+      },
+      "minimalValidExample": {
+        "query": "contract",
+        "search_type": "name",
+        "doc_type": "cases",
+        "size": 1,
+        "search_language": "en",
+        "sort_results": "default"
+      },
+      "responseStructure": {
+        "type": "json",
+        "shape": "{ results: [ { dataset, citation_en, name_en, document_date_en, url_en, scraped_timestamp_en, cases_cited_en?, cases_citing_en?, citing_cases_count?, upstream_license, score? } ] }",
+        "representativeResponse": {
+          "results": [
+            {
+              "dataset": "FC",
+              "citation_en": "2022 FC 1796",
+              "name_en": "Toronto Standard Condominium Corporation No. 1654 v. Tri-Can Contract Incorporated",
+              "document_date_en": "2022-12-28T00:00:00+00:00",
+              "url_en": "https://decisions.fct-cf.gc.ca/fc-cf/decisions/en/item/522725/index.do",
+              "scraped_timestamp_en": "2023-11-30T19:10:44.033000+00:00",
+              "citing_cases_count": 5,
+              "score": 12.214046
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "notes": [
+    "Les outils Québec ont été activés puis testés dans cette session.",
+    "Le serveur Canadian Legal Data / a2aj a répondu avec des structures JSON réelles pour coverage, fetch_document et search_legal_documents.",
+    "Aucun chemin workspaceStorage temporaire n'est conservé dans ce catalogue."
+  ]
+}

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Lexior — Inspecteur de trajectoires</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">LX</div>
+          <div>
+            <p class="eyebrow">Lexior · Data studio</p>
+            <h1>Inspecteur de trajectoires</h1>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span class="live-indicator"><i></i> Lecture locale</span>
+          <button class="button button-secondary" id="refreshButton" type="button">
+            <span aria-hidden="true">↻</span> Actualiser
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero-panel" aria-labelledby="run-heading">
+          <div class="hero-copy">
+            <p class="section-kicker">Audit de génération</p>
+            <h2 id="run-heading">Suivez chaque question, de la création à la validation.</h2>
+            <p>Les fichiers du run sont relus automatiquement. Aucune donnée ne quitte cette machine.</p>
+          </div>
+          <div class="run-control">
+            <label for="runSelect">Run observé</label>
+            <select id="runSelect" aria-describedby="runMeta">
+              <option value="">Chargement des runs…</option>
+            </select>
+            <span id="runMeta">—</span>
+          </div>
+        </section>
+
+        <section class="metrics-grid" aria-label="Résumé du run">
+          <article class="metric-card metric-primary">
+            <span class="metric-label">Acceptées</span>
+            <strong id="acceptedMetric">—</strong>
+            <small id="targetMetric">objectif —</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Rejetées</span>
+            <strong id="rejectedMetric">—</strong>
+            <small id="scenarioMetric">— scénarios traités</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Taux d’acceptation</span>
+            <strong id="rateMetric">—</strong>
+            <small id="modelMetric">modèle —</small>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Coût cumulé</span>
+            <strong id="costMetric">—</strong>
+            <small id="callsMetric">— appels API</small>
+          </article>
+        </section>
+
+        <section class="workspace">
+          <aside class="question-panel" aria-labelledby="questions-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="section-kicker">Exploration</p>
+                <h2 id="questions-heading">Questions</h2>
+              </div>
+              <span class="count-badge" id="visibleCount">0</span>
+            </div>
+
+            <label class="field-label" for="questionSelect">Aller directement à une question</label>
+            <select id="questionSelect" disabled>
+              <option value="">Aucune question</option>
+            </select>
+
+            <div class="search-field">
+              <span aria-hidden="true">⌕</span>
+              <label class="sr-only" for="questionSearch">Rechercher une question</label>
+              <input id="questionSearch" type="search" placeholder="Rechercher dans les questions…" autocomplete="off" />
+            </div>
+
+            <div class="segmented-control" role="group" aria-label="Filtrer par statut">
+              <button class="segment is-active" type="button" data-status="all">Toutes</button>
+              <button class="segment" type="button" data-status="accepted">Acceptées</button>
+              <button class="segment" type="button" data-status="rejected">Rejetées</button>
+            </div>
+
+            <div class="question-list" id="questionList" aria-live="polite">
+              <div class="empty-list">Sélectionnez un run pour afficher ses questions.</div>
+            </div>
+          </aside>
+
+          <section class="detail-panel" id="detailPanel" aria-live="polite">
+            <div class="empty-state" id="emptyState">
+              <div class="empty-symbol" aria-hidden="true">⌁</div>
+              <h2>Sélectionnez une question</h2>
+              <p>La trajectoire, les appels d’outils, les critiques et les métadonnées apparaîtront ici.</p>
+            </div>
+
+            <div id="detailContent" hidden>
+              <div class="detail-header">
+                <div>
+                  <div class="detail-badges" id="detailBadges"></div>
+                  <h2 id="detailQuestion"></h2>
+                  <p class="detail-id" id="detailId"></p>
+                </div>
+                <button class="button button-secondary" id="copyButton" type="button">Copier le JSON</button>
+              </div>
+
+              <div class="detail-grid" id="overviewGrid"></div>
+              <div id="rejectionSection"></div>
+              <div id="scenarioSection"></div>
+              <div id="messagesSection"></div>
+              <div id="toolsSection"></div>
+              <div id="groundingSection"></div>
+              <div id="metadataSection"></div>
+
+              <article class="data-card raw-card">
+                <details>
+                  <summary>
+                    <span><i class="card-index">JSON</i> Donnée complète</span>
+                    <small>Afficher la représentation brute</small>
+                  </summary>
+                  <pre id="rawJson"></pre>
+                </details>
+              </article>
+            </div>
+          </section>
+        </section>
+      </main>
+
+      <footer>
+        <span id="lastRefresh">En attente des données</span>
+        <span>Source : Phase1_Data_Preparation/data/agentic</span>
+      </footer>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

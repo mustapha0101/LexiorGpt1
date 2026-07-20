@@ -1,5 +1,24 @@
 # Lexior - Distillation CoT Juridique en 2 Phases
 
+## Pipeline juridique agentique
+
+Le mode recommandé pour les nouveaux jeux juridiques est une machine à états
+qui appelle les outils MCP réels. Le pipeline one-shot reste disponible sous
+`GENERATION_MODE=legacy`; le comportement historique demeure le défaut pendant
+la migration.
+
+```bash
+cd Phase1_Data_Preparation
+python -m agentic_generation.cli doctor
+python -m agentic_generation.cli generate --config configs/agentic_generation.yaml \
+  --target-accepted 10 --max-scenarios 30 --dry-run
+```
+
+Le pilote réel nécessite `TEACHER_BASE_URL`, `TEACHER_API_KEY` et
+`TEACHER_MODEL`, puis le drapeau explicite `--allow-remote-calls`. Consultez
+[le runbook](docs/agentic_generation_runbook.md) et
+[l'architecture](docs/agentic_generation_architecture.md).
+
 Ce projet implémente un pipeline professionnel en deux phases pour distiller le raisonnement d'un grand modèle de langage (**Teacher**) vers un modèle de langage local plus petit et performant (**Student**), spécialisé dans le droit canadien et québécois en utilisant la structure de raisonnement **IRAC (Issue, Rule, Application, Conclusion)**.
 
 Le modèle local apprend à écrire son raisonnement à l'intérieur de balises `<thinking>...</thinking>` avant de générer la conclusion finale en français.
@@ -12,7 +31,7 @@ Le projet est structuré en deux phases indépendantes pour une meilleure compr�
 
 ```text
 DistillationModeles/
-├── setup_env.sh                        # Configuration globale des clés d'API (HF, RunPod, OpenAI, WandB)
+├── .env.example / environnement        # Variables locales; aucun secret n'est versionné
 ├── README.md                           # Documentation générale du projet
 │
 ├── Phase1_Data_Preparation/            # PHASE 1 : Préparation & Génération (Machine locale ou CPU Pod)
@@ -35,9 +54,9 @@ DistillationModeles/
 Cette phase s'exécute sur votre machine locale ou sur une instance CPU économique. Elle permet d'extraire la matière première des bases brutes de droit canadien/québécois de l'A2AJ et de générer un dataset CoT structuré.
 
 ### Étape 1.1 : Configurer vos clés d'API
-Éditez le fichier `setup_env.sh` à la racine pour ajouter vos clés :
+Définissez les variables dans votre environnement (ne versionnez jamais `.env`) :
 ```bash
-source setup_env.sh
+# chargez votre environnement avec la méthode de votre choix
 ```
 
 ### Étape 1.2 : Lancer la génération et le formatage
@@ -65,7 +84,7 @@ Vous pouvez orchestrer la création du GPU et lancer l'entraînement à distance
    ```
 2. Chargez vos variables d'environnement :
    ```bash
-   source setup_env.sh
+   # chargez votre environnement local
    ```
 3. Exécutez le script d'orchestration en passant l'URL de votre dépôt Git public ou privé :
    ```bash
@@ -85,7 +104,7 @@ Si vous préférez louer l'instance manuellement via l'interface web de RunPod :
    ```bash
    git clone https://github.com/mustapha0101/LexiorGpt1.git
    cd LexiorGpt1
-   source setup_env.sh
+   # chargez votre environnement local
    ```
 4. Lancez le script d'entraînement :
    ```bash

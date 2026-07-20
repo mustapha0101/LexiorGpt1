@@ -19,14 +19,17 @@ def parse_args():
     parser.add_argument(
         "--hf_repo",
         type=str,
-        default=os.environ.get("HF_DATASET_REPO_ID", ""),
-        help="Dépôt Hugging Face du dataset."
+        default=os.environ.get("HF_REPO_FEDERAL")
+                or os.environ.get("HF_DATASET_REPO_ID", "")
+                or "intelliwork/canadian-cot-dataset-federal-french",
+        help="Dépôt Hugging Face servant de point de reprise."
     )
     parser.add_argument(
         "--hf_file",
         type=str,
-        default="data/backup_95_examples.jsonl",
-        help="Chemin du fichier JSONL de backup dans le dépôt HF."
+        default=None,
+        help="Chemin d'un JSONL brut dans le dépôt HF. Par défaut, le dépôt est "
+             "lu comme un dataset (parquet) — c'est le format écrit par push_to_hf.py."
     )
     parser.add_argument(
         "--output_file",
@@ -48,24 +51,34 @@ def main():
         
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
     
-    # 1. Tenter de télécharger le fichier de backup depuis HF si le fichier local n'existe pas encore ou est vide
+    # 1. Tenter de télécharger le checkpoint depuis HF si le fichier local n'existe pas encore ou est vide
     if not os.path.exists(args.output_file) or os.path.getsize(args.output_file) == 0:
-        print(f"Téléchargement du checkpoint depuis HF ({args.hf_repo}/{args.hf_file})...")
+        print(f"Aucun fichier local. Récupération du checkpoint depuis HF ({args.hf_repo})...")
         try:
-            downloaded_path = hf_hub_download(
-                repo_id=args.hf_repo,
-                filename=args.hf_file,
-                repo_type="dataset",
-                token=token
-            )
-            # Copier le fichier téléchargé vers l'emplacement de travail attendu par generator_a2aj.py
-            shutil.copy(downloaded_path, args.output_file)
-            print(f"Fichier de checkpoint téléchargé et copié avec succès vers '{args.output_file}'")
+            if args.hf_file:
+                # Chemin explicite vers un JSONL brut (ancien fonctionnement).
+                downloaded_path = hf_hub_download(
+                    repo_id=args.hf_repo,
+                    filename=args.hf_file,
+                    repo_type="dataset",
+                    token=token
+                )
+                shutil.copy(downloaded_path, args.output_file)
+            else:
+                # Le dépôt est un dataset écrit par push_to_hf.py (parquet) : on
+                # le relit et on le remet à plat en JSONL, format attendu par
+                # l'index de reprise de generator_a2aj.py.
+                from datasets import load_dataset
+                ds = load_dataset(args.hf_repo, split="train", token=token)
+                ds.to_json(args.output_file, orient="records", lines=True, force_ascii=False)
+            n = sum(1 for _ in open(args.output_file, encoding="utf-8"))
+            print(f"Checkpoint récupéré : {n} lignes écrites dans '{args.output_file}'.")
         except Exception as e:
             print(f"\nAvertissement : Impossible de charger le checkpoint depuis HF ({e}).")
             print("La génération démarrera à zéro (aucun fichier local détecté).")
     else:
-        print(f"Fichier de travail local détecté à '{args.output_file}' ({os.path.getsize(args.output_file)} octets). Reprise locale.")
+        n = sum(1 for _ in open(args.output_file, encoding="utf-8"))
+        print(f"Fichier de travail local détecté à '{args.output_file}' ({n} lignes). Reprise locale.")
 
     # 2. Exécuter generator_a2aj.py en propageant le fichier de sortie et tous les autres arguments
     cmd = [sys.executable, "generator_a2aj.py", "--output_file", args.output_file] + unknown_args
