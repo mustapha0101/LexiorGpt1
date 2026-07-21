@@ -694,6 +694,15 @@ class PlannerAgent:
                 "contenu complet pour pouvoir fonder ma réponse sur le texte officiel."
             )
         if tool == "search_quebec_jurisprudence":
+            article_nums = PlannerAgent._extract_article_nums_from_history(state)
+            if article_nums:
+                arts = ", ".join(f"article {n}" for n in article_nums[:2])
+                return (
+                    f"J'ai identifié la règle applicable ({arts}). Je cherche "
+                    "maintenant comment les tribunaux ont appliqué cette disposition "
+                    "à des situations factuelles similaires, pour déterminer les "
+                    "exceptions et conditions d'application concrètes."
+                )
             return (
                 "Les faits de l'utilisateur justifient une recherche de jurisprudence "
                 "québécoise pour voir comment les tribunaux ont appliqué les règles "
@@ -810,14 +819,20 @@ class PlannerAgent:
             keyword = candidates[min(previous, len(candidates) - 1)]
             return {"keyword": keyword}
         if tool == "search_quebec_jurisprudence":
-            intent = self._extract_search_intent(thinking)
-            if intent.keywords:
-                jurisprudence_query = " ".join(intent.keywords[:4])
-            elif "vice" in query.casefold():
-                jurisprudence_query = "vice caché application faits"
+            article_nums = self._extract_article_nums_from_history(state)
+            situation = self._compact_keyword(query)
+            if article_nums:
+                article_part = " ".join(
+                    f"article {n}" for n in article_nums[:2]
+                )
+                jurisprudence_query = f"{article_part} {situation}"
             else:
-                jurisprudence_query = self._compact_keyword(query)
-            return {"query": jurisprudence_query}
+                intent = self._extract_search_intent(thinking)
+                if intent.keywords:
+                    jurisprudence_query = " ".join(intent.keywords[:4])
+                else:
+                    jurisprudence_query = situation
+            return {"query": jurisprudence_query[:200]}
         if tool == "get_quebec_regulation":
             urls = [u for o in state.tool_history for u in o.source_urls]
             if not urls:
@@ -1135,6 +1150,27 @@ class PlannerAgent:
             if word not in stopwords
         ]
         return " ".join(words[:3]) or "droit applicable"
+
+    @staticmethod
+    def _extract_article_nums_from_history(state: ResearchState) -> list[str]:
+        """Extract article numbers from prior get_*_articles calls and semantic searches."""
+        nums: list[str] = []
+        seen: set[str] = set()
+        for obs in state.tool_history:
+            if obs.tool_name in {"get_ccq_articles", "get_cpc_articles"} and obs.ok:
+                sa = obs.arguments.get("start_article")
+                if sa is not None:
+                    n = str(int(sa)) if isinstance(sa, float) and sa == int(sa) else str(sa)
+                    if n not in seen:
+                        nums.append(n)
+                        seen.add(n)
+            elif obs.tool_name in {"semantic_search_ccq", "semantic_search_cpc"} and obs.ok:
+                for m in ARTICLE_LABEL_RE.finditer(obs.normalized_response or ""):
+                    n = m.group(1)
+                    if n not in seen:
+                        nums.append(n)
+                        seen.add(n)
+        return nums
 
     @staticmethod
     def _extract_search_intent(thinking: str) -> SearchIntent:

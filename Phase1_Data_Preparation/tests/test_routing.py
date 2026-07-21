@@ -29,7 +29,8 @@ def run_offline(catalog, category, max_tool_calls=4):
 @pytest.mark.parametrize("category,expected", [
     ("article_ccq_precis", ["get_ccq_articles"]),
     ("recherche_theme_ccq", ["semantic_search_ccq", "get_ccq_articles"]),
-    ("cas_civil_quebecois", ["semantic_search_ccq", "get_ccq_articles"]),
+    ("cas_civil_quebecois", ["semantic_search_ccq", "get_ccq_articles",
+                             "search_quebec_jurisprudence"]),
     ("article_cpc_precis", ["get_cpc_articles"]),
     ("reglement_quebecois_inconnu", ["search_quebec_regulations", "get_quebec_regulation"]),
 ])

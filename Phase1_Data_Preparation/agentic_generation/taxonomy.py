@@ -74,40 +74,45 @@ CATEGORIES: dict[str, Category] = {c.name: c for c in [
         default_weight=1.5),
     Category(
         name="explication_article",
-        description="Explication d'un article précis (le texte officiel doit être "
-                    "récupéré avant d'expliquer).",
-        expected_route=_route("get_ccq_articles"),
-        expected_source_types=["legislation"],
+        description="Explication d'un article précis : récupérer le texte officiel, "
+                    "puis chercher comment les tribunaux l'appliquent.",
+        expected_route=_route("get_ccq_articles",
+                              ("search_quebec_jurisprudence", True)),
+        expected_source_types=["legislation", "jurisprudence"],
         default_weight=1.5),
     Category(
         name="recherche_theme_ccq",
-        description="Sujet CCQ sans numéro d'article : recherche sémantique "
-                    "puis récupération officielle des articles retenus.",
-        expected_route=_route("semantic_search_ccq", "get_ccq_articles"),
-        expected_source_types=["legislation"],
-        default_weight=2.0),
-    Category(
-        name="recherche_theme_cpc",
-        description="Sujet CPC sans numéro d'article.",
-        expected_route=_route("semantic_search_cpc", "get_cpc_articles"),
-        legal_domain="procédure civile québécoise",
-        expected_source_types=["legislation"],
-        default_weight=1.5),
-    Category(
-        name="cas_civil_quebecois",
-        description="Cas civil québécois concret : CCQ d'abord, jurisprudence "
-                    "seulement si l'application factuelle le justifie.",
-        expected_route=_route(("semantic_search_ccq", True), "get_ccq_articles",
+        description="Sujet CCQ sans numéro d'article : recherche sémantique, "
+                    "récupération officielle, puis jurisprudence sur l'article trouvé.",
+        expected_route=_route("semantic_search_ccq", "get_ccq_articles",
                               ("search_quebec_jurisprudence", True)),
         expected_source_types=["legislation", "jurisprudence"],
         default_weight=2.0),
     Category(
-        name="cas_procedure_quebecoise",
-        description="Cas concret de procédure civile québécoise.",
-        expected_route=_route(("semantic_search_cpc", True), "get_cpc_articles",
+        name="recherche_theme_cpc",
+        description="Sujet CPC sans numéro d'article : recherche, texte officiel, "
+                    "puis jurisprudence sur l'application.",
+        expected_route=_route("semantic_search_cpc", "get_cpc_articles",
                               ("search_quebec_jurisprudence", True)),
         legal_domain="procédure civile québécoise",
-        expected_source_types=["legislation"],
+        expected_source_types=["legislation", "jurisprudence"],
+        default_weight=1.5),
+    Category(
+        name="cas_civil_quebecois",
+        description="Cas civil québécois concret : trouver la loi, puis chercher "
+                    "comment les tribunaux l'appliquent à des faits similaires.",
+        expected_route=_route(("semantic_search_ccq", True), "get_ccq_articles",
+                              "search_quebec_jurisprudence"),
+        expected_source_types=["legislation", "jurisprudence"],
+        default_weight=2.0),
+    Category(
+        name="cas_procedure_quebecoise",
+        description="Cas concret de procédure civile : trouver la règle, puis "
+                    "voir l'application jurisprudentielle.",
+        expected_route=_route(("semantic_search_cpc", True), "get_cpc_articles",
+                              "search_quebec_jurisprudence"),
+        legal_domain="procédure civile québécoise",
+        expected_source_types=["legislation", "jurisprudence"],
         default_weight=1.0),
     Category(
         name="reglement_quebecois_connu",
@@ -301,8 +306,7 @@ def get_category(name: str) -> Category:
 # Catégories où une recherche de jurisprudence est un signe de sur-recherche :
 # une simple demande d'article ne la justifie jamais.
 NO_JURISPRUDENCE = {
-    "article_ccq_precis", "article_cpc_precis", "explication_article",
-    "recherche_theme_ccq", "recherche_theme_cpc",
+    "article_ccq_precis", "article_cpc_precis",
     "reglement_quebecois_connu", "reglement_quebecois_inconnu",
     "verification_entree_en_vigueur", "question_non_juridique",
 }
