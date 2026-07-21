@@ -6,7 +6,7 @@ from agentic_generation.agentic_critic import AGENTIC_CRITIC_SYSTEM
 from agentic_generation.legal_critic import LEGAL_CRITIC_SYSTEM
 from agentic_generation.planner_agent import PlannerAgent
 from agentic_generation.scenario_generator import ScenarioGenerator
-from agentic_generation.schemas import Message, ResearchState, Role, ScenarioSpec, TrainingTrajectory
+from agentic_generation.schemas import Decision, Message, ResearchState, Role, ScenarioSpec, TrainingTrajectory
 from agentic_generation.trajectory_agent import TrajectoryAgent, normalize_final_answer
 from agentic_generation.validators import validate_tool_route, validate_trajectory
 
@@ -124,9 +124,9 @@ def test_json_answer_wrapper_is_unwrapped_and_guarded(catalog):
     assert "réponse finale enveloppée dans un objet JSON" in result.errors
 
 
-def test_wrong_federal_route_is_rejected_by_post_hoc_check(catalog):
-    """Without a route guard, the teacher's wrong tool choice (CCQ for a
-    federal case) is rejected by the post-hoc allowed_tools check."""
+def test_wrong_federal_route_guard_redirects_to_correct_tool(catalog):
+    """The guard redirects a wrong tool (CCQ for a federal case) to the
+    correct federal tool instead of raising an error."""
     scenario = ScenarioGenerator(seed=3407, offline=True).generate("cas_federal_concret")
     state = ResearchState(
         scenario=scenario,
@@ -140,8 +140,9 @@ def test_wrong_federal_route_is_rejected_by_post_hoc_check(catalog):
         "next_tool": "search_ccq_keywords",
         "arguments": {"keyword": "faillite"},
     })
-    with pytest.raises(ValueError, match="incompatible avec la catégorie"):
-        PlannerAgent(catalog, client=client).decide(state)
+    decision = PlannerAgent(catalog, client=client).decide(state)
+    assert decision.decision == Decision.call_tool
+    assert decision.next_tool == "search_legal_documents"
     errors = validate_tool_route("cas_federal_concret", ["search_ccq_keywords"])
     assert any("hors route" in error for error in errors)
     assert any("requis absent" in error for error in errors)

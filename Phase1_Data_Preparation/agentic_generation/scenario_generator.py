@@ -71,14 +71,20 @@ _LEGAL_MARKERS = (
 )
 
 
+_FEDERAL_CASE_CATEGORIES = {"cas_federal_concret", "jurisprudence_federale"}
+_FEDERAL_LAW_CATEGORIES = {"loi_federale"}
+
+
 class ScenarioGenerator:
     def __init__(self, client=None, seed: int = 3407, offline: bool = False,
-                 taxonomy_proportions: Optional[dict[str, float]] = None):
+                 taxonomy_proportions: Optional[dict[str, float]] = None,
+                 anchor_bank=None):
         self.client = client
         self.rng = random.Random(seed)
         self.seed = seed
         self.offline = offline
         self.proportions = taxonomy_proportions or {}
+        self.anchor_bank = anchor_bank
         self.index = 0
 
     def generate(self, category_name: Optional[str] = None) -> ScenarioSpec:
@@ -89,10 +95,12 @@ class ScenarioGenerator:
         if self.client is None:
             raise RuntimeError("client Teacher requis hors mode offline")
         article_anchor = self._article_anchor(category.name)
+        federal_anchor = self._federal_anchor(category.name)
         prompt = scenario_user_prompt(category.name, category.description,
                                       category.expected_jurisdiction,
                                       str(self.seed + self.index),
-                                      str(article_anchor) if article_anchor else None)
+                                      article_anchor=str(article_anchor) if article_anchor else None,
+                                      federal_anchor=federal_anchor)
         raw = self.client.complete_json("scenario_generator", [
             {"role": "system", "content": SCENARIO_GENERATOR_SYSTEM},
             {"role": "user", "content": prompt},
@@ -110,7 +118,7 @@ class ScenarioGenerator:
             facts = dict(raw.get("facts_provided") or {})
             facts["article_number"] = article_anchor
             raw["facts_provided"] = facts
-        self._enforce_category_contract(raw, category)
+        self._enforce_category_contract(raw, category, has_federal_anchor=bool(federal_anchor))
         query = str(raw.get("user_query", ""))
         raw["scenario_id"] = hashlib.sha256(
             f"{self.seed}:{category.name}:{self.index}:{query}".encode()).hexdigest()[:16]
@@ -119,7 +127,8 @@ class ScenarioGenerator:
             f"{category.name}:{facts_shape}".encode()).hexdigest()[:16]
         return ScenarioSpec.model_validate(raw)
 
-    def _enforce_category_contract(self, raw: dict, category: Category) -> None:
+    def _enforce_category_contract(self, raw: dict, category: Category,
+                                    has_federal_anchor: bool = False) -> None:
         """Garde-fous déterministes pour les confusions de domaine coûteuses."""
         query = str(raw.get("user_query", ""))
         folded = query.casefold()
@@ -142,6 +151,13 @@ class ScenarioGenerator:
                     raw["clarification_answer"] = (
                         "La situation est au Québec et concerne un contrat civil."
                     )
+        elif category.name == "recherche_theme_ccq":
+            ccq_bad = ("prestation", "ccq", "c.c.q", "commission de la construction")
+            if any(marker in folded for marker in ccq_bad):
+                raw["user_query"] = FIXTURE_QUERIES[category.name]
+                raw["facts_provided"] = {}
+                raw["facts_missing"] = []
+                raw["clarification_answer"] = None
         elif category.name == "recherche_theme_cpc":
             if any(marker in folded for marker in _PENAL_MARKERS):
                 raw["user_query"] = FIXTURE_QUERIES[category.name]
@@ -149,15 +165,13 @@ class ScenarioGenerator:
                 raw["facts_missing"] = []
                 raw["clarification_answer"] = None
         elif category.name == "cas_federal_concret":
-            if not any(marker in folded for marker in _FEDERAL_MARKERS):
+            if not has_federal_anchor and not any(marker in folded for marker in _FEDERAL_MARKERS):
                 raw["user_query"] = FIXTURE_QUERIES[category.name]
                 raw["facts_provided"] = {}
                 raw["facts_missing"] = []
                 raw["clarification_answer"] = None
         elif category.name == "loi_federale":
-            # Cette catégorie exige une loi identifiable afin que la recherche
-            # puisse fournir une citation réutilisable par fetch_document.
-            if not re.search(r"\bloi\s+(?:sur|de|concernant)\b", folded):
+            if not has_federal_anchor and not re.search(r"\bloi\s+(?:sur|de|concernant)\b", folded):
                 raw["user_query"] = FIXTURE_QUERIES[category.name]
                 raw["facts_provided"] = {}
                 raw["facts_missing"] = []
@@ -174,6 +188,22 @@ class ScenarioGenerator:
             return self.rng.choice(VERIFIED_CCQ_ARTICLES)
         if category_name == "article_cpc_precis":
             return self.rng.choice(VERIFIED_CPC_ARTICLES)
+        return None
+
+    def _federal_anchor(self, category_name: str) -> Optional[str]:
+        if not self.anchor_bank:
+            return None
+        if category_name in _FEDERAL_CASE_CATEGORIES:
+            anchor = self.anchor_bank.sample_case(self.rng)
+            if anchor:
+                return (f"Décision fédérale imposée : {anchor.name_fr} "
+                        f"({anchor.citation_fr}, {anchor.dataset}). "
+                        f"Domaine : {anchor.topic_hint}.")
+        if category_name in _FEDERAL_LAW_CATEGORIES:
+            anchor = self.anchor_bank.sample_law(self.rng)
+            if anchor:
+                return (f"Loi fédérale imposée : {anchor.name_fr} "
+                        f"({anchor.citation_fr}).")
         return None
 
     @staticmethod
@@ -206,6 +236,8 @@ class ScenarioGenerator:
         clarification_answer = None
         if category.name in {"juridiction_ambigue", "question_incomplete"}:
             missing = ["juridiction", "faits essentiels"]
+        if category.name == "question_incomplete":
+            clarification_answer = "C'est au Québec, mon employeur a réduit mes heures sans préavis."
         if category.name == "clarification_puis_recherche":
             missing = ["lieu de l’immeuble", "nature du problème"]
             clarification_answer = "La maison est au Québec et j’ai découvert un vice caché après la vente."

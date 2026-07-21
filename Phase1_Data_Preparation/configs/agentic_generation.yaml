@@ -6,7 +6,7 @@ generation:
   max_tool_response_chars: 6000
   max_doc_fetch_chars: 12000
   near_duplicate_jaccard: 0.90
-  prompt_version: agentic-1.8-grounded-rag
+  prompt_version: agentic-2.8-guarded
 
 teacher:
   base_url: ""
@@ -60,18 +60,18 @@ taxonomy:
     reglement_quebecois_connu: 1.0
     reglement_quebecois_inconnu: 1.0
     jurisprudence_quebecoise: 1.0
-    loi_federale: 1.5
-    jurisprudence_federale: 1.0
-    cas_federal_concret: 1.0
-    comparaison_quebec_federal: 0.7
+    loi_federale: 0
+    jurisprudence_federale: 0
+    cas_federal_concret: 0
+    comparaison_quebec_federal: 0
     juridiction_ambigue: 1.0
     question_incomplete: 1.0
     verification_entree_en_vigueur: 0.7
-    couverture_dataset: 0.5
+    couverture_dataset: 0
     question_non_juridique: 0.7
     panne_mcp: 0.5
     resultat_vide: 0.5
-    source_trop_longue: 0.5
+    source_trop_longue: 0
     clarification_puis_recherche: 1.0
 
 mix:

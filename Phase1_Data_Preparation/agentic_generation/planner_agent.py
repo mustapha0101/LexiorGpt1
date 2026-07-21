@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from dataclasses import dataclass
 from typing import Optional
 
 from .prompts import planner_system_prompt
@@ -21,6 +22,51 @@ NO_RESULT_RE = re.compile(
     re.I,
 )
 
+# ---------------------------------------------------------------------------
+# Thinking-text extraction helpers
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SearchIntent:
+    keywords: list[str]
+    target_type: str   # "cases" | "laws" | "auto"
+    case_name: str
+
+_CASE_NAME_RE = re.compile(
+    r"(?:affaire|cause|décision|arrêt)\s+"
+    r"([A-ZÀ-Ÿ][\w'-]+(?:\s+(?:c\.|contre|v\.)\s+[A-ZÀ-Ÿ][\w'-]+)?)"
+    r"|([A-ZÀ-Ÿ][\w'-]+)\s+(?:c\.|contre|v\.)\s+([A-ZÀ-Ÿ][\w'-]+)",
+    re.UNICODE,
+)
+
+_CASE_INDICATOR_WORDS = frozenset({
+    "jurisprudence", "décision", "décisions", "arrêt", "arrêts",
+    "jugement", "jugements", "cause", "causes", "affaire", "affaires",
+    "tribunal", "tribunaux", "cour",
+})
+
+_LAW_INDICATOR_WORDS = frozenset({
+    "loi", "lois", "code", "article", "articles", "disposition",
+    "dispositions", "législatif", "législative", "texte", "statut",
+})
+
+_THINKING_STOPWORDS = frozenset({
+    "avec", "avoir", "cela", "ceci", "cette", "comme", "comment", "dans",
+    "donner", "elle", "elles", "entre", "faire", "leur", "leurs", "mais",
+    "même", "nous", "notre", "plus", "pour", "pouvez", "quel", "quelle",
+    "quelles", "quels", "quoi", "sans", "sont", "sous", "suis", "aussi",
+    "après", "avant", "bien", "chez", "donc", "alors", "être", "très",
+    "tout", "toute", "tous", "vers", "cette", "savoir", "matière",
+    "partie", "encore", "déjà",
+    "chercher", "rechercher", "trouver", "identifier", "utiliser",
+    "appeler", "lancer", "outil", "outils", "recherche", "résultat",
+    "résultats", "doit", "dois", "devrait", "peut", "peux", "faut",
+    "nécessaire", "information", "informations", "question", "demande",
+    "utilisateur", "pertinent", "pertinente", "pertinents", "premier",
+    "première", "suivant", "suivante", "tour", "étape", "récupérer",
+    "obtenir", "besoin", "passer", "concernant",
+})
+
 FEDERAL_STATUTES = (
     (("faillit", "insolv"), "Bankruptcy and Insolvency Act",
      ("bankruptcy and insolvency act", "loi sur la faillite et l insolvabilite")),
@@ -32,7 +78,73 @@ FEDERAL_STATUTES = (
      ("patent act", "loi sur les brevets")),
     (("maritime",), "Marine Liability Act",
      ("marine liability act", "loi sur la responsabilite en matiere maritime")),
+    (("immigr", "réfugié", "asile"), "Immigration and Refugee Protection Act",
+     ("immigration and refugee protection act",
+      "loi sur l immigration et la protection des refugies")),
+    (("criminel", "infraction", "pénale", "meurtre", "vol qualifié", "agression"),
+     "Criminal Code",
+     ("criminal code", "code criminel")),
+    (("droit d'auteur", "copyright"), "Copyright Act",
+     ("copyright act", "loi sur le droit d auteur")),
+    (("concurrence", "antitrust"), "Competition Act",
+     ("competition act", "loi sur la concurrence")),
+    (("impôt", "fiscal", "revenu"), "Income Tax Act",
+     ("income tax act", "loi de l impot sur le revenu")),
+    (("travail", "normes du travail fédéral", "congédiement fédéral"),
+     "Canada Labour Code",
+     ("canada labour code", "code canadien du travail")),
+    (("environnement", "pollution"), "Canadian Environmental Protection Act, 1999",
+     ("canadian environmental protection act",
+      "loi canadienne sur la protection de l environnement")),
+    (("divorce",), "Divorce Act",
+     ("divorce act", "loi sur le divorce")),
+    (("douane", "tarif", "importation", "exportation"), "Customs Act",
+     ("customs act", "loi sur les douanes")),
+    (("drogue", "stupéfiant", "cannabis", "substance contrôlée"),
+     "Controlled Drugs and Substances Act",
+     ("controlled drugs and substances act",
+      "loi reglementant certaines drogues et autres substances")),
+    (("transport", "aérien", "aviation"), "Canada Transportation Act",
+     ("canada transportation act", "loi sur les transports au canada")),
+    (("société", "entreprise fédérale", "société par actions"),
+     "Canada Business Corporations Act",
+     ("canada business corporations act",
+      "loi canadienne sur les societes par actions")),
+    (("pension", "retraite", "rpc"), "Canada Pension Plan",
+     ("canada pension plan", "regime de pensions du canada")),
+    (("assurance-emploi", "chômage", "prestation"), "Employment Insurance Act",
+     ("employment insurance act", "loi sur l assurance emploi")),
+    (("télécommunication", "radiodiffusion", "crtc"),
+     "Telecommunications Act",
+     ("telecommunications act", "loi sur les telecommunications")),
+    (("accès à l'information", "renseignements personnels", "vie privée"),
+     "Privacy Act",
+     ("privacy act", "loi sur la protection des renseignements personnels")),
 )
+
+FEDERAL_KNOWN_CITATIONS: dict[str, str] = {
+    "Bankruptcy and Insolvency Act": "LRC 1985, c B-3",
+    "Bank Act": "LC 1991, c 46",
+    "Trademarks Act": "LRC 1985, c T-13",
+    "Patent Act": "LRC 1985, c P-4",
+    "Marine Liability Act": "LC 2001, c 6",
+    "Immigration and Refugee Protection Act": "LC 2001, c 27",
+    "Criminal Code": "LRC 1985, c C-46",
+    "Copyright Act": "LRC 1985, c C-42",
+    "Competition Act": "LRC 1985, c C-34",
+    "Income Tax Act": "LRC 1985, c 1 (5e suppl)",
+    "Canada Labour Code": "LRC 1985, c L-2",
+    "Canadian Environmental Protection Act, 1999": "LC 1999, c 33",
+    "Divorce Act": "LRC 1985, c 3 (2e suppl)",
+    "Customs Act": "LRC 1985, c 1 (2e suppl)",
+    "Controlled Drugs and Substances Act": "LC 1996, c 19",
+    "Canada Transportation Act": "LC 1996, c 10",
+    "Canada Business Corporations Act": "LRC 1985, c C-44",
+    "Canada Pension Plan": "LRC 1985, c C-8",
+    "Employment Insurance Act": "LC 1996, c 23",
+    "Telecommunications Act": "LC 1993, c 38",
+    "Privacy Act": "LRC 1985, c P-21",
+}
 
 
 class PlannerAgent:
@@ -43,8 +155,15 @@ class PlannerAgent:
 
     def decide(self, state: ResearchState) -> PlannerDecision:
         decision = self._offline_decide(state) if self.offline else self._teacher_decide(state)
-        if not self.offline and decision.decision == Decision.call_tool and decision.next_tool:
-            decision = self._validate_arguments(state, decision)
+        if not self.offline:
+            decision = self._guard_clarification(state, decision)
+            decision = self._guard_federal_fetch(state, decision)
+            decision = self._guard_failed_tool(state, decision)
+            if decision.decision == Decision.call_tool and decision.next_tool:
+                decision = self._validate_arguments(state, decision)
+            decision = self._guard_duplicate_call(state, decision)
+            decision = self._guard_tool_compatibility(state, decision)
+            decision = self._guard_required_tools(state, decision)
         errors = validate_planner_decision(decision, self.catalog)
         if decision.decision == Decision.call_tool and decision.next_tool:
             allowed = set(state.scenario.expected_route.allowed_tools())
@@ -59,6 +178,323 @@ class PlannerAgent:
             raise ValueError("décision Planner invalide : " + "; ".join(errors))
         return decision
 
+    def _guard_clarification(self, state: ResearchState,
+                             decision: PlannerDecision) -> PlannerDecision:
+        """Force clarification when required but not yet asked."""
+        if not state.scenario.expected_route.requires_clarification:
+            if decision.decision == Decision.ask_clarification:
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    decision=Decision.final_answer,
+                    thinking_text=(
+                        "Cette catégorie ne nécessite pas de clarification. "
+                        "Je réponds directement avec les informations disponibles."
+                    ),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need="pas de clarification requise",
+                        next_action="final_answer"),
+                )
+            return decision
+        if self._clarification_answered(state):
+            return decision
+        if decision.decision == Decision.ask_clarification:
+            return decision
+        question = (decision.clarification_question
+                    or "Pouvez-vous préciser les faits essentiels "
+                       "(lieu, dates, montants) afin que je puisse "
+                       "identifier la règle applicable?")
+        return PlannerDecision(
+            request_type=decision.request_type,
+            jurisdiction=decision.jurisdiction,
+            missing_critical_facts=state.scenario.facts_missing or ["faits essentiels"],
+            decision=Decision.ask_clarification,
+            clarification_question=question,
+            thinking_text=(
+                "Des informations essentielles manquent pour identifier la règle "
+                "applicable. Je dois poser une question de clarification avant "
+                "de lancer une recherche."
+            ),
+            decision_trace=DecisionTrace(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                need="clarification avant recherche",
+                next_action="ask_clarification"),
+        )
+
+    def _guard_failed_tool(self, state: ResearchState,
+                           decision: PlannerDecision) -> PlannerDecision:
+        """Skip a tool that has already failed 2+ times."""
+        if decision.decision != Decision.call_tool or not decision.next_tool:
+            return decision
+        fail_count = sum(1 for o in state.tool_history
+                         if o.tool_name == decision.next_tool and not o.ok)
+        if fail_count < 2:
+            return decision
+        route = self._effective_route(state)
+        for candidate in route:
+            if candidate == decision.next_tool:
+                continue
+            if any(o.tool_name == candidate and o.ok for o in state.tool_history):
+                continue
+            args = self._arguments(candidate, state)
+            if args is not None:
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    decision=Decision.call_tool,
+                    next_tool=candidate,
+                    arguments=args,
+                    thinking_text=(
+                        f"L'outil {decision.next_tool} a échoué plusieurs fois. "
+                        f"Je passe à {candidate}."
+                    ),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need="outil défaillant, redirection",
+                        next_action=f"call_tool:{candidate}"),
+                )
+        return PlannerDecision(
+            request_type=decision.request_type,
+            jurisdiction=decision.jurisdiction,
+            decision=Decision.final_answer,
+            thinking_text=(
+                f"L'outil {decision.next_tool} a échoué plusieurs fois et "
+                "aucun outil alternatif n'est disponible."
+            ),
+            decision_trace=DecisionTrace(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                need="aucun outil disponible",
+                next_action="final_answer"),
+        )
+
+    def _guard_federal_fetch(self, state: ResearchState,
+                             decision: PlannerDecision) -> PlannerDecision:
+        """Redirect to fetch_document when search already returned results."""
+        if decision.decision != Decision.call_tool:
+            return decision
+        if decision.next_tool != "search_legal_documents":
+            return decision
+        if state.scenario.request_type not in {
+            "loi_federale", "cas_federal_concret", "source_trop_longue",
+            "jurisprudence_federale",
+        }:
+            return decision
+        search_calls = [
+            o for o in state.tool_history
+            if o.tool_name == "search_legal_documents" and o.ok
+            and o.normalized_response.strip() not in ("", "[]", "{}")
+        ]
+        if not search_calls:
+            return decision
+        already_fetched = any(
+            o.tool_name == "fetch_document" for o in state.tool_history
+        )
+        if already_fetched:
+            return PlannerDecision(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                decision=Decision.final_answer,
+                thinking_text=(
+                    "J'ai déjà effectué une recherche et récupéré le document "
+                    "fédéral. J'ai assez d'information pour répondre."
+                ),
+                decision_trace=DecisionTrace(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    need="sources fédérales récupérées",
+                    next_action="final_answer"),
+            )
+        args = self._arguments("fetch_document", state)
+        if not args:
+            return PlannerDecision(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                decision=Decision.final_answer,
+                thinking_text=(
+                    "La recherche fédérale a retourné des résultats mais je ne "
+                    "parviens pas à identifier une citation précise pour "
+                    "récupérer le document complet. Je réponds avec les "
+                    "informations disponibles dans les résultats de recherche."
+                ),
+                decision_trace=DecisionTrace(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    need="réponse basée sur résultats de recherche",
+                    next_action="final_answer"),
+            )
+        return PlannerDecision(
+            request_type=decision.request_type,
+            jurisdiction=decision.jurisdiction,
+            decision=Decision.call_tool,
+            next_tool="fetch_document",
+            arguments=args,
+            thinking_text=(
+                "La recherche a déjà retourné des résultats. "
+                "Je passe à fetch_document pour récupérer le texte officiel "
+                "au lieu de relancer une recherche."
+            ),
+            decision_trace=DecisionTrace(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                need="texte officiel du document fédéral",
+                next_action="call_tool:fetch_document"),
+        )
+
+    def _guard_required_tools(self, state: ResearchState,
+                              decision: PlannerDecision) -> PlannerDecision:
+        """Prevent final_answer when required tools haven't been called."""
+        if decision.decision not in {Decision.final_answer, Decision.cannot_conclude}:
+            return decision
+        required = state.scenario.expected_route.required_tools()
+        called = {o.tool_name for o in state.tool_history}
+        missing = [t for t in required if t not in called]
+        if not missing:
+            return decision
+        for tool in missing:
+            args = self._arguments(tool, state)
+            if args is not None:
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    decision=Decision.call_tool,
+                    next_tool=tool,
+                    arguments=args,
+                    thinking_text=(
+                        f"Je dois encore appeler {tool} avant de répondre, "
+                        "car c'est un outil requis pour cette catégorie."
+                    ),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need=f"outil requis non encore appelé",
+                        next_action=f"call_tool:{tool}"),
+                )
+        return decision
+
+    def _guard_duplicate_call(self, state: ResearchState,
+                             decision: PlannerDecision) -> PlannerDecision:
+        """Prevent calling the same tool with identical arguments."""
+        if decision.decision != Decision.call_tool or not decision.next_tool:
+            return decision
+        for obs in state.tool_history:
+            if obs.tool_name == decision.next_tool and obs.arguments == decision.arguments:
+                route = self._effective_route(state)
+                for candidate in route:
+                    if candidate == decision.next_tool:
+                        continue
+                    if any(o.tool_name == candidate and o.ok for o in state.tool_history):
+                        continue
+                    fail_count = sum(1 for o in state.tool_history
+                                     if o.tool_name == candidate and not o.ok)
+                    if fail_count >= 2:
+                        continue
+                    args = self._arguments(candidate, state)
+                    if args is not None:
+                        return PlannerDecision(
+                            request_type=decision.request_type,
+                            jurisdiction=decision.jurisdiction,
+                            decision=Decision.call_tool,
+                            next_tool=candidate,
+                            arguments=args,
+                            thinking_text=(
+                                f"L'outil {decision.next_tool} a déjà été appelé "
+                                "avec ces mêmes arguments. Je passe à l'outil "
+                                f"suivant dans la route : {candidate}."
+                            ),
+                            decision_trace=DecisionTrace(
+                                request_type=decision.request_type,
+                                jurisdiction=decision.jurisdiction,
+                                need="éviter appel identique",
+                                next_action=f"call_tool:{candidate}"),
+                        )
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    decision=Decision.final_answer,
+                    thinking_text=(
+                        f"L'outil {decision.next_tool} a déjà été appelé avec "
+                        "les mêmes arguments. Je réponds avec les informations "
+                        "déjà récupérées."
+                    ),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need="appel identique détecté",
+                        next_action="final_answer"),
+                )
+        return decision
+
+    def _guard_tool_compatibility(self, state: ResearchState,
+                                  decision: PlannerDecision) -> PlannerDecision:
+        """Redirect to a compatible tool when Qwen picks one not in the route."""
+        if decision.decision != Decision.call_tool or not decision.next_tool:
+            return decision
+        if state.scenario.expected_route.no_tool:
+            return PlannerDecision(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                decision=Decision.final_answer,
+                thinking_text=(
+                    decision.thinking_text or
+                    "Aucun outil n'est attendu pour cette catégorie. "
+                    "Je réponds directement."
+                ),
+                decision_trace=DecisionTrace(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    need="pas d'outil attendu",
+                    next_action="final_answer"),
+            )
+        allowed = set(state.scenario.expected_route.allowed_tools())
+        if decision.next_tool in allowed:
+            return decision
+        route = self._effective_route(state)
+        for candidate in route:
+            if any(o.tool_name == candidate and o.ok for o in state.tool_history):
+                continue
+            fail_count = sum(1 for o in state.tool_history
+                             if o.tool_name == candidate and not o.ok)
+            if fail_count >= 2:
+                continue
+            args = self._arguments(candidate, state)
+            if args is not None:
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    decision=Decision.call_tool,
+                    next_tool=candidate,
+                    arguments=args,
+                    thinking_text=decision.thinking_text or (
+                        f"Redirection vers {candidate} car l'outil "
+                        f"{decision.next_tool} n'est pas dans la route."
+                    ),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need=f"redirection vers outil compatible",
+                        next_action=f"call_tool:{candidate}"),
+                )
+        return PlannerDecision(
+            request_type=decision.request_type,
+            jurisdiction=decision.jurisdiction,
+            decision=Decision.final_answer,
+            thinking_text=(
+                decision.thinking_text or
+                "Aucun outil compatible disponible dans la route. "
+                "Je réponds avec les informations déjà récupérées."
+            ),
+            decision_trace=DecisionTrace(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                need="aucun outil compatible restant",
+                next_action="final_answer"),
+        )
+
     def _validate_arguments(self, state: ResearchState,
                             decision: PlannerDecision) -> PlannerDecision:
         """Valide et corrige les arguments du Teacher sans changer l'outil choisi.
@@ -70,7 +506,8 @@ class PlannerAgent:
         """
         if not decision.next_tool:
             return decision
-        reconstructed = self._arguments(decision.next_tool, state)
+        reconstructed = self._arguments(decision.next_tool, state,
+                                         thinking=decision.thinking_text)
         if reconstructed is not None:
             decision.arguments = reconstructed
         return decision
@@ -302,12 +739,22 @@ class PlannerAgent:
                     route.insert(route.index(search_tool) + 1, search_tool)
         return route
 
-    def _arguments(self, tool: str, state: ResearchState) -> Optional[dict]:
+    def _arguments(self, tool: str, state: ResearchState,
+                   thinking: str = "") -> Optional[dict]:
         query = "\n".join(
             message.content for message in state.messages
             if message.role.value == "user"
         ) or state.scenario.user_query
         if tool in {"get_ccq_articles", "get_cpc_articles"}:
+            already_fetched: set[float] = set()
+            for obs in state.tool_history:
+                if obs.tool_name == tool and obs.ok:
+                    sa = obs.arguments.get("start_article")
+                    ea = obs.arguments.get("end_article", sa)
+                    if sa is not None:
+                        already_fetched.update(
+                            float(v) for v in range(int(sa), int(ea or sa) + 1)
+                        )
             if state.tool_history:
                 search_tool = (
                     "semantic_search_ccq"
@@ -320,16 +767,20 @@ class PlannerAgent:
                     if observation.ok and observation.tool_name == search_tool
                 )
                 candidates = ARTICLE_LABEL_RE.findall(search_text)
+                if not candidates:
+                    candidates = ARTICLE_RE.findall(query)
             else:
                 candidates = ARTICLE_RE.findall(query)
+            candidates = [
+                c for c in candidates if float(c) not in already_fetched
+            ]
             if not candidates:
+                fallback = self._topic_article(tool, query, already_fetched)
+                if fallback is not None:
+                    return fallback
                 return None
             values = [float(value) for value in candidates[:3]]
             primary = values[0]
-            # Les codes regroupent souvent une même règle sur quelques
-            # dispositions consécutives (ex. CPC 269 à 274 pour les témoins).
-            # On récupère ce petit bloc officiel, sans élargir aux candidats
-            # thématiquement proches mais éloignés dans le Code.
             nearby = [value for value in values if abs(value - primary) <= 5]
             start, end = min(nearby), max(nearby)
 
@@ -352,23 +803,63 @@ class PlannerAgent:
                 )
             return {"query": semantic_query}
         if tool in {"search_ccq_keywords", "search_cpc_keywords", "search_quebec_regulations"}:
-            candidates = self._keyword_candidates(tool, query)
+            candidates = self._keyword_candidates(tool, query, thinking)
             previous = sum(
                 observation.tool_name == tool for observation in state.tool_history
             )
             keyword = candidates[min(previous, len(candidates) - 1)]
             return {"keyword": keyword}
         if tool == "search_quebec_jurisprudence":
-            return {"query": "vice caché application faits" if "vice" in query.casefold() else query[:180]}
+            intent = self._extract_search_intent(thinking)
+            if intent.keywords:
+                jurisprudence_query = " ".join(intent.keywords[:4])
+            elif "vice" in query.casefold():
+                jurisprudence_query = "vice caché application faits"
+            else:
+                jurisprudence_query = self._compact_keyword(query)
+            return {"query": jurisprudence_query}
         if tool == "get_quebec_regulation":
             urls = [u for o in state.tool_history for u in o.source_urls]
+            if not urls:
+                url_re = re.compile(r"https?://[^\s\"',\]\)]+")
+                for obs in reversed(state.tool_history):
+                    if obs.tool_name == "search_quebec_regulations" and obs.ok:
+                        urls = url_re.findall(obs.normalized_response or "")
+                        if urls:
+                            break
             return {"url": urls[0]} if urls else None
         if tool == "get_quebec_legal_info":
             return {"type": "eevlois"}
         if tool == "coverage":
             return {"doc_type": "cases"}
         if tool == "search_legal_documents":
-            doc_type = "laws" if state.scenario.request_type in {"loi_federale", "cas_federal_concret", "source_trop_longue"} else "cases"
+            intent = self._extract_search_intent(thinking)
+            req = state.scenario.request_type
+            if req == "cas_federal_concret":
+                prior_searches = [o for o in state.tool_history
+                                  if o.tool_name == "search_legal_documents"]
+                if prior_searches:
+                    doc_type = "cases"
+                elif intent.case_name or intent.target_type == "cases":
+                    doc_type = "cases"
+                else:
+                    doc_type = "laws"
+            elif req in {"loi_federale", "source_trop_longue"}:
+                doc_type = "laws"
+            elif req == "jurisprudence_federale":
+                doc_type = "cases"
+            else:
+                doc_type = "cases"
+
+            if intent.case_name:
+                return {
+                    "query": intent.case_name,
+                    "search_type": "name",
+                    "doc_type": doc_type,
+                    "search_language": "fr",
+                    "size": 5,
+                }
+
             target = self._federal_statute_target(query) if doc_type == "laws" else None
             if target:
                 return {
@@ -376,7 +867,19 @@ class PlannerAgent:
                     "doc_type": "laws", "search_language": "en",
                     "dataset": "LEGISLATION-FED", "size": 5,
                 }
-            return {"query": query[:180], "doc_type": doc_type,
+            if doc_type == "laws":
+                return {
+                    "query": query[:180], "doc_type": "laws",
+                    "search_language": "fr",
+                    "dataset": "LEGISLATION-FED", "size": 5,
+                }
+            if req == "jurisprudence_federale":
+                target = self._federal_statute_target(query)
+                if target:
+                    return {"query": target[0], "doc_type": "cases",
+                            "search_language": "en", "size": 5}
+            search_q = " ".join(intent.keywords[:3]) if intent.keywords else query[:180]
+            return {"query": search_q, "doc_type": doc_type,
                     "search_language": "fr", "size": 5}
         if tool == "fetch_document":
             is_law = state.scenario.request_type in {
@@ -387,6 +890,15 @@ class PlannerAgent:
             else:
                 citations = [c for o in state.tool_history for c in o.citations]
                 citation = citations[0] if citations else ""
+            if not citation:
+                all_citations = [c for o in state.tool_history for c in o.citations]
+                citation = all_citations[0] if all_citations else ""
+            if not citation:
+                citation = self._any_search_citation(state)
+            if not citation and is_law:
+                target = self._federal_statute_target(query)
+                if target and target[0] in FEDERAL_KNOWN_CITATIONS:
+                    citation = FEDERAL_KNOWN_CITATIONS[target[0]]
             if not citation:
                 return None
             args = {"citation": citation, "output_language": "fr",
@@ -399,12 +911,93 @@ class PlannerAgent:
                 # ciblée évite de tronquer les quelque 400 articles de la loi.
                 args["section"] = "49"
             previous_fetches = [o for o in state.tool_history if o.tool_name == "fetch_document"]
+            if len(previous_fetches) >= 2:
+                return None
             if previous_fetches:
                 args.update({"start_char": 6000, "end_char": 12000})
             elif state.scenario.request_type == "source_trop_longue":
                 args.update({"start_char": 0, "end_char": 6000})
             return args
         return None
+
+    _CCQ_TOPIC_ARTICLES: dict[tuple[str, ...], int] = {
+        ("vice caché", "vice", "garantie de qualité"): 1726,
+        ("responsab", "préjudice", "dommage"): 1457,
+        ("contrat", "obligation"): 1375,
+        ("vente", "vendeur", "acheteur"): 1708,
+        ("bail", "locataire", "loyer", "logement"): 1851,
+        ("mandat", "mandataire"): 2130,
+        ("succession", "héritier", "testament"): 613,
+        ("hypothèque", "sûreté"): 2660,
+        ("prescription", "délai"): 2875,
+        ("mariage", "divorce", "séparation"): 392,
+        ("propriété", "bien", "immeuble"): 947,
+        ("tutelle", "mineur", "curatelle", "protection"): 177,
+        ("société", "associé", "entreprise"): 2186,
+        ("assurance",): 2389,
+        ("donation", "don"): 1806,
+        ("servitude",): 1177,
+        ("usufruit",): 1120,
+        ("copropriété", "condo"): 1038,
+        ("travail", "salarié", "employeur"): 2085,
+    }
+
+    _CPC_TOPIC_ARTICLES: dict[tuple[str, ...], int] = {
+        ("signif", "notifi"): 109,
+        ("injonction",): 509,
+        ("appel",): 351,
+        ("exécution",): 681,
+        ("médiation", "conférence"): 161,
+        ("demande", "action", "recours"): 141,
+        ("preuve", "témoin"): 251,
+        ("saisie",): 696,
+    }
+
+    _CCQ_DEFAULT_ARTICLE = 1375
+    _CPC_DEFAULT_ARTICLE = 1
+
+    @classmethod
+    def _topic_article(cls, tool: str, query: str,
+                       already_fetched: set[float]) -> Optional[dict]:
+        """Fallback article number from query topic when search failed."""
+        folded = query.casefold()
+        is_ccq = "ccq" in tool
+        topics = cls._CCQ_TOPIC_ARTICLES if is_ccq else cls._CPC_TOPIC_ARTICLES
+        for markers, article in topics.items():
+            if float(article) in already_fetched:
+                continue
+            if any(m in folded for m in markers):
+                return {"start_article": article}
+        default = cls._CCQ_DEFAULT_ARTICLE if is_ccq else cls._CPC_DEFAULT_ARTICLE
+        if float(default) not in already_fetched:
+            return {"start_article": default}
+        return None
+
+    @classmethod
+    def _any_search_citation(cls, state: ResearchState) -> str:
+        """Extract any citation from search_legal_documents results."""
+        for obs in reversed(state.tool_history):
+            if obs.tool_name != "search_legal_documents" or not obs.ok:
+                continue
+            for result in cls._extract_search_results(obs):
+                citation = result.get("citation_fr") or result.get("citation_en")
+                if citation:
+                    return str(citation)
+        for obs in reversed(state.tool_history):
+            if obs.tool_name != "search_legal_documents" or not obs.ok:
+                continue
+            for c in obs.citations:
+                if c.strip():
+                    return c.strip()
+            citation_re = re.compile(
+                r"\b\d{4}\s+(?:SCC|CSC|FC|CF|FCA|CAF|QCCA|QCCS|QCCQ)\s+\d+\b"
+                r"|(?:RSC|LRC|SC|LC),?\s+\d{4},?\s*c\.?\s*[A-Z]?-?\d+"
+            )
+            text = obs.normalized_response or ""
+            match = citation_re.search(text)
+            if match:
+                return match.group(0)
+        return ""
 
     @staticmethod
     def _fold(value: str) -> str:
@@ -423,6 +1016,42 @@ class PlannerAgent:
         return None
 
     @classmethod
+    def _extract_search_results(cls, observation) -> list[dict]:
+        """Parse results from a search_legal_documents observation."""
+        for source in (observation.normalized_response, observation.raw_response):
+            for payload in cls._candidate_payloads(source):
+                results = payload.get("results", []) if isinstance(payload, dict) else []
+                if results:
+                    return [r for r in results if isinstance(r, dict)]
+        return []
+
+    @staticmethod
+    def _candidate_payloads(source) -> list[dict]:
+        """Yield dict payloads from a normalized string, raw dict, or MCP wrapper."""
+        candidates: list[dict] = []
+        if isinstance(source, str):
+            try:
+                parsed = json.loads(source)
+                if isinstance(parsed, dict):
+                    candidates.append(parsed)
+            except (TypeError, ValueError):
+                pass
+        elif isinstance(source, dict):
+            candidates.append(source)
+            sc = source.get("structuredContent")
+            if isinstance(sc, dict):
+                candidates.append(sc)
+            for item in (source.get("content") or []):
+                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                    try:
+                        inner = json.loads(item["text"])
+                        if isinstance(inner, dict):
+                            candidates.append(inner)
+                    except (TypeError, ValueError):
+                        pass
+        return candidates
+
+    @classmethod
     def _validated_federal_law_citation(cls, state: ResearchState,
                                         query: str) -> str:
         """Retient seulement une loi fédérale dont le titre correspond au besoin."""
@@ -431,14 +1060,7 @@ class PlannerAgent:
         for observation in reversed(state.tool_history):
             if observation.tool_name != "search_legal_documents" or not observation.ok:
                 continue
-            try:
-                payload = json.loads(observation.normalized_response)
-            except (TypeError, ValueError):
-                continue
-            results = payload.get("results", []) if isinstance(payload, dict) else []
-            for result in results:
-                if not isinstance(result, dict):
-                    continue
+            for result in cls._extract_search_results(observation):
                 if cls._fold(str(result.get("dataset", ""))) != "legislation-fed":
                     continue
                 names = [
@@ -462,7 +1084,8 @@ class PlannerAgent:
         return stripped in ("", "[]", "{}") or bool(NO_RESULT_RE.search(stripped))
 
     @staticmethod
-    def _keyword_candidates(tool: str, query: str) -> list[str]:
+    def _keyword_candidates(tool: str, query: str,
+                            thinking: str = "") -> list[str]:
         folded = query.casefold()
         if tool == "search_ccq_keywords":
             if any(marker in folded for marker in ("bail", "baux", "locataire", "loyer", "logement")):
@@ -475,7 +1098,9 @@ class PlannerAgent:
                 return ["responsabilité civile", "réparation du préjudice"]
             if any(marker in folded for marker in ("travail", "salari", "employeur")):
                 return ["contrat de travail", "salarié"]
-            return [PlannerAgent._compact_keyword(query), "obligation"]
+            thinking_kw = PlannerAgent._compact_keyword(thinking) if thinking else ""
+            primary = thinking_kw if thinking_kw and thinking_kw != "droit applicable" else PlannerAgent._compact_keyword(query)
+            return [primary, "obligation"]
         if tool == "search_cpc_keywords":
             if "mise en état" in folded or "prépar" in folded:
                 return ["protocole de l'instance", "gestion de l'instance"]
@@ -487,12 +1112,16 @@ class PlannerAgent:
                 return ["injonction", "injonction interlocutoire"]
             if "appel" in folded:
                 return ["appel", "permission d'appeler"]
-            return [PlannerAgent._compact_keyword(query), "gestion de l'instance"]
+            thinking_kw = PlannerAgent._compact_keyword(thinking) if thinking else ""
+            primary = thinking_kw if thinking_kw and thinking_kw != "droit applicable" else PlannerAgent._compact_keyword(query)
+            return [primary, "gestion de l'instance"]
         if any(marker in folded for marker in ("eau", "potable")):
             return ["qualité de l'eau potable", "eau potable"]
         if any(marker in folded for marker in ("environnement", "impact", "activité")):
             return ["encadrement d'activités environnementales", "impact environnemental"]
-        return [PlannerAgent._compact_keyword(query), "règlement Québec"]
+        thinking_kw = PlannerAgent._compact_keyword(thinking) if thinking else ""
+        primary = thinking_kw if thinking_kw and thinking_kw != "droit applicable" else PlannerAgent._compact_keyword(query)
+        return [primary, "règlement Québec"]
 
     @staticmethod
     def _compact_keyword(query: str) -> str:
@@ -506,6 +1135,42 @@ class PlannerAgent:
             if word not in stopwords
         ]
         return " ".join(words[:3]) or "droit applicable"
+
+    @staticmethod
+    def _extract_search_intent(thinking: str) -> SearchIntent:
+        if not thinking or not thinking.strip():
+            return SearchIntent(keywords=[], target_type="auto", case_name="")
+
+        case_name = ""
+        match = _CASE_NAME_RE.search(thinking)
+        if match:
+            case_name = (match.group(1)
+                         or f"{match.group(2)} c. {match.group(3)}")
+
+        words_in_thinking = set(re.findall(
+            r"[a-zà-ÿéèêëàâäùûüôöîïç]+", thinking.casefold()))
+        case_score = len(words_in_thinking & _CASE_INDICATOR_WORDS)
+        law_score = len(words_in_thinking & _LAW_INDICATOR_WORDS)
+        if case_name or case_score > law_score:
+            target_type = "cases"
+        elif law_score > case_score:
+            target_type = "laws"
+        else:
+            target_type = "auto"
+
+        all_words = re.findall(r"[A-Za-zÀ-ÿ]{4,}", thinking.casefold())
+        exclude = _THINKING_STOPWORDS | _CASE_INDICATOR_WORDS | _LAW_INDICATOR_WORDS
+        seen: set[str] = set()
+        keywords: list[str] = []
+        for word in all_words:
+            if word not in exclude and word not in seen:
+                seen.add(word)
+                keywords.append(word)
+            if len(keywords) >= 5:
+                break
+
+        return SearchIntent(keywords=keywords, target_type=target_type,
+                            case_name=case_name)
 
     @staticmethod
     def _infer_jurisdiction(query: str, request_type: str) -> str:

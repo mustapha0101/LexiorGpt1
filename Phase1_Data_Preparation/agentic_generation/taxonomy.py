@@ -162,7 +162,7 @@ CATEGORIES: dict[str, Category] = {c.name: c for c in [
     Category(
         name="comparaison_quebec_federal",
         description="Comparaison entre le régime québécois et le régime fédéral.",
-        expected_route=_route("semantic_search_ccq", "get_ccq_articles",
+        expected_route=_route(("semantic_search_ccq", True), "get_ccq_articles",
                               "search_legal_documents",
                               ("fetch_document", True)),
         expected_jurisdiction="Québec et Canada (fédéral)",
@@ -180,7 +180,9 @@ CATEGORIES: dict[str, Category] = {c.name: c for c in [
         name="question_incomplete",
         description="Information essentielle manquante (« Mon patron peut-il "
                     "faire ça ? ») : clarification avant recherche.",
-        expected_route=_route(clarification=True),
+        expected_route=_route(("semantic_search_ccq", True),
+                              ("get_ccq_articles", True),
+                              clarification=True),
         expected_jurisdiction="indéterminée",
         default_weight=1.0),
     Category(

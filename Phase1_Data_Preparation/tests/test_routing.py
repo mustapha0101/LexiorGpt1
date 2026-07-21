@@ -51,8 +51,11 @@ def test_bank_in_montreal_routes_federal_not_ccq(catalog):
 def test_incomplete_question_clarifies_before_search(catalog):
     result, transport = run_offline(catalog, "question_incomplete")
     assert result.accepted, result.rejection
-    assert transport.calls == []
-    assert "préciser" in result.trajectory.final_answer().casefold()
+    messages = result.trajectory.messages
+    clarification_msg = [m for m in messages
+                         if m.role.value == "assistant"
+                         and m.content.rstrip().endswith("?")]
+    assert len(clarification_msg) >= 1
 
 
 def test_greeting_uses_no_tool(catalog):

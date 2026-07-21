@@ -23,6 +23,7 @@ from .mcp_executor import MCPExecutor, MockMCPTransport, RealMCPTransport
 from .orchestrator import AgenticOrchestrator
 from .planner_agent import PlannerAgent
 from .publisher import prepare_release, push_release
+from .anchor_bank import AnchorBank, build_anchor_bank
 from .scenario_generator import ScenarioGenerator
 from .schemas import GenerationManifest
 from .storage import JsonCache, RunStorage
@@ -65,11 +66,32 @@ def _print_progress(index: int, max_scenarios: int, counts: Counter,
     )
 
 
+_MAX_ATTEMPTS_PER_SLOT = 5
+
+
 def _next_category(targets: dict[str, int], accepted: Counter,
                    attempted: Counter) -> str:
-    """Choisit la catégorie la plus en retard sur son quota d'acceptation."""
-    pending = [name for name, target in targets.items() if accepted[name] < target]
+    """Choisit la catégorie la plus en retard sur son quota d'acceptation.
+
+    Si une catégorie a été tentée trop de fois sans succès, elle est ignorée
+    et une catégorie avec quota 0 (overflow) prend le relais.
+    """
+    pending = [
+        name for name, target in targets.items()
+        if accepted[name] < target
+        and (attempted[name] - accepted[name]) < target * _MAX_ATTEMPTS_PER_SLOT
+    ]
     if not pending:
+        overflow = [
+            name for name, target in targets.items()
+            if target == 0 and accepted[name] == 0
+            and (attempted[name] - accepted[name]) < _MAX_ATTEMPTS_PER_SLOT
+        ]
+        if overflow:
+            return min(overflow, key=lambda name: (attempted[name], name))
+        all_pending = [name for name, target in targets.items() if accepted[name] < target]
+        if all_pending:
+            return min(all_pending, key=lambda name: (attempted[name], name))
         raise RuntimeError("tous les quotas de catégories sont atteints")
     return min(
         pending,
@@ -246,12 +268,21 @@ def generate(args) -> int:
     executor = MCPExecutor(catalog, transport, allow_remote_calls=cfg.allow_remote_calls,
                            cache=mcp_cache, max_response_chars=cfg.max_tool_response_chars,
                            rag=rag)
+    anchor_bank = None
     if not cfg.offline:
         remote_tools = sum(not catalog.is_local(name) for name in catalog.tools)
         print(f"[init] vérification des schémas des {remote_tools} outils MCP...", flush=True)
         asyncio.run(executor.verify_catalog())
         print("[init] catalogue MCP vérifié.", flush=True)
-    scenario_generator = ScenarioGenerator(teacher, cfg.seed, cfg.offline, cfg.taxonomy_proportions)
+        print("[init] pré-interrogation MCP pour ancres fédérales...", flush=True)
+        anchor_bank = build_anchor_bank(transport)
+        print(
+            f"[init] ancres: {len(anchor_bank.cases)} décisions fédérales, "
+            f"{len(anchor_bank.laws)} lois fédérales.",
+            flush=True,
+        )
+    scenario_generator = ScenarioGenerator(teacher, cfg.seed, cfg.offline, cfg.taxonomy_proportions,
+                                           anchor_bank=anchor_bank)
     orchestrator = AgenticOrchestrator(
         cfg, catalog, PlannerAgent(catalog, teacher, cfg.offline), executor,
         TrajectoryAgent(teacher, cfg.offline), LegalCritic(critic_client, cfg.offline),

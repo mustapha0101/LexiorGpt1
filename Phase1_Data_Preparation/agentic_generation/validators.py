@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
@@ -23,6 +24,69 @@ PRECISE_ARTICLE_TOOLS = {
     "article_ccq_precis": "get_ccq_articles",
     "article_cpc_precis": "get_cpc_articles",
 }
+
+# --------------- language mismatch detection ---------------
+
+_CJK_RANGES = (
+    ("一", "鿿"),    # CJK Unified Ideographs
+    ("㐀", "䶿"),    # CJK Extension A
+    ("぀", "ゟ"),    # Hiragana
+    ("゠", "ヿ"),    # Katakana
+    ("가", "힯"),    # Hangul Syllables
+)
+
+_FOREIGN_SCRIPT_CATEGORIES = {"CYRILLIC", "ARABIC", "DEVANAGARI", "THAI", "GREEK", "HEBREW"}
+
+_STOPWORDS: dict[str, set[str]] = {
+    "fr": {"le", "la", "les", "de", "des", "du", "un", "une", "est", "sont",
+            "en", "au", "aux", "ce", "cette", "il", "elle", "nous", "vous",
+            "qui", "que", "dans", "pour", "par", "sur", "avec", "pas", "ne",
+            "plus", "ou", "et", "mais", "donc", "car", "entre", "après",
+            "avant", "selon", "lors", "ses", "leur", "leurs", "être", "avoir",
+            "fait", "peut", "doit", "soit"},
+    "en": {"the", "of", "and", "to", "in", "is", "it", "that", "was", "for",
+            "on", "are", "with", "as", "at", "be", "this", "have", "from",
+            "or", "an", "by", "not", "but", "what", "all", "were", "when",
+            "can", "there", "their", "which", "do", "if", "will", "has",
+            "been", "would", "could", "should", "may"},
+}
+
+_STRIP_RE = re.compile(r"<tool_call>.*?</tool_call>|<tool_response>.*?</tool_response>|https?://\S+|```.*?```", re.DOTALL)
+
+
+def _detect_language_mismatch(text: str, expected_lang: str) -> Optional[str]:
+    """Return an error string if *text* is not predominantly in *expected_lang*, else None."""
+    clean = _STRIP_RE.sub(" ", text)
+    letters = [ch for ch in clean if ch.isalpha()]
+    if len(letters) < 30:
+        return None
+
+    cjk_count = sum(
+        1 for ch in letters
+        if any(lo <= ch <= hi for lo, hi in _CJK_RANGES)
+    )
+    if cjk_count / len(letters) > 0.05:
+        return "language mismatch : contenu CJK détecté"
+
+    foreign_script_count = 0
+    for ch in letters:
+        script = unicodedata.name(ch, "").split()[0]
+        if script in _FOREIGN_SCRIPT_CATEGORIES:
+            foreign_script_count += 1
+    if foreign_script_count / len(letters) > 0.10:
+        return "language mismatch : écriture non latine détectée"
+
+    words = re.findall(r"[a-zà-ÿœæ]+", clean.lower())
+    if len(words) < 15:
+        return None
+    expected_stops = _STOPWORDS.get(expected_lang, set())
+    other_langs = {k: v for k, v in _STOPWORDS.items() if k != expected_lang}
+    expected_hits = sum(1 for w in words if w in expected_stops)
+    for lang, stops in other_langs.items():
+        foreign_hits = sum(1 for w in words if w in stops)
+        if foreign_hits > expected_hits and foreign_hits / len(words) > 0.08:
+            return f"language mismatch : langue détectée '{lang}' au lieu de '{expected_lang}'"
+    return None
 
 
 @dataclass
@@ -225,6 +289,13 @@ def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
         if expected == "québec" and "fédéral" in resolved:
             errors.append("juridiction contradictoire")
 
+    assistant_text = "\n".join(
+        m.content for m in trajectory.messages if m.role == Role.assistant
+    )
+    lang_err = _detect_language_mismatch(assistant_text, trajectory.language)
+    if lang_err:
+        errors.append(lang_err)
+
     fingerprint = _fingerprint(trajectory)
     if seen_fingerprints is not None:
         tokens = set(fingerprint.split())
@@ -289,6 +360,7 @@ def compute_metrics(rows: Iterable[TrainingTrajectory], catalog: ToolCatalog) ->
         totals["clarification_correct"] += expected_clarification == actual_clarification
         totals["stopped_correctly"] += len(calls) <= 4 and not any("boucle" in e for e in result.errors)
         totals["loops"] += any("boucle" in e for e in result.errors)
+        totals["lang_mismatch"] += any("language mismatch" in e for e in result.errors)
         totals["unsupported"] += any("absente des réponses" in e or "URL absente" in e for e in result.errors)
         expected_j = row.expected_jurisdiction.casefold()
         resolved_j = row.resolved_jurisdiction.casefold()
@@ -311,6 +383,7 @@ def compute_metrics(rows: Iterable[TrainingTrajectory], catalog: ToolCatalog) ->
         "clarification_accuracy": totals["clarification_correct"] / n,
         "stop_accuracy": totals["stopped_correctly"] / n,
         "loop_rate": totals["loops"] / n,
+        "language_mismatch_rate": totals["lang_mismatch"] / n,
         "unsupported_claim_rate": totals["unsupported"] / n,
         "jurisdiction_accuracy": totals["jurisdiction_correct"] / n,
         "legal_critic_acceptance_rate": totals["legal_accept"] / n,
