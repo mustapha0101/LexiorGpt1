@@ -4,21 +4,420 @@ This document explains how Phase 1 generates the training dataset for LexiorGPT:
 what the pipeline does at each stage, the modules involved, and the design
 decisions behind them.
 
-Phase 1 turns raw legal corpora into a single formatted, audited chat dataset
-made of three kinds of examples:
+Phase 1 produces two kinds of training data:
+
+- **Agentic trajectories** — multi-turn research sessions where the model
+  plans, calls legal tools, reads the results, and builds a grounded answer.
+  This is the primary pipeline, described below.
+- **Legacy single-turn CoT** — one-shot IRAC resolutions from pre-fetched
+  law text (stages 1–6, described further down).
+
+Both share the same identity alignment set and formatting/audit stages.
+
+---
+
+## Agentic Generation Pipeline
+
+The agentic pipeline generates training trajectories where the model learns to
+**plan, search, and reason** over live legal databases using MCP tools. Each
+trajectory is a complete research session: the model decides which tools to
+call, reads the results, and writes a response grounded exclusively in the
+sources it retrieved — or asks for clarification when essential facts are
+missing. Two independent critics evaluate the result before accepting it.
+
+### Architecture
+
+```mermaid
+flowchart TD
+    TAX["Taxonomie · 23 catégories"] --> SG["Scenario Generator"]
+    SG -->|ScenarioSpec| ORC["Orchestrateur"]
+    ORC --> PL{"Planner Agent"}
+    PL -->|call_tool| MCP["MCP Executor · outils juridiques"]
+    MCP -->|observation| PL
+    PL -->|ask_clarification| CL["Échange de clarification"]
+    CL -->|réponse| PL
+    PL -->|final_answer| TA["Trajectory Agent · rédaction"]
+    TA --> CR{"Legal Critic + Agentic Critic"}
+    CR -->|"scores ≥ 0.70"| ACC["Accepté · JSONL"]
+    CR -->|"repair · 1 tentative"| TA
+    CR -->|échec| REJ["Rejeté · JSONL"]
+```
+
+### Components
+
+| Component | Role |
+|---|---|
+| **Taxonomy** | 23 legal question categories (precise article, thematic search, concrete case, clarification, simulated failure…) with expected tool routes and configurable sampling weights. |
+| **Scenario Generator** | Produces a realistic French legal question from the sampled category. Online: calls the Teacher LLM. Offline: uses deterministic fixtures. |
+| **Planner Agent** | Planning loop: reasons inside a `<thinking>` block, decides the next action (`call_tool`, `ask_clarification`, or `final_answer`). Guards correct jurisdiction, duplicates, and invalid routes. Extracts `SearchIntent` from the thinking text to choose focused keywords and `doc_type`. |
+| **MCP Executor** | Executes tool calls via the MCP protocol — CanLII/A2AJ (federal), LegisQuébec (Quebec), SOQUIJ (jurisprudence). Normalizes, truncates, and extracts citations from responses. |
+| **Trajectory Agent** | Writes the final response as natural legal prose, exclusively from retrieved sources. For precise-article categories, returns the official text verbatim. |
+| **Legal Critic** | Evaluates legal fidelity: correct jurisdiction, rule accuracy, grounded citations, no unsupported claims. Score ≥ 0.70 required. |
+| **Agentic Critic** | Evaluates tool routing quality: correct tool sequence, no loops, no unnecessary calls, proper clarification handling. Score ≥ 0.70 required. |
+
+### How a Trajectory is Built
+
+1. **Scenario sampling.** The CLI picks the category most behind its
+   acceptance quota. The Scenario Generator produces a `ScenarioSpec` with
+   a user query, expected route, jurisdiction, and optional clarification
+   answer.
+
+2. **Planning loop.** The Orchestrator initializes a `ResearchState` and
+   enters the Planner loop. Each iteration: the Planner reasons in a
+   `<thinking>` block, then returns a decision.
+   - `call_tool` → the MCP Executor runs the tool and feeds the observation
+     back to the Planner.
+   - `ask_clarification` → a clarification question is appended, the
+     scenario's pre-written answer is injected, and planning resumes.
+   - `final_answer` → the loop exits.
+
+3. **Final answer.** The Trajectory Agent writes a prose response using only
+   the evidence collected during the planning loop. The answer cites specific
+   articles and decisions retrieved by the tools.
+
+4. **Dual evaluation.** The Legal Critic and Agentic Critic independently
+   score the trajectory. Both must accept (score ≥ 0.70). If one rejects,
+   the Trajectory Agent attempts a single repair guided by the critic's
+   feedback. If the repair fails, the trajectory is rejected.
+
+5. **Storage.** Accepted trajectories are appended to the run's JSONL file.
+   Rejected trajectories are stored separately with their rejection reasons.
+   A manifest records quotas, costs, and category distribution.
+
+### Example 1 — Law Search (`recherche_theme_ccq`)
+
+Route: `semantic_search_ccq` → `get_ccq_articles`
+
+---
+
+> **Utilisateur**
+>
+> Quels articles du Code civil du Québec encadrent les vices cachés lors de la
+> vente d'un bien?
+
+---
+
+> **Réflexion**
+>
+> Type de demande : recherche thématique dans le CCQ
+> Juridiction : Québec
+> Informations manquantes : aucune
+> Sources nécessaires : articles du CCQ sur la garantie de qualité et les vices cachés
+> Prochaine action : recherche sémantique dans le CCQ
+
+**Appel** → `semantic_search_ccq`
+
+```json
+{"query": "vices cachés garantie qualité vente bien"}
+```
+
+> **Résultat de l'outil**
+>
+> **Art. 1726.** Le vendeur est tenu de garantir à l'acheteur que le bien et
+> ses accessoires sont, lors de la vente, exempts de vices cachés qui le
+> rendent impropre à l'usage auquel on le destine ou qui diminuent tellement
+> son utilité que l'acheteur ne l'aurait pas acheté, ou n'aurait pas donné si
+> haut prix, s'il les avait connus.
+>
+> **Art. 1727.** Si le bien périt par suite d'un vice caché qui existait lors
+> de la vente, la perte échoit au vendeur, lequel est tenu à la restitution
+> du prix.
+>
+> **Art. 1739.** L'acheteur qui constate que le bien est atteint d'un vice
+> doit, par écrit, le dénoncer au vendeur dans un délai raisonnable depuis sa
+> découverte.
+>
+> *legisquebec.gouv.qc.ca/fr/document/lc/CCQ-1991*
+
+---
+
+> **Réflexion**
+>
+> Les articles 1726, 1727 et 1739 sont pertinents. Je dois récupérer le texte
+> officiel complet des articles 1726 à 1739 pour fonder ma réponse sur les
+> sources primaires.
+> Prochaine action : récupérer les articles 1726 à 1739 du CCQ
+
+**Appel** → `get_ccq_articles`
+
+```json
+{"start_article": 1726, "end_article": 1739}
+```
+
+> **Résultat de l'outil**
+>
+> **Art. 1726.** Le vendeur est tenu de garantir à l'acheteur que le bien et
+> ses accessoires sont, lors de la vente, exempts de vices cachés qui le
+> rendent impropre à l'usage auquel on le destine ou qui diminuent tellement
+> son utilité que l'acheteur ne l'aurait pas acheté, ou n'aurait pas donné si
+> haut prix, s'il les avait connus. Il n'est, cependant, pas tenu de garantir
+> le vice caché connu de l'acheteur ni le vice apparent; est apparent le vice
+> qui peut être constaté par un acheteur prudent et diligent sans avoir besoin
+> de recourir à un expert.
+>
+> **Art. 1728.** Si le vendeur connaissait le vice caché ou ne pouvait
+> l'ignorer, il est tenu, outre la restitution du prix, de tous les
+> dommages-intérêts soufferts par l'acheteur.
+>
+> **Art. 1739.** L'acheteur qui constate que le bien est atteint d'un vice
+> doit, par écrit, le dénoncer au vendeur dans un délai raisonnable depuis sa
+> découverte. Ce délai commence à courir, lorsque le vice apparaît
+> graduellement, du jour où l'acheteur a pu en soupçonner la gravité et
+> l'étendue.
+>
+> *legisquebec.gouv.qc.ca/fr/document/lc/CCQ-1991*
+
+---
+
+> **Réponse finale**
+>
+> La garantie contre les vices cachés est encadrée par les articles 1726 à
+> 1739 du Code civil du Québec. L'article 1726 impose au vendeur de garantir
+> que le bien vendu est exempt de vices cachés qui le rendent impropre à
+> l'usage auquel on le destine, ou qui diminuent tellement son utilité que
+> l'acheteur ne l'aurait pas acheté à ce prix s'il les avait connus.
+>
+> Pour qu'un vice soit qualifié de « caché », il doit répondre à trois
+> conditions : être suffisamment grave, être inconnu de l'acheteur au moment
+> de la vente, et ne pas être apparent lors d'un examen raisonnable par un
+> acheteur prudent et diligent (art. 1726 al. 2). Le vendeur est tenu à cette
+> garantie même s'il ignorait lui-même le vice (art. 1727), mais s'il le
+> connaissait ou ne pouvait l'ignorer, il est tenu en plus de tous les
+> dommages-intérêts (art. 1728).
+>
+> L'acheteur qui découvre un vice peut réclamer la diminution du prix de vente
+> ou, si le vice rend le bien impropre à son usage, la résolution de la vente.
+> Il doit toutefois dénoncer le vice par écrit au vendeur dans un délai
+> raisonnable depuis sa découverte (art. 1739), faute de quoi il pourrait
+> perdre ses recours.
+>
+> *Source : Code civil du Québec, RLRQ, c. CCQ-1991, art. 1726–1739 —
+> legisquebec.gouv.qc.ca*
+
+**Verdict** : Accepté — Legal Critic : 0.85, Agentic Critic : 0.90
+
+### Example 2 — Civil Case with Court Decision (`cas_civil_quebecois`)
+
+Route: `semantic_search_ccq` → `get_ccq_articles` → `search_quebec_jurisprudence`
+
+---
+
+> **Utilisateur**
+>
+> J'ai acheté une maison au Québec et j'ai découvert un problème de fondation
+> trois mois après la vente. Le vendeur refuse de payer les réparations. Quels
+> sont mes recours?
+
+---
+
+> **Réflexion**
+>
+> Type de demande : cas civil québécois concret
+> Juridiction : Québec
+> Informations manquantes : aucune — les faits essentiels sont fournis
+> Sources nécessaires : articles du CCQ sur la garantie de qualité + jurisprudence québécoise sur les vices cachés immobiliers
+> Prochaine action : recherche sémantique dans le CCQ
+
+**Appel** → `semantic_search_ccq`
+
+```json
+{"query": "vice caché immeuble recours acheteur garantie vendeur"}
+```
+
+> **Résultat de l'outil**
+>
+> **Art. 1726.** Le vendeur est tenu de garantir à l'acheteur que le bien et
+> ses accessoires sont, lors de la vente, exempts de vices cachés qui le
+> rendent impropre à l'usage auquel on le destine [...]
+>
+> **Art. 1728.** Si le vendeur connaissait le vice caché ou ne pouvait
+> l'ignorer, il est tenu, outre la restitution du prix, de tous les
+> dommages-intérêts soufferts par l'acheteur.
+>
+> **Art. 1739.** L'acheteur qui constate que le bien est atteint d'un vice
+> doit, par écrit, le dénoncer au vendeur dans un délai raisonnable [...]
+>
+> *legisquebec.gouv.qc.ca/fr/document/lc/CCQ-1991*
+
+---
+
+> **Réflexion**
+>
+> Les articles 1726 à 1739 sont pertinents. Je dois récupérer le texte
+> officiel complet.
+> Prochaine action : récupérer les articles 1726 à 1739 du CCQ
+
+**Appel** → `get_ccq_articles`
+
+```json
+{"start_article": 1726, "end_article": 1739}
+```
+
+> **Résultat de l'outil**
+>
+> **Art. 1726.** Le vendeur est tenu de garantir [...] Il n'est, cependant,
+> pas tenu de garantir le vice caché connu de l'acheteur ni le vice apparent;
+> est apparent le vice qui peut être constaté par un acheteur prudent et
+> diligent sans avoir besoin de recourir à un expert.
+>
+> **Art. 1727.** Si le bien périt par suite d'un vice caché qui existait lors
+> de la vente, la perte échoit au vendeur, lequel est tenu à la restitution
+> du prix.
+>
+> **Art. 1728.** Si le vendeur connaissait le vice caché ou ne pouvait
+> l'ignorer, il est tenu, outre la restitution du prix, de tous les
+> dommages-intérêts soufferts par l'acheteur.
+>
+> *legisquebec.gouv.qc.ca/fr/document/lc/CCQ-1991*
+
+---
+
+> **Réflexion**
+>
+> L'utilisateur a un cas concret avec des faits précis — problème de
+> fondation, trois mois après la vente, refus du vendeur. Les tribunaux
+> québécois ont développé une jurisprudence riche sur les vices cachés
+> immobiliers. Je dois chercher des décisions pertinentes pour compléter
+> l'analyse.
+> Prochaine action : recherche de jurisprudence québécoise
+
+**Appel** → `search_quebec_jurisprudence`
+
+```json
+{"query": "vice caché fondation immeuble résidentiel recours diminution prix"}
+```
+
+> **Résultat de l'outil**
+>
+> **Lévesque c. Carrier, 2021 QCCS 4580.** Le tribunal accueille l'action en
+> diminution de prix pour vice caché. Des fissures aux fondations
+> constituaient un vice caché suffisamment grave au sens de l'article
+> 1726 C.c.Q. Le tribunal retient que le vice existait au moment de la vente
+> et n'était pas apparent lors de l'inspection préachat. Indemnité de
+> 45 000 $ accordée pour les travaux correctifs.
+>
+> **Beaudoin c. Tremblay, 2019 QCCA 1842.** La Cour d'appel confirme : le
+> délai de dénonciation de l'article 1739 C.c.Q. doit être apprécié avec
+> souplesse lorsque le vice se manifeste graduellement. Un délai de six mois
+> entre la découverte et la dénonciation a été jugé raisonnable.
+>
+> *canlii.org/fr/qc*
+
+---
+
+> **Réponse finale**
+>
+> En vertu du Code civil du Québec, vous disposez de recours importants contre
+> le vendeur. L'article 1726 C.c.Q. impose au vendeur la garantie que le bien
+> est exempt de vices cachés qui le rendent impropre à l'usage auquel on le
+> destine. Un problème de fondation non apparent lors de l'inspection
+> constitue typiquement un vice caché suffisamment grave au sens de cet
+> article.
+>
+> L'article 1727 C.c.Q. précise que le vendeur est tenu à cette garantie même
+> s'il ignorait l'existence du vice, ce qui signifie que son refus de payer ne
+> constitue pas en soi une défense. Si le vendeur connaissait le vice ou ne
+> pouvait l'ignorer, l'article 1728 C.c.Q. prévoit qu'il est tenu non
+> seulement de la restitution du prix, mais aussi de tous les
+> dommages-intérêts.
+>
+> La jurisprudence québécoise confirme cette approche. Dans *Lévesque c.
+> Carrier* (2021 QCCS 4580), le tribunal a accueilli une action en diminution
+> de prix pour un vice caché de fondation et a accordé 45 000 $ pour les
+> travaux correctifs, retenant que le vice existait au moment de la vente et
+> n'était pas apparent. La Cour d'appel, dans *Beaudoin c. Tremblay*
+> (2019 QCCA 1842), a par ailleurs confirmé que le délai de dénonciation est
+> apprécié avec souplesse lorsque le vice se manifeste graduellement.
+>
+> Vous devez dénoncer le vice par écrit au vendeur dans un délai raisonnable
+> (art. 1739 C.c.Q.). Trois mois après l'achat, votre dénonciation reste
+> vraisemblablement dans un délai raisonnable, mais il est recommandé d'agir
+> rapidement. Vos recours comprennent la diminution du prix de vente pour
+> compenser les réparations, ou la résolution de la vente si le vice rend la
+> maison impropre à l'habitation.
+>
+> *Sources :*
+> *Code civil du Québec, RLRQ, c. CCQ-1991, art. 1726–1739 —
+> legisquebec.gouv.qc.ca*
+> *Lévesque c. Carrier, 2021 QCCS 4580 — canlii.org*
+> *Beaudoin c. Tremblay, 2019 QCCA 1842 — canlii.org*
+
+**Verdict** : Accepté — Legal Critic : 0.80, Agentic Critic : 0.85
+
+### Running the Agentic Pipeline
+
+```bash
+cd Phase1_Data_Preparation
+
+# Offline dry run (no API, no MCP — uses fixtures):
+python -m agentic_generation generate --run-id test --offline --dry-run --max-scenarios 10
+
+# Production run (requires Teacher API + MCP servers):
+python -m agentic_generation generate \
+  --run-id quebec-v5 \
+  --allow-remote-calls \
+  --target-accepted 100
+
+# Diagnostics:
+python -m agentic_generation doctor --allow-remote-calls
+```
+
+Key CLI flags:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--run-id` | auto | Unique run identifier; resume-safe |
+| `--target-accepted` | 100 | Number of accepted trajectories to produce |
+| `--max-scenarios` | target × 5 | Hard cap on total attempts |
+| `--offline` | false | Use fixture data, no API calls |
+| `--dry-run` | false | Implies `--offline`; no storage writes |
+| `--no-critics` | false | Skip critic evaluation (debug only) |
+| `--allow-remote-calls` | false | Required for production runs (safety gate) |
+| `--resume` / `--no-resume` | auto | Resume from existing run data |
+| `--push-to-hf` | false | Publish accepted trajectories to HuggingFace |
+
+### Agentic Pipeline Files
+
+| File | Role |
+|---|---|
+| `agentic_generation/cli.py` | CLI entry point, main generation loop, quota tracking |
+| `agentic_generation/orchestrator.py` | State machine: planner loop → trajectory → critics → accept/reject |
+| `agentic_generation/planner_agent.py` | Planning decisions, argument construction, guard system |
+| `agentic_generation/taxonomy.py` | 23 category definitions with expected tool routes |
+| `agentic_generation/scenario_generator.py` | Question generation from categories (LLM or fixtures) |
+| `agentic_generation/trajectory_agent.py` | Final answer writing and repair |
+| `agentic_generation/mcp_executor.py` | MCP tool execution, caching, response normalization |
+| `agentic_generation/legal_critic.py` | Legal fidelity evaluation |
+| `agentic_generation/agentic_critic.py` | Tool routing quality evaluation |
+| `agentic_generation/prompts.py` | All system prompts (agent, scenario, planner, critics) |
+| `agentic_generation/schemas.py` | Pydantic models for all data structures |
+| `agentic_generation/anchor_bank.py` | Pre-queries MCP for federal case/law anchors |
+| `agentic_generation/validators.py` | Post-hoc trajectory validation |
+| `agentic_generation/config.py` | YAML config loading |
+| `agentic_generation/fixtures.py` | Deterministic MCP fixtures for offline/testing |
+| `configs/agentic_generation.yaml` | Generation config (model, taxonomy weights, critic thresholds) |
+| `tests/test_routing.py` | End-to-end offline route tests for all categories |
+| `tests/test_quality_guardrails.py` | Guard system and argument construction tests |
+| `tests/test_rejection_regressions.py` | Regression tests for known false-positive rejections |
+
+---
+
+## Legacy Pipeline (Stages 1–6)
+
+Phase 1 also includes a legacy single-turn pipeline that generates IRAC
+chain-of-thought examples from pre-fetched law text. These examples are
+mixed with the agentic trajectories in the final dataset.
 
 - **`legal_federal`** — Canadian federal law (from `a2aj/canadian-laws`)
 - **`legal_quebec`** — Quebec civil law (from `intelliwork/canadian-quebec-law-corpus`)
 - **`identity`** / **`identity_control`** — LexiorGPT product-identity alignment
 
-Each legal example is a chain-of-thought (CoT) resolution in French structured
-with the **IRAC** method (Issue, Rule, Application, Conclusion), inside a
-`<thinking>...</thinking>` block, followed by a plain-French answer and a single
-footnote citation.
+Each legacy legal example is a chain-of-thought (CoT) resolution in French
+structured with the **IRAC** method (Issue, Rule, Application, Conclusion),
+inside a `<thinking>...</thinking>` block, followed by a plain-French answer
+and a single footnote citation.
 
----
-
-## Pipeline overview
+### Pipeline overview
 
 `run_generation.sh` is the orchestrator. It runs six stages, then an audit gate:
 
@@ -45,7 +444,7 @@ pipeline uses provider-neutral `TEACHER_BASE_URL`, `TEACHER_API_KEY`, and
 
 ---
 
-## Stage 1 — Federal legal data (`generator_a2aj.py` + `a2aj_cleaner.py`)
+### Stage 1 — Federal legal data (`generator_a2aj.py` + `a2aj_cleaner.py`)
 
 Reads raw Canadian legislation from `a2aj/canadian-laws`, sends the section text
 to the Teacher, and stores the returned IRAC CoT.
@@ -83,7 +482,7 @@ to await a future section-level split rather than misrepresented.
 overwritten with the row's real `source_url` from the dataset, so every federal
 citation points at the actual `laws-lois.justice.gc.ca` document.
 
-## Stage 2 — Quebec legal data (`generate_ccq_data.py` + `ccq_cleaner.py`)
+### Stage 2 — Quebec legal data (`generate_ccq_data.py` + `ccq_cleaner.py`)
 
 Reads articles from `intelliwork/canadian-quebec-law-corpus` (Code civil du
 Québec + Code de procédure civile, article-level), and asks the Teacher to write
@@ -102,7 +501,7 @@ prompt, giving the Quebec generator the same grounding guarantee the federal one
 has. It is rewritten into the citation after generation, never left to the
 Teacher.
 
-## Stage 3 — Identity data (`generate_identity_data.py` + `identity_templates.py` + `identity_policy.py`)
+### Stage 3 — Identity data (`generate_identity_data.py` + `identity_templates.py` + `identity_policy.py`)
 
 Generates the product-identity alignment set from templates — **no API calls**.
 The goal is for the model to consistently identify as *LexiorGPT, developed by
@@ -130,7 +529,7 @@ prompt, and to never disclose or confirm its underlying foundation model.
   them, the model would learn to announce itself before every ordinary legal
   answer.
 
-## Stage 5 — Mixing (`mix_datasets.py`)
+### Stage 5 — Mixing (`mix_datasets.py`)
 
 Replaces the previous shell `cat`. A `cat` made the identity proportion
 accidental — it was whatever the files happened to contain. The mixer makes it
@@ -145,7 +544,7 @@ accidental — it was whatever the files happened to contain. The mixer makes it
 - Writes a JSON manifest: source counts, final counts, percentages, identity
   category distribution, seed, input paths.
 
-## Stage 6 — Formatting (`dataset_formatter.py`)
+### Stage 6 — Formatting (`dataset_formatter.py`)
 
 Renders each record to the `text` field the trainer consumes, and splits
 train/test.
@@ -172,7 +571,7 @@ train/test.
   goes entirely to train or entirely to test — a random per-row split would leak
   near-identical paraphrases across the boundary. Writes a `split_audit.json`.
 
-## Audit gate (`audit_training_dataset.py`)
+### Audit gate (`audit_training_dataset.py`)
 
 Runs on the formatted train/test files and **exits non-zero on any critical
 identity-policy violation**, so a faulty dataset is never uploaded. It reports
