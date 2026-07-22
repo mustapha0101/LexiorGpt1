@@ -168,6 +168,7 @@ def to_research_state(state: LexiorState) -> ResearchState:
         sources=state.get("sources", []),
         step=state.get("step", 0),
         max_tool_calls=state.get("max_tool_calls", 4),
+        jurisdiction_status=state.get("resolved_jurisdiction") or "unknown",
         missing_critical_facts=state.get("missing_critical_facts", []),
         status=StateStatus(state.get("status", "planning")),
         stop_reason=state.get("stop_reason") or None,

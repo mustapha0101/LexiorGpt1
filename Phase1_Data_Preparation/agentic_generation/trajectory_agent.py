@@ -79,6 +79,12 @@ class TrajectoryAgent:
                 if message.role.value == "user"
             ],
             "type_de_demande": state.scenario.request_type,
+            **(
+                {"juridiction_etablie": state.jurisdiction_status}
+                if state.jurisdiction_status
+                and state.jurisdiction_status != "unknown"
+                else {}
+            ),
             "informations_manquantes": state.missing_critical_facts,
             "preuves_officielles_uniquement": evidence,
             "outils_de_selection_non_citables": [
