@@ -34,6 +34,16 @@ export interface StatusEvent {
   label: string;
 }
 
+export interface DecisionEvent {
+  type: "decision";
+  step: number;
+  decision: string;
+  tool?: string | null;
+  args?: Record<string, unknown>;
+  jurisdiction?: string;
+  thinking?: string;
+}
+
 export interface DoneEvent {
   type: "done";
   accepted: boolean;
@@ -51,6 +61,7 @@ export type SSEEvent =
   | TokenEvent
   | ClarificationEvent
   | StatusEvent
+  | DecisionEvent
   | DoneEvent
   | ErrorEvent;
 
@@ -96,6 +107,16 @@ export interface Rejection {
   details?: string;
 }
 
+/* ── Raw SSE line (Agent Log raw view) ── */
+
+export interface RawSSELine {
+  id: string;
+  /** Event type parsed from the line ("token", "tool_call", ...) */
+  eventType: string;
+  /** The line exactly as received on the wire, e.g. `data: {...}` */
+  line: string;
+}
+
 /* ── Agent log entry ── */
 
 export interface AgentLogEntry {
@@ -104,8 +125,25 @@ export interface AgentLogEntry {
   label: string;
   timestamp: number;
   query: string;
+  /** Planner-decision details (entries with node === "decision") */
+  step?: number;
+  decision?: string;
+  tool?: string | null;
+  args?: Record<string, unknown>;
+  jurisdiction?: string;
+  thinking?: string;
 }
 
 /* ── App view ── */
 
 export type AppView = "chat" | "dashboard";
+
+/* ── Chat model selection ── */
+
+export type ChatModelId = "gpt-4o" | "gpt-4o-mini" | "qwen-local";
+
+export const CHAT_MODEL_OPTIONS: { id: ChatModelId; label: string }[] = [
+  { id: "gpt-4o", label: "GPT-4o" },
+  { id: "gpt-4o-mini", label: "GPT-4o mini" },
+  { id: "qwen-local", label: "Qwen 2.5 7B · local" },
+];

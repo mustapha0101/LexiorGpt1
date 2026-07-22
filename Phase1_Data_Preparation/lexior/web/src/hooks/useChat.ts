@@ -1,5 +1,12 @@
 import { useCallback, useRef, useState } from "react";
-import type { AgentLogEntry, ChatMessage, SSEEvent, ToolCall } from "../types";
+import type {
+  AgentLogEntry,
+  ChatMessage,
+  ChatModelId,
+  RawSSELine,
+  SSEEvent,
+  ToolCall,
+} from "../types";
 
 let nextId = 0;
 function uid(): string {
@@ -12,9 +19,24 @@ export interface UseChatReturn {
   currentNode: string | null;
   visitedNodes: string[];
   agentLog: AgentLogEntry[];
+  rawEvents: RawSSELine[];
+  model: ChatModelId;
+  setModel: (model: ChatModelId) => void;
   sendMessage: (query: string) => Promise<void>;
   cancelStream: () => void;
   clearMessages: () => void;
+}
+
+const RAW_EVENTS_MAX = 500;
+
+const MODEL_STORAGE_KEY = "lexior-chat-model";
+
+function loadSavedModel(): ChatModelId {
+  const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+  if (saved === "gpt-4o" || saved === "gpt-4o-mini" || saved === "qwen-local") {
+    return saved;
+  }
+  return "gpt-4o";
 }
 
 export function useChat(): UseChatReturn {
@@ -23,10 +45,19 @@ export function useChat(): UseChatReturn {
   const [currentNode, setCurrentNode] = useState<string | null>(null);
   const [visitedNodes, setVisitedNodes] = useState<string[]>([]);
   const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
+  const [rawEvents, setRawEvents] = useState<RawSSELine[]>([]);
+  const [model, setModelState] = useState<ChatModelId>(loadSavedModel);
   const abortRef = useRef<AbortController | null>(null);
   const queryRef = useRef("");
   const messagesRef = useRef<ChatMessage[]>([]);
   messagesRef.current = messages;
+  const modelRef = useRef(model);
+  modelRef.current = model;
+
+  const setModel = useCallback((next: ChatModelId) => {
+    setModelState(next);
+    localStorage.setItem(MODEL_STORAGE_KEY, next);
+  }, []);
 
   const upsertAssistant = useCallback(
     (
@@ -88,7 +119,12 @@ export function useChat(): UseChatReturn {
         const resp = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, mode: "chat", history }),
+          body: JSON.stringify({
+            query,
+            mode: "chat",
+            history,
+            model: modelRef.current,
+          }),
           signal: controller.signal,
         });
 
@@ -122,6 +158,16 @@ export function useChat(): UseChatReturn {
             } catch {
               continue;
             }
+
+            setRawEvents((prev) => {
+              const next = [
+                ...prev,
+                { id: uid(), eventType: event.type, line: trimmed },
+              ];
+              return next.length > RAW_EVENTS_MAX
+                ? next.slice(next.length - RAW_EVENTS_MAX)
+                : next;
+            });
 
             switch (event.type) {
               case "thinking":
@@ -183,6 +229,27 @@ export function useChat(): UseChatReturn {
                   }),
                   blankAssistant,
                 );
+                break;
+
+              case "decision":
+                setAgentLog((prev) => [
+                  {
+                    id: uid(),
+                    node: "decision",
+                    label: event.tool
+                      ? `${event.decision} → ${event.tool}`
+                      : event.decision,
+                    timestamp: Date.now(),
+                    query: queryRef.current.slice(0, 60),
+                    step: event.step,
+                    decision: event.decision,
+                    tool: event.tool,
+                    args: event.args,
+                    jurisdiction: event.jurisdiction,
+                    thinking: event.thinking,
+                  },
+                  ...prev,
+                ].slice(0, 50));
                 break;
 
               case "status":
@@ -264,6 +331,7 @@ export function useChat(): UseChatReturn {
     setMessages([]);
     setCurrentNode(null);
     setVisitedNodes([]);
+    setRawEvents([]);
   }, []);
 
   return {
@@ -272,6 +340,9 @@ export function useChat(): UseChatReturn {
     currentNode,
     visitedNodes,
     agentLog,
+    rawEvents,
+    model,
+    setModel,
     sendMessage,
     cancelStream,
     clearMessages,

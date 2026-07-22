@@ -1,10 +1,59 @@
-import type { AgentLogEntry, AppView } from "../types";
+import { useEffect, useRef, useState } from "react";
+import type { AgentLogEntry, AppView, RawSSELine } from "../types";
 
 interface Props {
   currentView: AppView;
   onNavigate: (view: AppView) => void;
   agentLog: AgentLogEntry[];
+  rawEvents: RawSSELine[];
   streaming: boolean;
+}
+
+/* Couleur par type d'événement dans la vue raw */
+const RAW_COLORS: Record<string, string> = {
+  tool_call: "text-amber-300",
+  tool_result: "text-emerald-300",
+  decision: "text-blue-300",
+  clarification: "text-purple-300",
+  error: "text-red-300",
+};
+
+interface RawDisplayItem {
+  id: string;
+  kind: "line" | "tokens";
+  eventType?: string;
+  text: string;
+}
+
+/** Collapse consecutive token events into a single counter line. */
+function collapseRaw(events: RawSSELine[]): RawDisplayItem[] {
+  const out: RawDisplayItem[] = [];
+  let tokenRun = 0;
+  let runId = "";
+  for (const ev of events) {
+    if (ev.eventType === "token") {
+      if (tokenRun === 0) runId = ev.id;
+      tokenRun += 1;
+      continue;
+    }
+    if (tokenRun > 0) {
+      out.push({
+        id: runId,
+        kind: "tokens",
+        text: `… ${tokenRun} × {"type": "token"} …`,
+      });
+      tokenRun = 0;
+    }
+    out.push({ id: ev.id, kind: "line", eventType: ev.eventType, text: ev.line });
+  }
+  if (tokenRun > 0) {
+    out.push({
+      id: runId,
+      kind: "tokens",
+      text: `… ${tokenRun} × {"type": "token"} …`,
+    });
+  }
+  return out;
 }
 
 function ChatIcon() {
@@ -55,6 +104,13 @@ const NODE_COLORS: Record<string, string> = {
   reject: "bg-red-400",
 };
 
+const DECISION_COLORS: Record<string, string> = {
+  call_tool: "bg-amber-400",
+  final_answer: "bg-green-500",
+  ask_clarification: "bg-purple-400",
+  cannot_conclude: "bg-red-400",
+};
+
 function timeAgo(ts: number): string {
   const diff = Math.floor((Date.now() - ts) / 1000);
   if (diff < 5) return "now";
@@ -68,9 +124,24 @@ const navItems: { view: AppView; label: string; Icon: () => JSX.Element }[] = [
   { view: "dashboard", label: "Dashboard", Icon: DashboardIcon },
 ];
 
-export function Sidebar({ currentView, onNavigate, agentLog, streaming }: Props) {
+export function Sidebar({
+  currentView,
+  onNavigate,
+  agentLog,
+  rawEvents,
+  streaming,
+}: Props) {
+  const [logView, setLogView] = useState<"log" | "raw">("log");
+  const rawBottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (logView === "raw") {
+      rawBottomRef.current?.scrollIntoView({ behavior: "auto" });
+    }
+  }, [logView, rawEvents]);
+
   return (
-    <aside className="flex flex-col w-56 border-r border-border bg-surface-alt shrink-0">
+    <aside className="flex flex-col w-64 border-r border-border bg-surface-alt shrink-0">
       {/* Brand */}
       <div className="flex items-center gap-2.5 px-5 h-16 border-b border-border">
         <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center">
@@ -119,38 +190,123 @@ export function Sidebar({ currentView, onNavigate, agentLog, streaming }: Props)
               <span className="w-1 h-1 rounded-full bg-brand-500 animate-pulse [animation-delay:300ms]" />
             </span>
           )}
+          <span className="ml-auto flex rounded-md border border-border overflow-hidden">
+            {(["log", "raw"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setLogView(mode)}
+                className={`px-2 py-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
+                  logView === mode
+                    ? "bg-brand-600 text-white"
+                    : "text-text-muted hover:text-text-secondary"
+                }`}
+              >
+                {mode}
+              </button>
+            ))}
+          </span>
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 pb-3">
-          {agentLog.length === 0 ? (
+          {logView === "raw" ? (
+            rawEvents.length === 0 ? (
+              <p className="text-[11px] text-text-muted/60 px-1 py-2">
+                No events yet
+              </p>
+            ) : (
+              <div className="space-y-1 font-mono">
+                {collapseRaw(rawEvents).map((item) =>
+                  item.kind === "tokens" ? (
+                    <p
+                      key={item.id}
+                      className="text-[9px] text-text-muted/50 select-none"
+                    >
+                      {item.text}
+                    </p>
+                  ) : (
+                    <pre
+                      key={item.id}
+                      className={`text-[9.5px] leading-snug whitespace-pre-wrap break-all ${
+                        RAW_COLORS[item.eventType ?? ""] ?? "text-text-muted"
+                      }`}
+                    >
+                      {item.text}
+                    </pre>
+                  ),
+                )}
+                <div ref={rawBottomRef} />
+              </div>
+            )
+          ) : agentLog.length === 0 ? (
             <p className="text-[11px] text-text-muted/60 px-1 py-2">
               No activity yet
             </p>
           ) : (
             <div className="space-y-0.5">
-              {agentLog.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="flex items-start gap-2 px-2 py-1.5 rounded-md hover:bg-surface-raised/50 transition-colors"
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
-                      NODE_COLORS[entry.node] ?? "bg-text-muted"
-                    }`}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-medium text-text-secondary truncate">
-                      {entry.label}
-                    </p>
-                    <p className="text-[10px] text-text-muted truncate">
-                      {entry.query}
-                    </p>
+              {agentLog.map((entry) =>
+                entry.node === "decision" ? (
+                  <details
+                    key={entry.id}
+                    className="px-2 py-1.5 rounded-md hover:bg-surface-raised/50 transition-colors"
+                  >
+                    <summary className="flex items-start gap-2 cursor-pointer list-none">
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
+                          DECISION_COLORS[entry.decision ?? ""] ??
+                          "bg-text-muted"
+                        }`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-medium text-text-primary truncate">
+                          étape {entry.step} · {entry.label}
+                        </p>
+                        {entry.jurisdiction && (
+                          <p className="text-[10px] text-text-muted truncate">
+                            juridiction : {entry.jurisdiction}
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-text-muted/60 whitespace-nowrap shrink-0 mt-0.5">
+                        {timeAgo(entry.timestamp)}
+                      </span>
+                    </summary>
+                    <div className="mt-1 ml-3.5 space-y-1">
+                      {entry.args && Object.keys(entry.args).length > 0 && (
+                        <pre className="text-[10px] text-text-secondary bg-surface rounded px-1.5 py-1 whitespace-pre-wrap break-all font-mono">
+                          {JSON.stringify(entry.args, null, 1)}
+                        </pre>
+                      )}
+                      {entry.thinking && (
+                        <p className="text-[10px] text-text-muted italic leading-relaxed">
+                          {entry.thinking}
+                        </p>
+                      )}
+                    </div>
+                  </details>
+                ) : (
+                  <div
+                    key={entry.id}
+                    className="flex items-start gap-2 px-2 py-1.5 rounded-md hover:bg-surface-raised/50 transition-colors"
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
+                        NODE_COLORS[entry.node] ?? "bg-text-muted"
+                      }`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-medium text-text-secondary truncate">
+                        {entry.label}
+                      </p>
+                      <p className="text-[10px] text-text-muted truncate">
+                        {entry.query}
+                      </p>
+                    </div>
+                    <span className="text-[10px] text-text-muted/60 whitespace-nowrap shrink-0 mt-0.5">
+                      {timeAgo(entry.timestamp)}
+                    </span>
                   </div>
-                  <span className="text-[10px] text-text-muted/60 whitespace-nowrap shrink-0 mt-0.5">
-                    {timeAgo(entry.timestamp)}
-                  </span>
-                </div>
-              ))}
+                ),
+              )}
             </div>
           )}
         </div>

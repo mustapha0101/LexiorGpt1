@@ -76,12 +76,34 @@ _CRITIC = (
     else TeacherClient(_CFG.critic, allow_remote_calls=True)
 )
 
-# Chat live : modèle plus fort que celui du pipeline dataset.
-_CHAT_MODEL = os.environ.get("CHAT_TEACHER_MODEL", "gpt-4o")
-_CHAT_TEACHER = TeacherClient(
-    dataclasses.replace(_CFG.teacher, model=_CHAT_MODEL),
-    allow_remote_calls=True,
-)
+# Chat live : modèle choisi par requête via le menu de l'UI.
+#   gpt-4o / gpt-4o-mini : API OpenAI (endpoint teacher, modèle remplacé)
+#   qwen-local           : serveur local compatible OpenAI (Ollama)
+_DEFAULT_CHAT_MODEL = os.environ.get("CHAT_TEACHER_MODEL", "gpt-4o")
+_LOCAL_BASE_URL = os.environ.get(
+    "LOCAL_MODEL_BASE_URL", "http://localhost:11434/v1")
+_LOCAL_MODEL_NAME = os.environ.get("LOCAL_MODEL_NAME", "qwen2.5:7b-16k")
+
+_CHAT_CLIENTS: dict[str, TeacherClient] = {}
+
+
+def _chat_client(model_id: Optional[str]) -> TeacherClient:
+    key = (model_id
+           if model_id in ("gpt-4o", "gpt-4o-mini", "qwen-local")
+           else _DEFAULT_CHAT_MODEL)
+    if key not in _CHAT_CLIENTS:
+        if key == "qwen-local":
+            endpoint = dataclasses.replace(
+                _CFG.teacher,
+                base_url=_LOCAL_BASE_URL,
+                api_key="not-needed",
+                model=_LOCAL_MODEL_NAME,
+                timeout=600.0,
+            )
+        else:
+            endpoint = dataclasses.replace(_CFG.teacher, model=key)
+        _CHAT_CLIENTS[key] = TeacherClient(endpoint, allow_remote_calls=True)
+    return _CHAT_CLIENTS[key]
 
 # RAG local pour semantic_search_ccq/cpc (None tant que l'index n'est
 # pas construit : ces deux outils renvoient alors une erreur d'outil,
@@ -137,6 +159,7 @@ class ChatRequest(BaseModel):
     mode: Optional[str] = "chat"
     jurisdiction: str = "quebec"
     history: list[ChatTurn] = []
+    model: Optional[str] = None  # "gpt-4o" | "gpt-4o-mini" | "qwen-local"
 
     @property
     def text(self) -> str:
@@ -208,7 +231,8 @@ async def chat(request: ChatRequest):
             from agentic_generation.agentic_critic import AgenticCritic
             from agentic_generation.storage import JsonCache
 
-            planner = PlannerAgent(_CHAT_CATALOG, client=_CHAT_TEACHER,
+            chat_client = _chat_client(request.model)
+            planner = PlannerAgent(_CHAT_CATALOG, client=chat_client,
                                    chat_mode=True)
             transport = RealMCPTransport(_CFG.mcp_config_path)
             executor = MCPExecutor(
@@ -217,7 +241,7 @@ async def chat(request: ChatRequest):
                 max_response_chars=_CFG.max_tool_response_chars,
                 rag=_RAG,
             )
-            trajectory_agent = TrajectoryAgent(client=_CHAT_TEACHER,
+            trajectory_agent = TrajectoryAgent(client=chat_client,
                                                chat_mode=True)
             legal_critic = LegalCritic(client=_CRITIC)
             agentic_critic = AgenticCritic(client=_CRITIC)
@@ -245,10 +269,13 @@ async def chat(request: ChatRequest):
             final_thinking = ""
             rejection_reason = ""
             clarification_question = ""
+            # Un 7B local peut mettre plusieurs minutes par décision.
+            queue_timeout = 900 if request.model == "qwen-local" else 120
 
             while True:
                 try:
-                    kind, data = await asyncio.to_thread(q.get, timeout=120)
+                    kind, data = await asyncio.to_thread(
+                        q.get, timeout=queue_timeout)
                 except Exception:
                     yield _sse("error", message="Timeout waiting for graph")
                     break
@@ -269,6 +296,21 @@ async def chat(request: ChatRequest):
 
                     label = _NODE_LABELS.get(node_name, node_name)
                     yield _sse("status", node=node_name, label=label)
+
+                    if node_name == "plan":
+                        raw_decision = node_state.get("current_decision")
+                        if isinstance(raw_decision, dict):
+                            yield _sse(
+                                "decision",
+                                step=node_state.get("step", 0),
+                                decision=raw_decision.get("decision", ""),
+                                tool=raw_decision.get("next_tool"),
+                                args=raw_decision.get("arguments", {}),
+                                jurisdiction=raw_decision.get(
+                                    "jurisdiction", ""),
+                                thinking=(raw_decision.get("thinking_text")
+                                          or "")[:280],
+                            )
 
                     tool_history = node_state.get("tool_history", [])
                     if len(tool_history) > prev_tool_count:

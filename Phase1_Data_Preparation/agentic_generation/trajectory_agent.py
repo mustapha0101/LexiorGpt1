@@ -168,6 +168,30 @@ class TrajectoryAgent:
         if matches:
             marker = matches[-1]
             return cls._strip_labels(text[:marker.start()], text[marker.end():])
+        stripped = (text or "").strip()
+        if cls._THINKING_LABEL_RE.match(stripped) and "RAISONNEMENT" in stripped.upper():
+            # Petit modèle : blocs RAISONNEMENT (parfois dupliqués) suivis
+            # de la réponse sans étiquette. On sépare par paragraphes.
+            thinking_parts: list[str] = []
+            answer_parts: list[str] = []
+            for para in re.split(r"\n\s*\n", stripped):
+                para = para.strip()
+                if not para or re.fullmatch(r"-{3,}", para):
+                    continue
+                cleaned = cls._THINKING_LABEL_RE.sub("", para).strip()
+                if cleaned != para:  # paragraphe étiqueté RAISONNEMENT
+                    if cleaned and cleaned not in thinking_parts:
+                        thinking_parts.append(cleaned)
+                elif not answer_parts and para in thinking_parts:
+                    continue  # duplication du raisonnement sans étiquette
+                else:
+                    answer_parts.append(para)
+            if answer_parts:
+                return ("\n\n".join(thinking_parts),
+                        normalize_final_answer("\n\n".join(answer_parts)))
+            if thinking_parts:
+                return ("\n\n".join(thinking_parts[:-1]),
+                        normalize_final_answer(thinking_parts[-1]))
         return "", normalize_final_answer(text)
 
     @staticmethod

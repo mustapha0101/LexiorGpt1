@@ -67,6 +67,20 @@ class GraphNodes:
         try:
             rs = to_research_state(state)
             decision = self.planner.decide(rs)
+            import json as _json
+            log_line = (
+                f"[planner] etape {state.get('step', 0) + 1}: "
+                f"{decision.decision.value}"
+                + (f" -> {decision.next_tool} "
+                   f"{_json.dumps(decision.arguments)[:120]}"
+                   if decision.next_tool else "")
+                + (f" | juridiction: {decision.jurisdiction}"
+                   if decision.jurisdiction else "")
+            )
+            # Console Windows cp1252 : rester en ASCII pour ne jamais
+            # faire échouer le noeud sur un simple log.
+            print(log_line.encode("ascii", "backslashreplace")
+                  .decode("ascii"), flush=True)
             return {
                 "current_decision": decision.model_dump(mode="json"),
                 "step": state.get("step", 0) + 1,

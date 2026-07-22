@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { UseChatReturn } from "../hooks/useChat";
+import { CHAT_MODEL_OPTIONS, type ChatModelId } from "../types";
 import { AgentProgress } from "./AgentProgress";
 import { MessageBubble } from "./MessageBubble";
 import { InputBar } from "./InputBar";
@@ -14,6 +15,8 @@ export function Chat({ chat }: Props) {
     streaming,
     currentNode,
     visitedNodes,
+    model,
+    setModel,
     sendMessage,
     cancelStream,
     clearMessages,
@@ -36,14 +39,32 @@ export function Chat({ chat }: Props) {
             Quebec &amp; Federal Law &middot; CCQ, CPC, Jurisprudence
           </p>
         </div>
-        {messages.length > 0 && (
-          <button
-            onClick={clearMessages}
-            className="text-xs text-text-muted hover:text-text-secondary transition-colors cursor-pointer px-3 py-1.5 rounded-lg hover:bg-surface-raised"
+        <div className="flex items-center gap-2">
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value as ChatModelId)}
+            title="Model used for planning and answers"
+            className="
+              text-xs bg-surface-raised border border-border rounded-lg
+              px-2.5 py-1.5 text-text-secondary cursor-pointer
+              focus:outline-none focus:ring-2 focus:ring-brand-500/40
+            "
           >
-            Clear chat
-          </button>
-        )}
+            {CHAT_MODEL_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          {messages.length > 0 && (
+            <button
+              onClick={clearMessages}
+              className="text-xs text-text-muted hover:text-text-secondary transition-colors cursor-pointer px-3 py-1.5 rounded-lg hover:bg-surface-raised"
+            >
+              Clear chat
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Messages */}

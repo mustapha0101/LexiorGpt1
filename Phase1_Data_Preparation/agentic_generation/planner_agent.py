@@ -22,6 +22,37 @@ NO_RESULT_RE = re.compile(
     re.I,
 )
 
+# ── Garde-fou juridictionnel du mode chat ────────────────────────────────
+# Outils dont les sources sont exclusivement québécoises.
+QC_ONLY_TOOLS = {
+    "semantic_search_ccq", "semantic_search_cpc",
+    "get_ccq_articles", "get_cpc_articles",
+    "search_ccq_keywords", "search_cpc_keywords",
+    "search_quebec_regulations", "get_quebec_regulation",
+    "get_quebec_legal_info", "search_quebec_jurisprudence",
+}
+
+_PROVINCE_RE = re.compile(
+    r"\b(ontario|alberta|manitoba|saskatchewan|"
+    r"colombie[- ]britannique|british columbia|"
+    r"nouvelle[- ][ée]cosse|nova scotia|"
+    r"nouveau[- ]brunswick|new brunswick|"
+    r"terre[- ]neuve(?:[- ]et[- ]labrador)?|newfoundland|"
+    r"[îi]le[- ]du[- ]prince[- ][ée]douard|prince edward island|"
+    r"yukon|nunavut|territoires du nord[- ]ouest|northwest territories)\b",
+    re.I,
+)
+_QC_MENTION_RE = re.compile(
+    r"\b(qu[ée]bec|montr[ée]al|gatineau|laval|sherbrooke|trois[- ]rivi[èe]res)\b",
+    re.I,
+)
+_YES_RE = re.compile(r"^\s*(oui|yes|ouais|exactement|c'est ça)\s*[.!]?\s*$", re.I)
+_NO_RE = re.compile(r"^\s*(non|no|nope|pas au qu[ée]bec)\s*[.!]?\s*$", re.I)
+
+
+class QuebecToolsBlocked(ValueError):
+    """Outil québécois choisi alors que l'utilisateur n'est pas au Québec."""
+
 # ---------------------------------------------------------------------------
 # Thinking-text extraction helpers
 # ---------------------------------------------------------------------------
@@ -180,6 +211,9 @@ class PlannerAgent:
                 if not self.chat_mode:
                     decision = self._guard_tool_compatibility(state, decision)
                     decision = self._guard_required_tools(state, decision)
+                else:
+                    decision = self._guard_chat_jurisdiction(
+                        state, decision, retried=bool(feedback))
                 decision = self._guard_budget(state, decision)
                 self._raise_if_invalid(state, decision)
                 return decision
@@ -400,6 +434,79 @@ class PlannerAgent:
                         next_action=f"call_tool:{tool}"),
                 )
         return decision
+
+    @staticmethod
+    def _chat_jurisdiction_hint(state: ResearchState) -> Optional[str]:
+        """Juridiction déduite DÉTERMINISTIQUEMENT de la conversation.
+
+        Parcourt les messages dans l'ordre; le signal le plus récent
+        l'emporte. Retourne « Québec », un nom de province, ou
+        « hors Québec (province non précisée) » — None si rien ne tranche.
+        """
+        hint: Optional[str] = None
+        messages = state.messages
+        for index, message in enumerate(messages):
+            if message.role.value != "user":
+                continue
+            province = _PROVINCE_RE.search(message.content)
+            if province:
+                hint = province.group(0).title()
+                continue
+            if _QC_MENTION_RE.search(message.content):
+                hint = "Québec"
+                continue
+            previous_is_quebec_question = (
+                index > 0
+                and messages[index - 1].role.value == "assistant"
+                and "québec" in messages[index - 1].content.lower()
+                and messages[index - 1].content.rstrip().endswith("?")
+            )
+            if previous_is_quebec_question:
+                if _YES_RE.match(message.content):
+                    hint = "Québec"
+                elif _NO_RE.match(message.content):
+                    hint = "hors Québec (province non précisée)"
+        return hint
+
+    def _guard_chat_jurisdiction(self, state: ResearchState,
+                                 decision: PlannerDecision,
+                                 retried: bool) -> PlannerDecision:
+        """Bloque les outils québécois quand l'utilisateur n'est pas au Québec.
+
+        La juridiction déduite écrase aussi decision.jurisdiction pour que
+        le rédacteur reçoive une juridiction_etablie fiable, quel que soit
+        le modèle qui planifie.
+        """
+        hint = self._chat_jurisdiction_hint(state)
+        if hint is None:
+            return decision
+        decision.jurisdiction = hint
+        if hint == "Québec":
+            return decision
+        if (decision.decision != Decision.call_tool
+                or decision.next_tool not in QC_ONLY_TOOLS):
+            return decision
+        if not retried:
+            raise QuebecToolsBlocked(
+                f"outil québécois {decision.next_tool} interdit : "
+                f"l'utilisateur n'est pas au Québec ({hint}); utilise "
+                "search_legal_documents ou fetch_document (droit fédéral "
+                "ou autre province), ou passe à final_answer")
+        return PlannerDecision(
+            request_type=decision.request_type,
+            jurisdiction=hint,
+            decision=Decision.final_answer,
+            thinking_text=(
+                f"L'utilisateur n'est pas au Québec ({hint}) : les outils "
+                "CCQ/CPC ne s'appliquent pas. Je réponds avec le droit "
+                "fédéral applicable et les orientations générales."
+            ),
+            decision_trace=DecisionTrace(
+                request_type=decision.request_type,
+                jurisdiction=hint,
+                need="outils québécois inapplicables hors Québec",
+                next_action="final_answer"),
+        )
 
     def _guard_budget(self, state: ResearchState,
                       decision: PlannerDecision) -> PlannerDecision:

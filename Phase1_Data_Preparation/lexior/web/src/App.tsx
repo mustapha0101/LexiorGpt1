@@ -15,6 +15,7 @@ export default function App() {
         currentView={view}
         onNavigate={setView}
         agentLog={chat.agentLog}
+        rawEvents={chat.rawEvents}
         streaming={chat.streaming}
       />
 
