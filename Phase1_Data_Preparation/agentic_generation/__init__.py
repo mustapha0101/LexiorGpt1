@@ -16,5 +16,5 @@ sources réellement récupérées) — pas la récitation des lois depuis ses po
 Point d'entrée : python -m agentic_generation.cli --help
 """
 
-SCHEMA_VERSION = "agentic-1.0"
-DATASET_TYPE = "agentic_legal"
+SCHEMA_VERSION = "agentic-2.0"
+DATASET_TYPE = "agentic_legal_intermediate"

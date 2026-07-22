@@ -402,6 +402,98 @@ Key CLI flags:
 
 ---
 
+## Lexior Agent System — LangGraph + Live Chat (`lexior/`)
+
+The agentic pipeline is also exposed as a reusable **LangGraph** multi-agent
+system with two modes sharing the same graph:
+
+- **Dataset mode** — the orchestrator behaviour: scripted scenarios,
+  synthetic clarification answers, strict route validation, dual critics,
+  acceptance gates.
+- **Chat mode** — a live legal assistant (FastAPI backend + React frontend)
+  where a real user converses with the agent over the same legal tools.
+
+### Graph topology
+
+```mermaid
+flowchart LR
+    plan -->|call_tool| execute_tool --> plan
+    plan -->|ask_clarification| handle_clarification
+    handle_clarification -->|dataset : réponse scriptée| plan
+    handle_clarification -->|chat : question au vrai utilisateur| E1[END]
+    plan -->|final_answer / cannot_conclude| generate_answer --> run_critics
+    run_critics -->|score < seuil, repair ≤ 1| repair --> run_critics
+    run_critics --> validate_final
+    validate_final -->|accepté| export --> E2[END]
+    validate_final -->|refusé| reject --> E3[END]
+    plan -->|erreur / budget| reject
+```
+
+### Chat mode vs dataset mode
+
+| Aspect | Dataset | Chat |
+|---|---|---|
+| Scenario | scripted from the taxonomy | free user query + conversation history |
+| Clarifications | synthetic answer injected, planning resumes | the question ends the turn; the real user answers in the next message |
+| Route guards / required tools | enforced per category | skipped (`chat_mode=True` on the Planner) |
+| Tool arguments | deterministically reconstructed | the model's own arguments pass through (schema-validated only) |
+| Acceptance | validators + fingerprints + critics | auto-accepted after critics |
+| Teacher model | `teacher:` config (gpt-4o-mini) | `CHAT_TEACHER_MODEL` env (default `gpt-4o`) |
+| Tools | mock fixtures (offline) or real MCP | real MCP (`.mcp.json`) + local CCQ/CPC RAG index + shared cache |
+| Planner errors | fail the trajectory | one corrective retry with the validation error as feedback |
+
+### Jurisdiction handling in chat
+
+- The assistant covers **Québec law** (CCQ/CPC articles, keyword search,
+  regulations, semantic RAG) and **federal / pan-Canadian law** (a2aj:
+  statutes and case law).
+- When a question falls in a provincial domain and the province is unknown,
+  the agent asks first; for employment questions it also asks the **sector**
+  (federally regulated undertakings — banks, airlines, railways, telecoms —
+  fall under the Code canadien du travail regardless of province).
+- It never defaults to Québec law: it follows the regime established in the
+  conversation, including federal statutes fetched section-by-section via
+  `fetch_document` (e.g. s. 174 CLC for overtime).
+- **Case-law coverage limit**: a2aj indexes the SCC, federal courts and some
+  provincial courts, but **no Québec courts** (QCCA/QCCS/QCCQ/TAT). The
+  remote `search_quebec_jurisprudence` tool currently returns legislation
+  pages instead of decisions and is excluded from the chat catalog. The
+  agent states this honestly and refers users to CanLII / SOQUIJ.
+
+### Running the chat app
+
+```bash
+# Backend — from Phase1_Data_Preparation (auto-loads ../.env):
+python -m uvicorn lexior.api.app:app --port 8000 --reload
+
+# Frontend — from Phase1_Data_Preparation/lexior/web:
+npm install
+npm run dev        # http://localhost:5173 (proxies /api → :8000)
+```
+
+The chat endpoint streams SSE events: `thinking`, `status` (graph node),
+`tool_call` / `tool_result`, `clarification`, `token`, `done` / `error`.
+The UI shows a live agent-activity log in the sidebar, a pipeline stepper
+under the conversation, and collapsible tool-call cards.
+
+### Agent System Files
+
+| File | Role |
+|---|---|
+| `lexior/agent_graph/state.py` | `LexiorState` TypedDict + converters to/from pipeline schemas |
+| `lexior/agent_graph/nodes.py` | The 9 node functions bound to pipeline dependencies (chat/dataset aware) |
+| `lexior/agent_graph/graph.py` | StateGraph assembly and conditional routing |
+| `lexior/agent_graph/step_verifier.py` | Per-step proposal verification, trajectory validation, acceptance |
+| `lexior/agent_graph/result_classifier.py` | Tool-result quality classification |
+| `lexior/agent_graph/checkpointing.py` | SQLite checkpointers for graph persistence |
+| `lexior/api/app.py` | FastAPI backend: SSE chat (real MCP + RAG + gpt-4o), dataset-run endpoints |
+| `lexior/web/` | React + Vite + Tailwind chat UI (agent log, stepper, tool cards) |
+| `lexior/evaluation/comparison.py` | Stratified old-vs-new pipeline comparison reports |
+| `tests/test_graph.py` | Routing-function and initial-state tests |
+| `tests/test_step_verifier.py`, `tests/test_result_classifier.py`, `tests/test_acceptance.py`, `tests/test_comparison.py` | Verifier / classifier / acceptance / comparison suites |
+
+---
+
 ## Legacy Pipeline (Stages 1–6)
 
 Phase 1 also includes a legacy single-turn pipeline that generates IRAC
@@ -708,6 +800,12 @@ open while a generation run is writing its JSONL files.
 
 ## Known limitations and not-yet-done
 
+- **Québec court decisions are not searchable in chat.** a2aj indexes no
+  Québec courts (Québec case law reaches it only through SCC appeals), and
+  the lexior-ccq server's `search_quebec_jurisprudence` currently returns
+  legislation pages / HTTP 500s, so it is excluded from the chat catalog
+  until the server is repaired. The assistant states the limitation and
+  refers users to CanLII / SOQUIJ.
 - **Content correctness is not verified.** The gates check *structure* (IRAC
   present, citation present and grounded to the right article, no forbidden
   terms), not legal *truth*. When the Teacher cites a specific article from

@@ -1,24 +1,13 @@
 # -*- coding: utf-8 -*-
 
 """
-Taxonomie des demandes juridiques et politique de routage minimale.
+Taxonomie v2.0 : 12 types de demandes juridiques.
 
-Chaque catégorie définit :
-  - la route d'outils attendue (ExpectedRoute) — la politique que le dataset
-    doit enseigner ;
-  - si une clarification doit précéder toute recherche ;
-  - si aucun outil ne doit être appelé ;
-  - un mode de panne simulé éventuel (panne_mcp, resultat_vide,
-    source_trop_longue).
+Les types décrivent l'intention de l'utilisateur, pas le routage d'outils.
+Les modes de panne et la clarification sont des métadonnées orthogonales,
+pas des types à part entière.
 
-Les PROPORTIONS sont configurables dans configs/agentic_generation.yaml ;
-ce module ne fixe que la structure.
-
-Règle jurisprudence : elle n'est JAMAIS recherchée automatiquement. Elle est
-justifiée quand l'utilisateur demande des décisions, quand la question porte
-sur l'application d'une règle à des faits particuliers, quand la loi contient
-une notion ouverte, ou quand des exceptions jurisprudentielles peuvent
-changer le résultat. D'où : optional=True sur les étapes jurisprudence.
+Distributions configurables dans configs/agentic_generation.yaml.
 """
 
 from __future__ import annotations
@@ -27,239 +16,397 @@ import random
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .schemas import ExpectedRoute, ExpectedRouteStep
+from .schemas import (
+    ConditionalTool, ExpectedRoute, ExpectedRouteStep, RoutePolicy,
+)
 
 
 def _route(*steps, clarification: bool = False, no_tool: bool = False) -> ExpectedRoute:
     parsed = []
     for s in steps:
-        if isinstance(s, tuple):
-            tool, optional = s
-            parsed.append(ExpectedRouteStep(tool=tool, optional=optional))
-        else:
+        if isinstance(s, str):
             parsed.append(ExpectedRouteStep(tool=s))
+        elif isinstance(s, tuple):
+            if len(s) == 2:
+                tool, optional = s
+                parsed.append(ExpectedRouteStep(tool=tool, optional=optional))
+            elif len(s) == 3:
+                tool, optional, condition = s
+                parsed.append(ExpectedRouteStep(
+                    tool=tool, optional=optional, condition=condition))
     return ExpectedRoute(steps=parsed, requires_clarification=clarification,
                          no_tool=no_tool)
 
 
+def _policy(*caps, conditional=None, forbidden=None, preferred=None,
+            clarification=False, no_tool=False, expected_route=None):
+    return RoutePolicy(
+        required_capabilities=list(caps),
+        conditional_tools=[
+            ConditionalTool(tool=t, condition=c)
+            for t, c in (conditional or [])
+        ],
+        forbidden_tools=list(forbidden or []),
+        preferred_initial_tools=list(preferred or []),
+        requires_clarification=clarification,
+        no_tool=no_tool,
+        expected_route=expected_route or ExpectedRoute(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Outils interdits par juridiction
+# ---------------------------------------------------------------------------
+
+QUEBEC_ONLY_TOOLS = frozenset({
+    "semantic_search_ccq", "semantic_search_cpc",
+    "get_ccq_articles", "get_cpc_articles",
+    "search_ccq_keywords", "search_cpc_keywords",
+    "search_quebec_jurisprudence",
+    "search_quebec_regulations", "get_quebec_regulation",
+    "get_quebec_legal_info",
+})
+
+FEDERAL_ONLY_TOOLS = frozenset({
+    "search_legal_documents", "fetch_document",
+})
+
+
 @dataclass
-class Category:
+class RequestTypeSpec:
     name: str
     description: str
     expected_route: ExpectedRoute
-    expected_jurisdiction: str = "Québec"
+    route_policy: RoutePolicy = field(default_factory=RoutePolicy)
+    default_jurisdiction_status: str = "supported_quebec"
+    default_source_intents: list = field(default_factory=list)
     legal_domain: str = "droit civil québécois"
-    expected_source_types: list = field(default_factory=list)
-    failure_mode: Optional[str] = None
     default_weight: float = 1.0
+    clarification_weights: dict = field(default_factory=lambda: {
+        "none": 0.55, "before_search": 0.20, "after_initial_research": 0.25,
+    })
 
 
 # ---------------------------------------------------------------------------
-# Les 23 catégories imposées par le cahier des charges.
+# Les 12 types de demandes (spec section 5)
 # ---------------------------------------------------------------------------
 
-CATEGORIES: dict[str, Category] = {c.name: c for c in [
-    Category(
-        name="article_ccq_precis",
-        description="Demande du texte d'un article CCQ dont le numéro est donné.",
+REQUEST_TYPES: dict[str, RequestTypeSpec] = {rt.name: rt for rt in [
+    RequestTypeSpec(
+        name="case_analysis",
+        description="Cas concret : appliquer la loi à des faits particuliers, "
+                    "identifier la règle, chercher la jurisprudence pertinente.",
+        expected_route=_route(
+            ("semantic_search_ccq", True, "if Quebec civil law and article unknown"),
+            ("get_ccq_articles", False, "retrieve official text of identified article"),
+            ("search_quebec_jurisprudence", True,
+             "only if user requests application examples or jurisprudence needed"),
+        ),
+        route_policy=_policy(
+            "official_text_retrieval", "case_law_application",
+            conditional=[
+                ("search_quebec_jurisprudence",
+                 "only if user requests application examples or jurisprudence needed"),
+                ("semantic_search_ccq", "article number unknown"),
+            ],
+            preferred=["semantic_search_ccq", "get_ccq_articles"],
+        ),
+        default_source_intents=["legislation", "jurisprudence"],
+        default_weight=0.25,
+        clarification_weights={
+            "none": 0.40, "before_search": 0.30, "after_initial_research": 0.30,
+        },
+    ),
+    RequestTypeSpec(
+        name="procedure_guidance",
+        description="Question de procédure : appel, rétractation, injonction, "
+                    "mise en demeure, signification, délais.",
+        expected_route=_route(
+            ("semantic_search_cpc", True, "if procedural provision unknown"),
+            ("get_cpc_articles", False, "retrieve procedural text"),
+            ("search_quebec_jurisprudence", True,
+             "only if procedural test needs jurisprudential clarification"),
+        ),
+        route_policy=_policy(
+            "official_text_retrieval",
+            conditional=[
+                ("search_quebec_jurisprudence",
+                 "only if procedural test needs jurisprudential clarification"),
+            ],
+            preferred=["semantic_search_cpc", "get_cpc_articles"],
+        ),
+        legal_domain="procédure civile québécoise",
+        default_source_intents=["procedural_rule"],
+        default_weight=0.18,
+        clarification_weights={
+            "none": 0.25, "before_search": 0.35, "after_initial_research": 0.40,
+        },
+    ),
+    RequestTypeSpec(
+        name="topic_research",
+        description="Recherche thématique : sujet CCQ/CPC sans cas concret, "
+                    "explication générale d'un domaine juridique.",
+        expected_route=_route(
+            "semantic_search_ccq",
+            "get_ccq_articles",
+            ("search_quebec_jurisprudence", True,
+             "only if facts involve application to specific situation"),
+        ),
+        route_policy=_policy(
+            "article_discovery", "official_text_retrieval",
+            conditional=[
+                ("search_quebec_jurisprudence",
+                 "facts involve application to specific situation"),
+            ],
+            preferred=["semantic_search_ccq"],
+        ),
+        default_source_intents=["legislation"],
+        default_weight=0.12,
+        clarification_weights={
+            "none": 0.80, "before_search": 0.10, "after_initial_research": 0.10,
+        },
+    ),
+    RequestTypeSpec(
+        name="exact_text_retrieval",
+        description="Texte officiel d'un article dont le numéro est donné : "
+                    "récupération exacte, mot pour mot, sans analyse.",
         expected_route=_route("get_ccq_articles"),
-        expected_source_types=["legislation"],
-        default_weight=2.0),
-    Category(
-        name="article_cpc_precis",
-        description="Demande du texte d'un article CPC dont le numéro est donné.",
-        expected_route=_route("get_cpc_articles"),
-        legal_domain="procédure civile québécoise",
-        expected_source_types=["legislation"],
-        default_weight=1.5),
-    Category(
-        name="explication_article",
+        route_policy=_policy(
+            "official_text_retrieval",
+            preferred=["get_ccq_articles", "get_cpc_articles"],
+            forbidden=["search_legal_documents", "fetch_document",
+                        "search_quebec_jurisprudence",
+                        "search_ccq_keywords", "search_cpc_keywords"],
+        ),
+        default_source_intents=["legislation"],
+        default_weight=0.07,
+        clarification_weights={
+            "none": 1.0, "before_search": 0.0, "after_initial_research": 0.0,
+        },
+    ),
+    RequestTypeSpec(
+        name="article_explanation",
         description="Explication d'un article précis : récupérer le texte officiel, "
-                    "puis chercher comment les tribunaux l'appliquent.",
-        expected_route=_route("get_ccq_articles",
-                              ("search_quebec_jurisprudence", True)),
-        expected_source_types=["legislation", "jurisprudence"],
-        default_weight=1.5),
-    Category(
-        name="recherche_theme_ccq",
-        description="Sujet CCQ sans numéro d'article : recherche sémantique, "
-                    "récupération officielle, puis jurisprudence sur l'article trouvé.",
-        expected_route=_route("semantic_search_ccq", "get_ccq_articles",
-                              ("search_quebec_jurisprudence", True)),
-        expected_source_types=["legislation", "jurisprudence"],
-        default_weight=2.0),
-    Category(
-        name="recherche_theme_cpc",
-        description="Sujet CPC sans numéro d'article : recherche, texte officiel, "
-                    "puis jurisprudence sur l'application.",
-        expected_route=_route("semantic_search_cpc", "get_cpc_articles",
-                              ("search_quebec_jurisprudence", True)),
-        legal_domain="procédure civile québécoise",
-        expected_source_types=["legislation", "jurisprudence"],
-        default_weight=1.5),
-    Category(
-        name="cas_civil_quebecois",
-        description="Cas civil québécois concret : trouver la loi, puis chercher "
-                    "comment les tribunaux l'appliquent à des faits similaires.",
-        expected_route=_route(("semantic_search_ccq", True), "get_ccq_articles",
-                              "search_quebec_jurisprudence"),
-        expected_source_types=["legislation", "jurisprudence"],
-        default_weight=2.0),
-    Category(
-        name="cas_procedure_quebecoise",
-        description="Cas concret de procédure civile : trouver la règle, puis "
-                    "voir l'application jurisprudentielle.",
-        expected_route=_route(("semantic_search_cpc", True), "get_cpc_articles",
-                              "search_quebec_jurisprudence"),
-        legal_domain="procédure civile québécoise",
-        expected_source_types=["legislation", "jurisprudence"],
-        default_weight=1.0),
-    Category(
-        name="reglement_quebecois_connu",
-        description="Règlement québécois dont l'identité est connue : recherche "
-                    "puis récupération par l'URL réellement retournée.",
-        expected_route=_route("search_quebec_regulations", "get_quebec_regulation"),
+                    "puis expliquer avec la jurisprudence si pertinent.",
+        expected_route=_route(
+            "get_ccq_articles",
+            ("search_quebec_jurisprudence", True,
+             "article contains open-ended notion or facts warrant it"),
+        ),
+        route_policy=_policy(
+            "official_text_retrieval",
+            conditional=[
+                ("search_quebec_jurisprudence",
+                 "article contains open-ended notion or facts warrant it"),
+            ],
+            preferred=["get_ccq_articles"],
+            forbidden=["search_legal_documents", "fetch_document"],
+        ),
+        default_source_intents=["legislation", "jurisprudence"],
+        default_weight=0.06,
+        clarification_weights={
+            "none": 0.90, "before_search": 0.05, "after_initial_research": 0.05,
+        },
+    ),
+    RequestTypeSpec(
+        name="case_law_research",
+        description="L'utilisateur demande explicitement des décisions judiciaires.",
+        expected_route=_route(
+            ("get_ccq_articles", True, "article number known or discoverable"),
+            "search_quebec_jurisprudence",
+        ),
+        route_policy=_policy(
+            "case_law_application",
+            conditional=[
+                ("get_ccq_articles", "article number known or discoverable"),
+            ],
+            preferred=["search_quebec_jurisprudence"],
+        ),
+        default_source_intents=["jurisprudence"],
+        default_weight=0.10,
+        clarification_weights={
+            "none": 0.50, "before_search": 0.20, "after_initial_research": 0.30,
+        },
+    ),
+    RequestTypeSpec(
+        name="law_or_regulation_identification",
+        description="Identifier une loi, un règlement ou un texte officiel "
+                    "dont l'utilisateur connaît le sujet mais pas le titre exact.",
+        expected_route=_route(
+            "search_quebec_regulations",
+            "get_quebec_regulation",
+        ),
+        route_policy=_policy(
+            "regulation_discovery", "regulation_retrieval",
+            preferred=["search_quebec_regulations"],
+        ),
         legal_domain="droit réglementaire québécois",
-        expected_source_types=["reglement"],
-        default_weight=1.0),
-    Category(
-        name="reglement_quebecois_inconnu",
-        description="Règlement québécois à identifier : search_quebec_regulations "
-                    "puis get_quebec_regulation avec l'URL retournée.",
-        expected_route=_route("search_quebec_regulations", "get_quebec_regulation"),
-        legal_domain="droit réglementaire québécois",
-        expected_source_types=["reglement"],
-        default_weight=1.0),
-    Category(
-        name="jurisprudence_quebecoise",
-        description="L'utilisateur demande explicitement des décisions québécoises.",
-        expected_route=_route(("get_ccq_articles", True), "search_quebec_jurisprudence"),
-        expected_source_types=["jurisprudence"],
-        default_weight=1.0),
-    Category(
-        name="loi_federale",
-        description="Loi fédérale canadienne : recherche A2AJ puis fetch_document "
-                    "avec la citation réellement retournée.",
-        expected_route=_route("search_legal_documents", "fetch_document"),
-        expected_jurisdiction="Canada (fédéral)",
-        legal_domain="droit fédéral canadien",
-        expected_source_types=["legislation"],
-        default_weight=1.5),
-    Category(
-        name="jurisprudence_federale",
-        description="Décisions des tribunaux fédéraux ou de la Cour suprême.",
-        expected_route=_route("search_legal_documents", ("fetch_document", True)),
-        expected_jurisdiction="Canada (fédéral)",
-        legal_domain="droit fédéral canadien",
-        expected_source_types=["jurisprudence"],
-        default_weight=1.0),
-    Category(
-        name="cas_federal_concret",
-        description="Cas concret relevant du droit fédéral (banque, faillite, "
-                    "propriété intellectuelle, droit maritime...). Route fédérale, "
-                    "pas CCQ par défaut.",
-        expected_route=_route("search_legal_documents", "fetch_document",
-                              ("search_legal_documents", True)),
-        expected_jurisdiction="Canada (fédéral)",
-        legal_domain="droit fédéral canadien",
-        expected_source_types=["legislation", "jurisprudence"],
-        default_weight=1.0),
-    Category(
-        name="comparaison_quebec_federal",
-        description="Comparaison entre le régime québécois et le régime fédéral.",
-        expected_route=_route(("semantic_search_ccq", True), "get_ccq_articles",
-                              "search_legal_documents",
-                              ("fetch_document", True)),
-        expected_jurisdiction="Québec et Canada (fédéral)",
-        legal_domain="droit comparé Québec/fédéral",
-        expected_source_types=["legislation"],
-        default_weight=0.7),
-    Category(
-        name="juridiction_ambigue",
-        description="La juridiction dépend d'un fait manquant : clarification "
-                    "AVANT toute recherche.",
-        expected_route=_route(clarification=True),
-        expected_jurisdiction="indéterminée",
-        default_weight=1.0),
-    Category(
-        name="question_incomplete",
-        description="Information essentielle manquante (« Mon patron peut-il "
-                    "faire ça ? ») : clarification avant recherche.",
-        expected_route=_route(("semantic_search_ccq", True),
-                              ("get_ccq_articles", True),
-                              clarification=True),
-        expected_jurisdiction="indéterminée",
-        default_weight=1.0),
-    Category(
-        name="verification_entree_en_vigueur",
-        description="Vérifier l'entrée en vigueur / les modifications d'une "
-                    "disposition québécoise.",
+        default_source_intents=["regulation"],
+        default_weight=0.07,
+        clarification_weights={
+            "none": 0.70, "before_search": 0.15, "after_initial_research": 0.15,
+        },
+    ),
+    RequestTypeSpec(
+        name="legislative_status_verification",
+        description="Vérifier l'entrée en vigueur, les modifications ou l'abrogation "
+                    "d'une disposition.",
         expected_route=_route("get_quebec_legal_info"),
-        expected_source_types=["metadonnees_legislatives"],
-        default_weight=0.7),
-    Category(
-        name="couverture_dataset",
-        description="La couverture du corpus A2AJ est incertaine : coverage est "
-                    "justifié (jamais appelé systématiquement ailleurs).",
-        expected_route=_route("coverage", ("search_legal_documents", True)),
-        expected_jurisdiction="Canada (fédéral)",
+        route_policy=_policy(
+            "legislative_metadata",
+            preferred=["get_quebec_legal_info"],
+            forbidden=["search_legal_documents", "fetch_document",
+                        "search_quebec_jurisprudence"],
+        ),
+        default_source_intents=["legislative_metadata"],
+        default_weight=0.05,
+        clarification_weights={
+            "none": 0.80, "before_search": 0.10, "after_initial_research": 0.10,
+        },
+    ),
+    RequestTypeSpec(
+        name="document_analysis",
+        description="Analyser un document fourni (jugement, bail, contrat, "
+                    "mise en demeure, constat d'infraction).",
+        expected_route=_route(
+            ("semantic_search_ccq", True, "if relevant legislation unknown"),
+            ("get_ccq_articles", True, "if article identified in document"),
+        ),
+        route_policy=_policy(
+            conditional=[
+                ("semantic_search_ccq", "relevant legislation unknown"),
+                ("get_ccq_articles", "article identified in document"),
+            ],
+        ),
+        default_source_intents=["provided_document", "legislation"],
+        default_weight=0.04,
+        clarification_weights={
+            "none": 0.30, "before_search": 0.40, "after_initial_research": 0.30,
+        },
+    ),
+    RequestTypeSpec(
+        name="comparative_law",
+        description="Comparaison entre le régime québécois et le régime fédéral "
+                    "ou entre juridictions.",
+        expected_route=_route(
+            ("semantic_search_ccq", True),
+            "get_ccq_articles",
+            "search_legal_documents",
+            ("fetch_document", True, "federal document identified"),
+        ),
+        route_policy=_policy(
+            "official_text_retrieval", "federal_law_retrieval",
+            conditional=[
+                ("fetch_document", "federal document identified"),
+            ],
+            preferred=["semantic_search_ccq", "get_ccq_articles"],
+        ),
+        default_jurisdiction_status="undetermined",
+        legal_domain="droit comparé",
+        default_source_intents=["legislation"],
+        default_weight=0.02,
+        clarification_weights={
+            "none": 0.60, "before_search": 0.20, "after_initial_research": 0.20,
+        },
+    ),
+    RequestTypeSpec(
+        name="dataset_coverage",
+        description="Couverture du corpus A2AJ : coverage est justifié.",
+        expected_route=_route(
+            "coverage",
+            ("search_legal_documents", True,
+             "coverage reveals gap worth investigating"),
+        ),
+        route_policy=_policy(
+            "dataset_coverage",
+            conditional=[
+                ("search_legal_documents",
+                 "coverage reveals gap worth investigating"),
+            ],
+            preferred=["coverage"],
+        ),
+        default_jurisdiction_status="supported_federal",
         legal_domain="droit fédéral canadien",
-        expected_source_types=["metadonnees_dataset"],
-        default_weight=0.5),
-    Category(
-        name="question_non_juridique",
+        default_source_intents=["legislative_metadata"],
+        default_weight=0.01,
+        clarification_weights={
+            "none": 1.0, "before_search": 0.0, "after_initial_research": 0.0,
+        },
+    ),
+    RequestTypeSpec(
+        name="non_legal",
         description="Salutation ou question hors droit : AUCUN appel MCP.",
         expected_route=_route(no_tool=True),
-        expected_jurisdiction="sans objet",
+        route_policy=_policy(no_tool=True),
+        default_jurisdiction_status="undetermined",
         legal_domain="hors droit",
-        default_weight=0.7),
-    Category(
-        name="panne_mcp",
-        description="L'outil renvoie une erreur : le modèle doit le dire, sans "
-                    "fabriquer de réponse.",
-        expected_route=_route("get_ccq_articles"),
-        failure_mode="panne_mcp",
-        default_weight=0.5),
-    Category(
-        name="resultat_vide",
-        description="La recherche ne renvoie rien : reformulation limitée puis "
-                    "réponse prudente.",
-        expected_route=_route("semantic_search_ccq", ("semantic_search_ccq", True),
-                              ("coverage", True)),
-        failure_mode="resultat_vide",
-        default_weight=0.5),
-    Category(
-        name="source_trop_longue",
-        description="fetch_document renvoie un document très long : récupération "
-                    "par section ou par plage de caractères, troncature déclarée.",
-        expected_route=_route("search_legal_documents", "fetch_document",
-                              ("fetch_document", True)),
-        expected_jurisdiction="Canada (fédéral)",
-        legal_domain="droit fédéral canadien",
-        failure_mode="source_trop_longue",
-        default_weight=0.5),
-    Category(
-        name="clarification_puis_recherche",
-        description="Clarification d'abord ; la réponse de l'utilisateur permet "
-                    "ensuite la recherche.",
-        expected_route=_route(("semantic_search_ccq", True), "get_ccq_articles",
-                              clarification=True),
-        default_weight=1.0),
+        default_weight=0.03,
+        clarification_weights={
+            "none": 1.0, "before_search": 0.0, "after_initial_research": 0.0,
+        },
+    ),
 ]}
 
 
+# ---------------------------------------------------------------------------
+# Distributions par défaut (spec sections 15-16)
+# ---------------------------------------------------------------------------
+
+DEFAULT_JURISDICTION_WEIGHTS: dict[str, float] = {
+    "supported_quebec": 0.58,
+    "supported_federal": 0.22,
+    "municipal_coverage_uncertain": 0.07,
+    "supported_other_canadian": 0.08,
+    "unsupported_foreign": 0.05,
+}
+
+DEFAULT_FAILURE_MODE_WEIGHTS: dict[str, float] = {
+    "irrelevant_results": 0.25,
+    "wrong_document_type": 0.20,
+    "empty_result": 0.15,
+    "truncated_source": 0.15,
+    "tool_error": 0.10,
+    "stale_source": 0.08,
+    "malformed_result": 0.04,
+    "coverage_gap": 0.03,
+}
+
+DEFAULT_FAILURE_INJECTION_RATE: float = 0.07
+
+
+# ---------------------------------------------------------------------------
+# Sets de politique (anciennement NO_JURISPRUDENCE / OFFICIAL_TEXT_REQUIRED)
+# ---------------------------------------------------------------------------
+
+NO_JURISPRUDENCE = {
+    "exact_text_retrieval",
+    "legislative_status_verification",
+    "non_legal",
+}
+
+OFFICIAL_TEXT_REQUIRED = {
+    "exact_text_retrieval",
+    "article_explanation",
+}
+
+
+# ---------------------------------------------------------------------------
+# Fonctions de taxonomie
+# ---------------------------------------------------------------------------
+
 def weights(overrides: Optional[dict[str, float]] = None) -> dict[str, float]:
-    """Poids d'échantillonnage : défauts de la taxonomie, surchargés par le YAML."""
-    w = {name: cat.default_weight for name, cat in CATEGORIES.items()}
+    w = {name: rt.default_weight for name, rt in REQUEST_TYPES.items()}
     for name, val in (overrides or {}).items():
         if name not in w:
-            raise KeyError(f"Catégorie inconnue dans la configuration : {name}")
+            raise KeyError(f"Type de demande inconnu dans la configuration : {name}")
         w[name] = float(val)
     return w
 
 
-def sample_category(rng: random.Random,
-                    overrides: Optional[dict[str, float]] = None) -> Category:
+def sample_request_type(
+    rng: random.Random,
+    overrides: Optional[dict[str, float]] = None,
+) -> RequestTypeSpec:
     w = weights(overrides)
     names = sorted(w)
     total = sum(w[n] for n in names)
@@ -270,18 +417,88 @@ def sample_category(rng: random.Random,
     for name in names:
         acc += w[name]
         if pick <= acc:
-            return CATEGORIES[name]
-    return CATEGORIES[names[-1]]
+            return REQUEST_TYPES[name]
+    return REQUEST_TYPES[names[-1]]
 
 
-def target_category_counts(total: int,
-                           overrides: Optional[dict[str, float]] = None) -> dict[str, int]:
-    """Répartit un objectif d'acceptation selon les poids de la taxonomie.
+# Backward compatibility
+sample_category = sample_request_type
 
-    La méthode du plus fort reste garantit que la somme des quotas est
-    exactement ``total``. Le CLI pilote ensuite les *acceptés* vers ces quotas,
-    plutôt que de laisser les catégories faciles monopoliser le dataset.
-    """
+
+def sample_clarification_stage(
+    rng: random.Random,
+    request_type: RequestTypeSpec,
+    overrides: Optional[dict[str, float]] = None,
+) -> str:
+    cw = dict(request_type.clarification_weights)
+    if overrides:
+        for key, val in overrides.items():
+            if key in cw:
+                cw[key] = float(val)
+    stages = sorted(cw)
+    total = sum(cw[s] for s in stages)
+    if total <= 0:
+        return "none"
+    pick = rng.uniform(0, total)
+    acc = 0.0
+    for stage in stages:
+        acc += cw[stage]
+        if pick <= acc:
+            return stage
+    return "none"
+
+
+def sample_jurisdiction(
+    rng: random.Random,
+    overrides: Optional[dict[str, float]] = None,
+) -> str:
+    jw = dict(DEFAULT_JURISDICTION_WEIGHTS)
+    if overrides:
+        for key, val in overrides.items():
+            if key in jw:
+                jw[key] = float(val)
+    jurisdictions = sorted(jw)
+    total = sum(jw[j] for j in jurisdictions)
+    if total <= 0:
+        return "supported_quebec"
+    pick = rng.uniform(0, total)
+    acc = 0.0
+    for j in jurisdictions:
+        acc += jw[j]
+        if pick <= acc:
+            return j
+    return "supported_quebec"
+
+
+def sample_failure_mode(
+    rng: random.Random,
+    injection_rate: float = DEFAULT_FAILURE_INJECTION_RATE,
+    overrides: Optional[dict[str, float]] = None,
+) -> Optional[str]:
+    if rng.random() > injection_rate:
+        return None
+    fw = dict(DEFAULT_FAILURE_MODE_WEIGHTS)
+    if overrides:
+        for key, val in overrides.items():
+            if key in fw:
+                fw[key] = float(val)
+    modes = sorted(fw)
+    total = sum(fw[m] for m in modes)
+    if total <= 0:
+        return None
+    pick = rng.uniform(0, total)
+    acc = 0.0
+    for mode in modes:
+        acc += fw[mode]
+        if pick <= acc:
+            return mode
+    return None
+
+
+def target_request_type_counts(
+    total: int,
+    overrides: Optional[dict[str, float]] = None,
+) -> dict[str, int]:
     if total < 0:
         raise ValueError("objectif total négatif")
     weighted = weights(overrides)
@@ -297,23 +514,20 @@ def target_category_counts(total: int,
     return targets
 
 
-def get_category(name: str) -> Category:
-    if name not in CATEGORIES:
-        raise KeyError(f"Catégorie inconnue : {name}")
-    return CATEGORIES[name]
+# Backward compatibility
+target_category_counts = target_request_type_counts
 
 
-# Catégories où une recherche de jurisprudence est un signe de sur-recherche :
-# une simple demande d'article ne la justifie jamais.
-NO_JURISPRUDENCE = {
-    "article_ccq_precis", "article_cpc_precis",
-    "reglement_quebecois_connu", "reglement_quebecois_inconnu",
-    "verification_entree_en_vigueur", "question_non_juridique",
-}
+def get_request_type(name: str) -> RequestTypeSpec:
+    if name not in REQUEST_TYPES:
+        raise KeyError(f"Type de demande inconnu : {name}")
+    return REQUEST_TYPES[name]
 
-# Catégories où l'utilisateur demande un TEXTE OFFICIEL : répondre de mémoire
-# (aucun appel d'outil) est une faute de politique.
-OFFICIAL_TEXT_REQUIRED = {
-    "article_ccq_precis", "article_cpc_precis", "explication_article",
-    "reglement_quebecois_connu", "reglement_quebecois_inconnu",
-}
+
+# Backward compatibility
+def get_category(name: str) -> RequestTypeSpec:
+    return get_request_type(name)
+
+
+# Backward compatibility alias
+CATEGORIES = REQUEST_TYPES

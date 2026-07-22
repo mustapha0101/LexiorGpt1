@@ -10,41 +10,49 @@ from typing import Optional
 
 from .prompts import SCENARIO_GENERATOR_SYSTEM, scenario_user_prompt
 from .schemas import ScenarioSpec
-from .taxonomy import Category, get_category, sample_category
+from .taxonomy import (
+    RequestTypeSpec, get_request_type, sample_request_type,
+    sample_clarification_stage, sample_jurisdiction, sample_failure_mode,
+)
 
 
 ARTICLE_RE = re.compile(r"\b(?:article\s+)?(\d{1,4}(?:\.\d+)?)\b", re.I)
 
 
-FIXTURE_QUERIES = {
-    "article_ccq_precis": "Quel est le texte officiel de l’article 1457 du Code civil du Québec?",
-    "article_cpc_precis": "Pouvez-vous me donner le texte officiel de l’article 1 du Code de procédure civile?",
-    "explication_article": "Que signifie l’article 1457 du Code civil du Québec?",
-    "recherche_theme_ccq": "Quels articles du Code civil du Québec portent sur les vices cachés?",
-    "recherche_theme_cpc": "Quelles dispositions du CPC concernent la signification d’une demande?",
-    "cas_civil_quebecois": "J’ai acheté une maison au Québec et découvert après la vente un vice caché important. Quels sont mes recours?",
-    "cas_procedure_quebecoise": "Au Québec, une demande m’a été signifiée tardivement. Quelles conséquences sont possibles?",
-    "reglement_quebecois_connu": "Où puis-je consulter le règlement québécois sur l’encadrement d’activités environnementales?",
-    "reglement_quebecois_inconnu": "Quel règlement québécois encadre les activités selon leur impact environnemental?",
-    "jurisprudence_quebecoise": "Pouvez-vous trouver des décisions québécoises récentes sur les vices cachés?",
-    "loi_federale": "Trouvez le texte officiel de la Loi sur les banques du Canada.",
-    "jurisprudence_federale": "Quelles décisions de la Cour fédérale traitent récemment de marques de commerce?",
-    "cas_federal_concret": "Une banque située à Montréal refuse une opération. Quelle règle fédérale pourrait s’appliquer?",
-    "comparaison_quebec_federal": "Comparez les sources québécoises et fédérales applicables à cette opération bancaire.",
-    "juridiction_ambigue": "Mon contrat a été rompu; quels sont mes recours?",
-    "question_incomplete": "Mon patron peut-il faire ça?",
-    "verification_entree_en_vigueur": "Comment vérifier si une modification législative québécoise est entrée en vigueur?",
-    "couverture_dataset": "Le corpus contient-il des décisions de la Cour suprême du Canada?",
-    "question_non_juridique": "Bonjour! Comment allez-vous?",
-    "panne_mcp": "Donnez-moi le texte officiel de l’article 1457 du Code civil du Québec.",
-    "resultat_vide": "Quels articles du CCQ parlent exactement de cryptosuccession?",
-    "source_trop_longue": "Retrouvez une loi fédérale sur les banques et la partie pertinente sur les activités autorisées.",
-    "clarification_puis_recherche": "Quels recours ai-je contre le vendeur de ma maison?",
+FIXTURE_QUERIES: dict[str, str] = {
+    "case_analysis":
+        "J'ai acheté une maison au Québec et découvert après la vente un "
+        "vice caché important. Quels sont mes recours?",
+    "procedure_guidance":
+        "Au Québec, une demande m'a été signifiée tardivement. "
+        "Quelles conséquences sont possibles?",
+    "topic_research":
+        "Quels articles du Code civil du Québec portent sur les vices cachés?",
+    "exact_text_retrieval":
+        "Quel est le texte officiel de l'article 1457 du Code civil du Québec?",
+    "article_explanation":
+        "Que signifie l'article 1457 du Code civil du Québec?",
+    "case_law_research":
+        "Pouvez-vous trouver des décisions québécoises récentes sur "
+        "les vices cachés?",
+    "law_or_regulation_identification":
+        "Quel règlement québécois encadre les activités selon leur impact "
+        "environnemental?",
+    "legislative_status_verification":
+        "Comment vérifier si une modification législative québécoise est "
+        "entrée en vigueur?",
+    "document_analysis":
+        "J'ai reçu une mise en demeure pour un bail commercial. "
+        "Quels sont les points à vérifier?",
+    "comparative_law":
+        "Comparez les sources québécoises et fédérales applicables à "
+        "cette opération bancaire.",
+    "dataset_coverage":
+        "Le corpus contient-il des décisions de la Cour suprême du Canada?",
+    "non_legal":
+        "Bonjour! Comment allez-vous?",
 }
 
-# Ancres volontairement conservatrices : dispositions courantes dont
-# l'existence est stable. Elles empêchent le modèle de fabriquer un numéro
-# hors du code (p. ex. CCQ 3408) pour les catégories à article précis.
 VERIFIED_CCQ_ARTICLES = (
     1, 6, 7, 10, 11, 35, 1375, 1376, 1457, 1458, 1463, 1474,
     1607, 1611, 1708, 1713, 1726, 1739, 2085, 2098, 2130, 2803,
@@ -71,135 +79,212 @@ _LEGAL_MARKERS = (
 )
 
 
-_FEDERAL_CASE_CATEGORIES = {"cas_federal_concret", "jurisprudence_federale"}
-_FEDERAL_LAW_CATEGORIES = {"loi_federale"}
-
-
 class ScenarioGenerator:
     def __init__(self, client=None, seed: int = 3407, offline: bool = False,
-                 taxonomy_proportions: Optional[dict[str, float]] = None,
-                 anchor_bank=None):
+                 request_type_weights: Optional[dict[str, float]] = None,
+                 jurisdiction_weights: Optional[dict[str, float]] = None,
+                 clarification_stage_weights: Optional[dict[str, float]] = None,
+                 failure_mode_weights: Optional[dict[str, float]] = None,
+                 failure_injection_rate: float = 0.07,
+                 anchor_bank=None,
+                 # backward compat
+                 taxonomy_proportions: Optional[dict[str, float]] = None):
         self.client = client
         self.rng = random.Random(seed)
         self.seed = seed
         self.offline = offline
-        self.proportions = taxonomy_proportions or {}
+        self.request_type_weights = request_type_weights or taxonomy_proportions or {}
+        self.jurisdiction_weights = jurisdiction_weights or {}
+        self.clarification_stage_weights = clarification_stage_weights or {}
+        self.failure_mode_weights = failure_mode_weights or {}
+        self.failure_injection_rate = failure_injection_rate
         self.anchor_bank = anchor_bank
         self.index = 0
 
-    def generate(self, category_name: Optional[str] = None) -> ScenarioSpec:
-        category = get_category(category_name) if category_name else sample_category(self.rng, self.proportions)
+    def generate(
+        self,
+        request_type_name: Optional[str] = None,
+        clarification_stage: Optional[str] = None,
+        jurisdiction_status: Optional[str] = None,
+        failure_mode: Optional[str] = None,
+    ) -> ScenarioSpec:
+        rt = (get_request_type(request_type_name) if request_type_name
+              else sample_request_type(self.rng, self.request_type_weights))
         self.index += 1
+
+        if clarification_stage is None:
+            clarification_stage = sample_clarification_stage(
+                self.rng, rt, self.clarification_stage_weights)
+        if jurisdiction_status is None:
+            jurisdiction_status = sample_jurisdiction(
+                self.rng, self.jurisdiction_weights)
+        if failure_mode is None:
+            failure_mode = sample_failure_mode(
+                self.rng, self.failure_injection_rate,
+                self.failure_mode_weights)
+
         if self.offline:
-            return self._fixture(category)
+            return self._fixture(rt, clarification_stage,
+                                 jurisdiction_status, failure_mode)
         if self.client is None:
             raise RuntimeError("client Teacher requis hors mode offline")
-        article_anchor = self._article_anchor(category.name)
-        federal_anchor = self._federal_anchor(category.name)
-        prompt = scenario_user_prompt(category.name, category.description,
-                                      category.expected_jurisdiction,
-                                      str(self.seed + self.index),
-                                      article_anchor=str(article_anchor) if article_anchor else None,
-                                      federal_anchor=federal_anchor)
+
+        article_anchor = self._article_anchor(rt.name)
+        federal_anchor = self._federal_anchor(rt.name, jurisdiction_status)
+        prompt = scenario_user_prompt(
+            rt.name, rt.description,
+            jurisdiction_status, str(self.seed + self.index),
+            clarification_stage=clarification_stage,
+            article_anchor=str(article_anchor) if article_anchor else None,
+            federal_anchor=federal_anchor,
+        )
         raw = self.client.complete_json("scenario_generator", [
             {"role": "system", "content": SCENARIO_GENERATOR_SYSTEM},
             {"role": "user", "content": prompt},
         ])
-        # Les métadonnées d'évaluation sont imposées par la taxonomie; le LLM
-        # n'est jamais autorisé à les remplacer dans son JSON.
-        raw["request_type"] = category.name
-        raw["expected_route"] = category.expected_route.model_dump(mode="json")
-        raw["expected_jurisdiction"] = category.expected_jurisdiction
-        raw["legal_domain"] = category.legal_domain
-        raw["expected_source_types"] = category.expected_source_types
+
+        raw["request_type"] = rt.name
+        raw["expected_route"] = rt.expected_route.model_dump(mode="json")
+        raw["legal_domain"] = rt.legal_domain
+        raw["jurisdiction_status"] = jurisdiction_status
+        raw["clarification_stage"] = clarification_stage
+        raw["source_intent"] = rt.default_source_intents
+
+        if failure_mode:
+            raw["planned_failure_mode"] = failure_mode
+
         if article_anchor:
             raw["user_query"] = self._anchored_query(
-                category.name, str(raw.get("user_query", "")), article_anchor)
+                rt.name, str(raw.get("user_query", "")), article_anchor)
             facts = dict(raw.get("facts_provided") or {})
             facts["article_number"] = article_anchor
             raw["facts_provided"] = facts
-        self._enforce_category_contract(raw, category, has_federal_anchor=bool(federal_anchor))
+
+        self._enforce_contract(raw, rt,
+                               has_federal_anchor=bool(federal_anchor))
+        self._enforce_jurisdiction(raw)
+        self._enforce_clarification(raw)
+
         query = str(raw.get("user_query", ""))
         raw["scenario_id"] = hashlib.sha256(
-            f"{self.seed}:{category.name}:{self.index}:{query}".encode()).hexdigest()[:16]
+            f"{self.seed}:{rt.name}:{self.index}:{query}".encode()
+        ).hexdigest()[:16]
         facts_shape = sorted((raw.get("facts_provided") or {}).keys())
         raw["scenario_family_id"] = hashlib.sha256(
-            f"{category.name}:{facts_shape}".encode()).hexdigest()[:16]
+            f"{rt.name}:{facts_shape}".encode()).hexdigest()[:16]
+
         return ScenarioSpec.model_validate(raw)
 
-    def _enforce_category_contract(self, raw: dict, category: Category,
-                                    has_federal_anchor: bool = False) -> None:
-        """Garde-fous déterministes pour les confusions de domaine coûteuses."""
+    def _enforce_contract(self, raw: dict, rt: RequestTypeSpec,
+                          has_federal_anchor: bool = False) -> None:
         query = str(raw.get("user_query", ""))
         folded = query.casefold()
-        if category.name == "clarification_puis_recherche":
-            if not any(marker in folded for marker in _CIVIL_MARKERS):
-                raw["user_query"] = FIXTURE_QUERIES[category.name]
-                raw["clarification_answer"] = (
-                    "La maison est au Québec et j'ai découvert un vice caché "
-                    "important après la vente."
-                )
-                raw["facts_provided"] = {}
-                raw["facts_missing"] = [
-                    "lieu de l'immeuble", "nature précise du problème"
-                ]
-            else:
-                raw["facts_missing"] = list(raw.get("facts_missing") or [
-                    "fait civil essentiel à préciser"
-                ])
-                if not raw.get("clarification_answer"):
-                    raw["clarification_answer"] = (
-                        "La situation est au Québec et concerne un contrat civil."
-                    )
-        elif category.name == "recherche_theme_ccq":
-            ccq_bad = ("prestation", "ccq", "c.c.q", "commission de la construction")
-            if any(marker in folded for marker in ccq_bad):
-                raw["user_query"] = FIXTURE_QUERIES[category.name]
-                raw["facts_provided"] = {}
-                raw["facts_missing"] = []
-                raw["clarification_answer"] = None
-        elif category.name == "recherche_theme_cpc":
-            if any(marker in folded for marker in _PENAL_MARKERS):
-                raw["user_query"] = FIXTURE_QUERIES[category.name]
-                raw["facts_provided"] = {}
-                raw["facts_missing"] = []
-                raw["clarification_answer"] = None
-        elif category.name == "cas_federal_concret":
-            if not has_federal_anchor and not any(marker in folded for marker in _FEDERAL_MARKERS):
-                raw["user_query"] = FIXTURE_QUERIES[category.name]
-                raw["facts_provided"] = {}
-                raw["facts_missing"] = []
-                raw["clarification_answer"] = None
-        elif category.name == "loi_federale":
-            if not has_federal_anchor and not re.search(r"\bloi\s+(?:sur|de|concernant)\b", folded):
-                raw["user_query"] = FIXTURE_QUERIES[category.name]
-                raw["facts_provided"] = {}
-                raw["facts_missing"] = []
-                raw["clarification_answer"] = None
-        elif category.name == "question_non_juridique":
-            if any(marker in folded for marker in _LEGAL_MARKERS):
-                raw["user_query"] = FIXTURE_QUERIES[category.name]
-            raw["facts_provided"] = {}
-            raw["facts_missing"] = []
-            raw["clarification_answer"] = None
 
-    def _article_anchor(self, category_name: str) -> Optional[int]:
-        if category_name in {"article_ccq_precis", "explication_article"}:
+        if rt.name == "case_analysis":
+            clarification = raw.get("clarification_stage", "none")
+            jurisdiction = raw.get("jurisdiction_status", "undetermined")
+            if clarification == "before_search":
+                if not any(m in folded for m in _CIVIL_MARKERS):
+                    raw["user_query"] = (
+                        "Quels recours ai-je contre le vendeur de ma maison?")
+                    raw["synthetic_clarification_answer"] = (
+                        "La maison est au Québec et j'ai découvert un vice "
+                        "caché important après la vente.")
+                    raw["facts_provided"] = {}
+                    raw["facts_required_before_search"] = [
+                        "lieu de l'immeuble", "nature précise du problème"]
+            if (jurisdiction == "supported_federal" and not has_federal_anchor
+                    and not any(m in folded for m in _FEDERAL_MARKERS)):
+                raw["user_query"] = (
+                    "Une banque située à Montréal refuse une opération. "
+                    "Quelle règle fédérale pourrait s'appliquer?")
+                raw["facts_provided"] = {}
+        elif rt.name == "topic_research":
+            ccq_bad = ("prestation", "ccq", "c.c.q",
+                       "commission de la construction")
+            if any(m in folded for m in ccq_bad):
+                raw["user_query"] = FIXTURE_QUERIES["topic_research"]
+                raw["facts_provided"] = {}
+            elif any(m in folded for m in _PENAL_MARKERS):
+                raw["user_query"] = FIXTURE_QUERIES["topic_research"]
+                raw["facts_provided"] = {}
+                raw["clarification_answer"] = None
+        elif rt.name == "procedure_guidance":
+            if any(m in folded for m in _PENAL_MARKERS):
+                raw["user_query"] = FIXTURE_QUERIES["procedure_guidance"]
+                raw["facts_provided"] = {}
+        elif rt.name == "law_or_regulation_identification":
+            jurisdiction = raw.get("jurisdiction_status", "undetermined")
+            if (jurisdiction == "supported_federal" and not has_federal_anchor
+                    and not re.search(r"\bloi\s+(?:sur|de|concernant)\b", folded)):
+                raw["user_query"] = (
+                    "Trouvez le texte officiel de la Loi sur les banques "
+                    "du Canada.")
+                raw["facts_provided"] = {}
+        elif rt.name == "non_legal":
+            if any(m in folded for m in _LEGAL_MARKERS):
+                raw["user_query"] = FIXTURE_QUERIES["non_legal"]
+            raw["facts_provided"] = {}
+
+    @staticmethod
+    def _enforce_jurisdiction(raw: dict) -> None:
+        """Ensure jurisdiction_status matches the actual query content."""
+        query = str(raw.get("user_query", "")).casefold()
+        declared = raw.get("jurisdiction_status", "undetermined")
+
+        ccq_markers = ("code civil", "ccq", "c.c.q", "article", "québ",
+                       "légisquébec", "code de procédure civile", "cpc")
+        federal_markers = ("fédéral", "canada", "lrc", "failli", "insolv",
+                           "brevet", "marque de commerce", "maritime",
+                           "banque", "bancaire", "code criminel")
+
+        has_quebec = any(m in query for m in ccq_markers)
+        has_federal = any(m in query for m in federal_markers)
+
+        if has_quebec and not has_federal:
+            if declared not in ("supported_quebec", "undetermined"):
+                raw["jurisdiction_status"] = "supported_quebec"
+                raw["expected_jurisdiction"] = "Québec"
+        elif has_federal and not has_quebec:
+            if declared == "supported_quebec":
+                raw["jurisdiction_status"] = "supported_federal"
+                raw["expected_jurisdiction"] = "Canada (fédéral)"
+
+        status = raw.get("jurisdiction_status", "undetermined")
+        if status == "supported_quebec":
+            raw.setdefault("expected_jurisdiction", "Québec")
+        elif status == "supported_federal":
+            raw.setdefault("expected_jurisdiction", "Canada (fédéral)")
+
+    @staticmethod
+    def _enforce_clarification(raw: dict) -> None:
+        """Ensure clarification metadata is self-consistent."""
+        stage = raw.get("clarification_stage", "none")
+        if stage == "none":
+            raw["synthetic_clarification_answer"] = None
+            raw["clarification_answer"] = None
+        elif stage in ("before_search", "after_initial_research"):
+            if not raw.get("synthetic_clarification_answer") and not raw.get("clarification_answer"):
+                raw["clarification_stage"] = "none"
+
+    def _article_anchor(self, request_type_name: str) -> Optional[int]:
+        if request_type_name in {"exact_text_retrieval", "article_explanation"}:
             return self.rng.choice(VERIFIED_CCQ_ARTICLES)
-        if category_name == "article_cpc_precis":
-            return self.rng.choice(VERIFIED_CPC_ARTICLES)
         return None
 
-    def _federal_anchor(self, category_name: str) -> Optional[str]:
+    def _federal_anchor(self, request_type_name: str,
+                        jurisdiction_status: str) -> Optional[str]:
         if not self.anchor_bank:
             return None
-        if category_name in _FEDERAL_CASE_CATEGORIES:
+        if jurisdiction_status != "supported_federal":
+            return None
+        if request_type_name in {"case_analysis", "case_law_research"}:
             anchor = self.anchor_bank.sample_case(self.rng)
             if anchor:
                 return (f"Décision fédérale imposée : {anchor.name_fr} "
                         f"({anchor.citation_fr}, {anchor.dataset}). "
                         f"Domaine : {anchor.topic_hint}.")
-        if category_name in _FEDERAL_LAW_CATEGORIES:
+        if request_type_name == "law_or_regulation_identification":
             anchor = self.anchor_bank.sample_law(self.rng)
             if anchor:
                 return (f"Loi fédérale imposée : {anchor.name_fr} "
@@ -207,52 +292,66 @@ class ScenarioGenerator:
         return None
 
     @staticmethod
-    def _anchored_query(category_name: str, query: str, article: int) -> str:
-        # Le Teacher reçoit déjà l'ancre. Ce garde-fou garantit néanmoins que
-        # la donnée ne conserve jamais un autre numéro en cas de non-respect.
+    def _anchored_query(request_type_name: str, query: str,
+                        article: int) -> str:
         numbers = ARTICLE_RE.findall(query)
         folded = query.casefold()
         expected_code_named = (
-            (category_name == "article_cpc_precis" and
-             ("code de procédure civile" in folded or "cpc" in folded))
-            or (category_name in {"article_ccq_precis", "explication_article"} and
-                ("code civil" in folded or "ccq" in folded))
+            ("code civil" in folded or "ccq" in folded)
         )
         if numbers == [str(article)] and expected_code_named:
             return query
-        if category_name == "article_cpc_precis":
-            return (f"Pouvez-vous me donner le texte officiel de l'article {article} "
-                    "du Code de procédure civile du Québec?")
-        if category_name == "explication_article":
-            return (f"Que signifie l'article {article} du Code civil du Québec "
-                    "dans son texte officiel?")
-        return (f"Pouvez-vous me donner le texte officiel de l'article {article} "
-                "du Code civil du Québec?")
+        if request_type_name == "article_explanation":
+            return (f"Que signifie l'article {article} du Code civil du "
+                    "Québec dans son texte officiel?")
+        return (f"Pouvez-vous me donner le texte officiel de l'article "
+                f"{article} du Code civil du Québec?")
 
-    def _fixture(self, category: Category) -> ScenarioSpec:
-        family = hashlib.sha256(f"{category.name}:{self.index // 3}".encode()).hexdigest()[:12]
-        scenario_id = hashlib.sha256(f"{self.seed}:{category.name}:{self.index}".encode()).hexdigest()[:16]
-        missing = []
-        clarification_answer = None
-        if category.name in {"juridiction_ambigue", "question_incomplete"}:
-            missing = ["juridiction", "faits essentiels"]
-        if category.name == "question_incomplete":
-            clarification_answer = "C'est au Québec, mon employeur a réduit mes heures sans préavis."
-        if category.name == "clarification_puis_recherche":
-            missing = ["lieu de l’immeuble", "nature du problème"]
-            clarification_answer = "La maison est au Québec et j’ai découvert un vice caché après la vente."
+    def _fixture(self, rt: RequestTypeSpec,
+                 clarification_stage: str,
+                 jurisdiction_status: str,
+                 failure_mode: Optional[str]) -> ScenarioSpec:
+        family = hashlib.sha256(
+            f"{rt.name}:{self.index // 3}".encode()).hexdigest()[:12]
+        scenario_id = hashlib.sha256(
+            f"{self.seed}:{rt.name}:{self.index}".encode()).hexdigest()[:16]
+
+        facts_before_search: list[str] = []
+        clarification_answer: Optional[str] = None
+
+        if clarification_stage == "before_search":
+            facts_before_search = ["juridiction", "faits essentiels"]
+            clarification_answer = (
+                "C'est au Québec, mon employeur a réduit mes heures "
+                "sans préavis.")
+        elif clarification_stage == "after_initial_research":
+            clarification_answer = (
+                "La situation est au Québec et concerne un contrat civil.")
+
+        raw = {
+            "user_query": FIXTURE_QUERIES[rt.name],
+            "jurisdiction_status": jurisdiction_status,
+            "clarification_stage": clarification_stage,
+            "synthetic_clarification_answer": clarification_answer,
+            "clarification_answer": clarification_answer,
+        }
+        self._enforce_jurisdiction(raw)
+        self._enforce_clarification(raw)
+
         return ScenarioSpec(
             scenario_id=scenario_id,
-            scenario_family_id=f"{category.name}-{family}",
-            request_type=category.name,
+            scenario_family_id=f"{rt.name}-{family}",
+            request_type=rt.name,
             language="fr",
-            user_query=FIXTURE_QUERIES[category.name],
-            legal_domain=category.legal_domain,
-            expected_jurisdiction=category.expected_jurisdiction,
+            user_query=FIXTURE_QUERIES[rt.name],
+            legal_domain=rt.legal_domain,
+            jurisdiction_status=raw["jurisdiction_status"],
+            clarification_stage=raw["clarification_stage"],
+            source_intent=rt.default_source_intents,
             facts_provided={"fixture": True},
-            facts_missing=missing,
-            expected_source_types=category.expected_source_types,
-            expected_route=category.expected_route,
-            clarification_answer=clarification_answer,
-            failure_mode=category.failure_mode,
+            facts_required_before_search=facts_before_search,
+            expected_route=rt.expected_route,
+            synthetic_clarification_answer=raw.get("synthetic_clarification_answer"),
+            clarification_answer=raw.get("clarification_answer"),
+            planned_failure_mode=failure_mode,
         )

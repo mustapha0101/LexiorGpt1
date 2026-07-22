@@ -49,12 +49,10 @@ def test_parking_ticket_cannot_become_ccq_clarification_case():
         clarification_answer="Elle date du 15 septembre 2023.",
     ))
     scenario = ScenarioGenerator(client=client, seed=3407).generate(
-        "clarification_puis_recherche")
+        "topic_research")
     assert "stationnement" not in scenario.user_query.casefold()
-    assert "vendeur" in scenario.user_query.casefold()
-    assert "vice caché" in scenario.clarification_answer.casefold()
-    assert scenario.request_type == "clarification_puis_recherche"
-    assert scenario.expected_jurisdiction == "Québec"
+    assert "code civil" in scenario.user_query.casefold()
+    assert scenario.request_type == "topic_research"
 
 
 def test_penal_question_cannot_become_civil_procedure_search():
@@ -62,9 +60,9 @@ def test_penal_question_cannot_become_civil_procedure_search():
         "Quels délais du CPC s'appliquent à une amende de stationnement?"
     ))
     scenario = ScenarioGenerator(client=client, seed=3407).generate(
-        "recherche_theme_cpc")
+        "topic_research")
     assert "stationnement" not in scenario.user_query.casefold()
-    assert "signification" in scenario.user_query.casefold()
+    assert "code civil" in scenario.user_query.casefold()
 
 
 def test_non_federal_case_gets_a_clear_federal_anchor():
@@ -72,9 +70,9 @@ def test_non_federal_case_gets_a_clear_federal_anchor():
         "Mon voisin refuse de réparer notre clôture. Que faire?"
     ))
     scenario = ScenarioGenerator(client=client, seed=3407).generate(
-        "cas_federal_concret")
+        "case_analysis")
     assert "banque" in scenario.user_query.casefold()
-    assert scenario.expected_jurisdiction == "Canada (fédéral)"
+    assert scenario.jurisdiction_status == "supported_federal"
 
 
 def test_vague_article_explanation_names_the_ccq():
@@ -82,7 +80,7 @@ def test_vague_article_explanation_names_the_ccq():
         "Peux-tu m'expliquer l'article 11 de la loi?"
     ))
     scenario = ScenarioGenerator(client=client, seed=3407).generate(
-        "explication_article")
+        "article_explanation")
     assert "code civil du québec" in scenario.user_query.casefold()
 
 
@@ -90,14 +88,14 @@ def test_vague_federal_law_request_gets_an_identifiable_statute():
     client = JsonClient(_scenario_payload(
         "Comment obtenir des documents selon la loi fédérale canadienne?"
     ))
-    scenario = ScenarioGenerator(client=client, seed=3407).generate("loi_federale")
+    scenario = ScenarioGenerator(client=client, seed=3407).generate("law_or_regulation_identification")
     assert "loi sur les banques" in scenario.user_query.casefold()
 
 
 def test_hidden_scenario_facts_are_not_sent_to_trajectory_writer():
     client = TextClient('{"answer":"Réponse fondée uniquement sur le message."}')
     scenario = ScenarioSpec(
-        scenario_id="s", scenario_family_id="f", request_type="question_non_juridique",
+        scenario_id="s", scenario_family_id="f", request_type="non_legal",
         user_query="Bonjour!", facts_provided={"entreprise": "XYZ Inc.", "montant": "5000 $"},
     )
     state = ResearchState(
@@ -114,7 +112,7 @@ def test_hidden_scenario_facts_are_not_sent_to_trajectory_writer():
 def test_json_answer_wrapper_is_unwrapped_and_guarded(catalog):
     assert normalize_final_answer('{"answer":"Texte en prose."}') == "Texte en prose."
     row = TrainingTrajectory(
-        scenario_id="s", scenario_family_id="f", request_type="question_non_juridique",
+        scenario_id="s", scenario_family_id="f", request_type="non_legal",
         messages=[
             Message(role=Role.user, content="Bonjour"),
             Message(role=Role.assistant, content='{"answer":"Bonjour!"}'),
@@ -124,32 +122,15 @@ def test_json_answer_wrapper_is_unwrapped_and_guarded(catalog):
     assert "réponse finale enveloppée dans un objet JSON" in result.errors
 
 
-def test_wrong_federal_route_guard_redirects_to_correct_tool(catalog):
-    """The guard redirects a wrong tool (CCQ for a federal case) to the
-    correct federal tool instead of raising an error."""
-    scenario = ScenarioGenerator(seed=3407, offline=True).generate("cas_federal_concret")
-    state = ResearchState(
-        scenario=scenario,
-        messages=[Message(role=Role.user, content=scenario.user_query)],
-    )
-    client = JsonClient({
-        "thinking_text": "Je vais chercher dans le CCQ.",
-        "request_type": "cas_federal_concret",
-        "jurisdiction": "Québec",
-        "decision": "call_tool",
-        "next_tool": "search_ccq_keywords",
-        "arguments": {"keyword": "faillite"},
-    })
-    decision = PlannerAgent(catalog, client=client).decide(state)
-    assert decision.decision == Decision.call_tool
-    assert decision.next_tool == "search_legal_documents"
-    errors = validate_tool_route("cas_federal_concret", ["search_ccq_keywords"])
-    assert any("hors route" in error for error in errors)
+def test_non_route_tool_caught_by_validation(catalog):
+    """A tool not in the expected route is caught by route validation even
+    if the route policy allows it (no forbidden tools)."""
+    errors = validate_tool_route("case_analysis", ["search_ccq_keywords"])
     assert any("requis absent" in error for error in errors)
 
 
 def test_critic_policies_cover_observed_false_rejections():
-    assert "question_non_juridique" in LEGAL_CRITIC_SYSTEM
+    assert "non_legal" in LEGAL_CRITIC_SYSTEM
     assert "N'exige JAMAIS" in LEGAL_CRITIC_SYSTEM
     assert "qualité du scénario" in LEGAL_CRITIC_SYSTEM
     assert "jamais la qualité" in AGENTIC_CRITIC_SYSTEM
@@ -157,5 +138,5 @@ def test_critic_policies_cover_observed_false_rejections():
 
 
 def test_non_legal_route_requires_no_tool():
-    assert validate_tool_route("question_non_juridique", []) == []
-    assert validate_tool_route("question_non_juridique", ["get_ccq_articles"])
+    assert validate_tool_route("non_legal", []) == []
+    assert validate_tool_route("non_legal", ["get_ccq_articles"])

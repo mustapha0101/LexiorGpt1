@@ -22,13 +22,12 @@ from .legal_rag import (LegalRAG, OpenAIEmbedder, RAGError, build_index,
 from .mcp_executor import MCPExecutor, MockMCPTransport, RealMCPTransport
 from .orchestrator import AgenticOrchestrator
 from .planner_agent import PlannerAgent
-from .publisher import prepare_release, push_release
 from .anchor_bank import AnchorBank, build_anchor_bank
 from .scenario_generator import ScenarioGenerator
 from .schemas import GenerationManifest
 from .storage import JsonCache, RunStorage
 from .teacher_client import TeacherClient
-from .taxonomy import target_category_counts
+from .taxonomy import target_request_type_counts
 from .tool_catalog import load_catalog
 from .trajectory_agent import TrajectoryAgent
 
@@ -69,13 +68,9 @@ def _print_progress(index: int, max_scenarios: int, counts: Counter,
 _MAX_ATTEMPTS_PER_SLOT = 5
 
 
-def _next_category(targets: dict[str, int], accepted: Counter,
-                   attempted: Counter) -> str:
-    """Choisit la catégorie la plus en retard sur son quota d'acceptation.
-
-    Si une catégorie a été tentée trop de fois sans succès, elle est ignorée
-    et une catégorie avec quota 0 (overflow) prend le relais.
-    """
+def _next_request_type(targets: dict[str, int], accepted: Counter,
+                       attempted: Counter) -> str:
+    """Choisit le type de requête le plus en retard sur son quota."""
     pending = [
         name for name, target in targets.items()
         if accepted[name] < target
@@ -92,7 +87,7 @@ def _next_category(targets: dict[str, int], accepted: Counter,
         all_pending = [name for name, target in targets.items() if accepted[name] < target]
         if all_pending:
             return min(all_pending, key=lambda name: (attempted[name], name))
-        raise RuntimeError("tous les quotas de catégories sont atteints")
+        raise RuntimeError("tous les quotas de types de requêtes sont atteints")
     return min(
         pending,
         key=lambda name: (
@@ -224,10 +219,32 @@ def build_rag_index(args) -> int:
     return 0
 
 
+def _distribution_deviations(
+    targets: dict[str, int], actual: dict[str, int],
+) -> list[dict[str, object]]:
+    total_target = max(sum(targets.values()), 1)
+    total_actual = max(sum(actual.values()), 1)
+    deviations: list[dict[str, object]] = []
+    for name in sorted(set(targets) | set(actual)):
+        expected_pct = targets.get(name, 0) / total_target * 100
+        actual_pct = actual.get(name, 0) / total_actual * 100
+        deviation = actual_pct - expected_pct
+        if abs(deviation) > 2.0:
+            deviations.append({
+                "request_type": name,
+                "expected_pct": round(expected_pct, 1),
+                "actual_pct": round(actual_pct, 1),
+                "deviation_pct": round(deviation, 1),
+            })
+    return deviations
+
+
 def generate(args) -> int:
     cfg, catalog = _build(args)
-    if cfg.push_to_hf and not cfg.allow_remote_calls:
-        raise SystemExit("--push-to-hf exige --allow-remote-calls")
+    if cfg.push_to_hf:
+        raise SystemExit(
+            "--push-to-hf non disponible pour les enregistrements intermédiaires "
+            "(schema agentic-2.0). Utilisez le step de projection déterministe.")
     if not (cfg.offline or cfg.dry_run) and not cfg.allow_remote_calls:
         raise SystemExit("génération distante refusée : ajouter --allow-remote-calls ou utiliser --offline/--dry-run")
     run_id = args.run_id or f"agentic-{cfg.seed}-{catalog.catalog_hash[:12]}"
@@ -281,8 +298,15 @@ def generate(args) -> int:
             f"{len(anchor_bank.laws)} lois fédérales.",
             flush=True,
         )
-    scenario_generator = ScenarioGenerator(teacher, cfg.seed, cfg.offline, cfg.taxonomy_proportions,
-                                           anchor_bank=anchor_bank)
+    scenario_generator = ScenarioGenerator(
+        teacher, cfg.seed, cfg.offline,
+        request_type_weights=cfg.request_type_weights or None,
+        jurisdiction_weights=cfg.jurisdiction_weights or None,
+        clarification_stage_weights=cfg.clarification_stage_weights or None,
+        failure_mode_weights=cfg.failure_mode_weights or None,
+        failure_injection_rate=cfg.failure_injection_rate,
+        anchor_bank=anchor_bank,
+    )
     orchestrator = AgenticOrchestrator(
         cfg, catalog, PlannerAgent(catalog, teacher, cfg.offline), executor,
         TrajectoryAgent(teacher, cfg.offline), LegalCritic(critic_client, cfg.offline),
@@ -292,13 +316,14 @@ def generate(args) -> int:
     previous_rejected, previous_reasons = storage.rejection_summary() if cfg.resume else (0, {})
     counts = Counter(accepted=storage.accepted_count() if cfg.resume else 0,
                      rejected=previous_rejected, scenarios=0)
-    accepted_by_category = Counter(
+    accepted_by_type = Counter(
         storage.request_type_counts(storage.accepted_path) if cfg.resume else {}
     )
-    attempted_by_category = Counter(accepted_by_category)
+    attempted_by_type = Counter(accepted_by_type)
     if cfg.resume:
-        attempted_by_category.update(storage.request_type_counts(storage.rejected_path))
-    category_targets = target_category_counts(cfg.target_accepted, cfg.taxonomy_proportions)
+        attempted_by_type.update(storage.request_type_counts(storage.rejected_path))
+    type_targets = target_request_type_counts(
+        cfg.target_accepted, cfg.request_type_weights or None)
     rejections = Counter(previous_reasons)
     max_scenarios = cfg.max_scenarios if cfg.max_scenarios and cfg.max_scenarios > 0 else max(cfg.target_accepted * 5, 1)
     if cfg.resume and (counts["accepted"] or counts["rejected"]):
@@ -311,14 +336,14 @@ def generate(args) -> int:
         usage_before = _usage_snapshot(teacher, critic_client, rag)
         next_index = counts["scenarios"] + 1
         print(f"[{next_index}/{max_scenarios}] génération de la question...", flush=True)
-        category = _next_category(
-            category_targets, accepted_by_category, attempted_by_category)
-        scenario = scenario_generator.generate(category)
+        request_type_name = _next_request_type(
+            type_targets, accepted_by_type, attempted_by_type)
+        scenario = scenario_generator.generate(request_type_name=request_type_name)
         counts["scenarios"] += 1
         if scenario.scenario_id in done:
             print(f"[{counts['scenarios']}/{max_scenarios}] scénario déjà traité, ignoré.", flush=True)
             continue
-        attempted_by_category[scenario.request_type] += 1
+        attempted_by_type[scenario.request_type] += 1
         print(
             f"[{counts['scenarios']}/{max_scenarios}] question prête "
             f"({scenario.request_type}); planification, outils et critiques...",
@@ -331,7 +356,9 @@ def generate(args) -> int:
         if result.accepted and result.trajectory:
             storage.append_accepted(result.trajectory)
             counts["accepted"] += 1
-            accepted_by_category[result.trajectory.request_type] += 1
+            accepted_by_type[result.trajectory.request_type] += 1
+            if result.trajectory.quality.repaired:
+                counts["repaired_accepted"] += 1
         elif result.rejection:
             storage.append_rejected(result.rejection)
             counts["rejected"] += 1
@@ -347,8 +374,8 @@ def generate(args) -> int:
         _print_progress(counts["scenarios"], max_scenarios, counts,
                         cfg.target_accepted, status, usage_before, usage_after)
         storage.save_checkpoint({"run_id": run_id, "counts": dict(counts),
-                                 "accepted_by_category": dict(accepted_by_category),
-                                 "category_targets": category_targets,
+                                 "accepted_by_type": dict(accepted_by_type),
+                                 "type_targets": type_targets,
                                  "last_scenario_id": scenario.scenario_id})
     manifest = GenerationManifest(
         run_id=run_id, seed=cfg.seed, prompt_version=cfg.prompt_version,
@@ -356,38 +383,52 @@ def generate(args) -> int:
         teacher_base_url_hash=cfg.teacher.base_url_hash, critic_model=cfg.critic.model,
         target_accepted=cfg.target_accepted, counts=dict(counts),
         rejection_reasons=dict(rejections),
-        accepted_by_category=dict(accepted_by_category),
-        category_targets=category_targets,
+        accepted_by_category=dict(accepted_by_type),
+        category_targets=type_targets,
         costs={
             "teacher": teacher.cost_report() if teacher else {},
             "critic": (critic_client.cost_report()
                        if critic_client is not None and critic_client is not teacher else {}),
             "rag_queries": rag.cost_report() if rag else {},
         },
-        taxonomy_proportions=cfg.taxonomy_proportions, mix=cfg.mix,
-        files={"accepted": str(storage.accepted_path), "rejected": str(storage.rejected_path)},
+        taxonomy_proportions=cfg.request_type_weights, mix=cfg.mix,
+        files={
+            "accepted": str(storage.accepted_path),
+            "rejected": str(storage.rejected_path),
+            "repaired": str(storage.repaired_path),
+            "preference_pairs": str(storage.preference_pairs_path),
+            "regression_cases": str(storage.regression_cases_path),
+        },
         config_snapshot=cfg.redacted(),
     )
     storage.save_manifest(manifest)
+    deviations = _distribution_deviations(type_targets, dict(accepted_by_type))
+    summary = {
+        "run_id": run_id,
+        "schema_version": "agentic-2.0",
+        "counts": {
+            "total": counts["scenarios"],
+            "accepted": counts["accepted"],
+            "repaired_and_accepted": counts.get("repaired_accepted", 0),
+            "rejected": counts["rejected"],
+        },
+        "accepted_by_type": dict(accepted_by_type),
+        "type_targets": type_targets,
+        "rejection_reasons": dict(rejections),
+        "distribution_deviations": deviations,
+    }
+    storage.save_summary(summary)
     final_usage = _usage_snapshot(teacher, critic_client, rag)
     print(json.dumps({"run_id": run_id, "counts": dict(counts),
                       "api_usage": final_usage,
                       "manifest": str(storage.manifest_path)}, ensure_ascii=False))
-    if cfg.push_to_hf:
-        if counts["accepted"] < cfg.target_accepted:
-            raise SystemExit("publication refusée : objectif de trajectoires acceptées non atteint")
-        split_cfg = cfg.split
-        ratios = (float(split_cfg.get("train", 0.90)),
-                  float(split_cfg.get("validation", 0.05)),
-                  float(split_cfg.get("test", 0.05)))
-        if abs(sum(ratios) - 1.0) > 1e-6:
-            raise SystemExit("publication refusée : les ratios train/validation/test ne totalisent pas 1")
-        release_dir = Path(cfg.data_root) / "release" / run_id
-        prepare_release(storage.accepted_path, release_dir, catalog,
-                        storage.manifest_path, cfg.seed, ratios,
-                        cfg.legal_min_score, cfg.agentic_min_score)
-        push_release(release_dir, cfg.hf_dataset_repo_id, cfg.allow_remote_calls)
-        print(f"Dataset publié dans {cfg.hf_dataset_repo_id}")
+    if deviations:
+        print(f"[distribution] {len(deviations)} type(s) avec déviation > 2%:",
+              flush=True)
+        for d in deviations:
+            print(f"  {d['request_type']}: cible {d['expected_pct']}% "
+                  f"→ réel {d['actual_pct']}% ({d['deviation_pct']:+.1f}%)",
+                  flush=True)
     return 0 if counts["accepted"] >= cfg.target_accepted else 2
 
 

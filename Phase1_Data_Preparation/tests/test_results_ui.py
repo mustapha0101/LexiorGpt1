@@ -15,14 +15,14 @@ def repository(tmp_path):
     run_id = "demo-run"
     accepted = {
         "scenario_id": "accepted-1",
-        "request_type": "article_ccq_precis",
+        "request_type": "exact_text_retrieval",
         "messages": [{"role": "user", "content": "Quel est l'article 11?"}],
         "tool_trace": [{"tool_name": "search_ccq"}],
         "quality": {"legal_score": 0.9},
     }
     rejected = {
         "scenario_id": "rejected-1",
-        "request_type": "clarification_puis_recherche",
+        "request_type": "topic_research",
         "stage": "planner",
         "reasons": ["outil incompatible"],
         "timestamp": "2026-07-20T00:00:00+00:00",

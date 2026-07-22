@@ -179,9 +179,18 @@ class AgenticConfig:
     rag: RAGConfig = field(default_factory=RAGConfig)
 
     # --- versions --------------------------------------------------------
-    prompt_version: str = "agentic-2.0-distillation"
+    prompt_version: str = "agentic-4.0-intermediate"
 
-    # --- taxonomie / mélange / split (depuis le YAML) --------------------
+    # --- distributions (spec sections 15-16) ----------------------------
+    request_type_weights: dict[str, float] = field(default_factory=dict)
+    jurisdiction_weights: dict[str, float] = field(default_factory=dict)
+    clarification_stage_weights: dict[str, float] = field(default_factory=dict)
+    failure_mode_weights: dict[str, float] = field(default_factory=dict)
+    failure_injection_rate: float = 0.07
+    max_search_reformulations: int = 1
+    max_thinking_words: int = 45
+
+    # --- legacy / mélange / split (depuis le YAML) ----------------------
     taxonomy_proportions: dict[str, float] = field(default_factory=dict)
     mix: dict[str, Any] = field(default_factory=dict)
     split: dict[str, Any] = field(default_factory=dict)
@@ -209,7 +218,11 @@ class AgenticConfig:
             "teacher": self.teacher.redacted(),
             "critic": self.critic.redacted(),
             "rag": self.rag.redacted(),
-            "taxonomy_proportions": self.taxonomy_proportions,
+            "request_type_weights": self.request_type_weights,
+            "jurisdiction_weights": self.jurisdiction_weights,
+            "failure_injection_rate": self.failure_injection_rate,
+            "max_search_reformulations": self.max_search_reformulations,
+            "max_thinking_words": self.max_thinking_words,
             "mix": self.mix,
             "split": self.split,
             "hf_dataset_repo_id": self.hf_dataset_repo_id,
@@ -335,6 +348,18 @@ def load_config(config_path: Optional[str] = None,
         ),
         llm_rerank_k=int(rag_yaml.get("llm_rerank_k", RAGConfig.llm_rerank_k)),
     )
+
+    cfg.request_type_weights = dict(gen.get("request_type_weights", {}))
+    cfg.jurisdiction_weights = dict(gen.get("jurisdiction_weights", {}))
+    cfg.clarification_stage_weights = dict(
+        gen.get("clarification_stage_weights", {}))
+    cfg.failure_mode_weights = dict(gen.get("failure_mode_weights", {}))
+    cfg.failure_injection_rate = float(
+        gen.get("failure_injection_rate", cfg.failure_injection_rate))
+    cfg.max_search_reformulations = int(
+        gen.get("max_search_reformulations", cfg.max_search_reformulations))
+    cfg.max_thinking_words = int(
+        gen.get("max_thinking_words", cfg.max_thinking_words))
 
     cfg.taxonomy_proportions = dict(raw.get("taxonomy", {}).get("proportions", {}))
     cfg.mix = dict(raw.get("mix", {}))

@@ -13,29 +13,20 @@ from .mcp_executor import MCPExecutionError, MCPExecutor, MockMCPTransport
 from .planner_agent import PlannerAgent
 from .prompts import agent_system_prompt
 from .response_verifier import verify_observation
+from .case_law_gate import gate_search_results
 from .schemas import (
-    CriticResult, Decision, GenerationMetadata, GroundingEntry, Message, QualityReport,
-    RejectionRecord, ResearchState, Role, ScenarioSpec, StateStatus,
-    ToolCall, TrainingTrajectory,
+    AcceptanceResult, CaseLawSearchStatus, CriticResult, Decision,
+    GenerationMetadata, GroundingEntry, Message, QualityReport,
+    RejectionDetail, RejectionRecord, RepairReport, ResearchState,
+    Role, ScenarioSpec, StateStatus, ToolCall, TrainingTrajectory,
 )
 from .tool_catalog import ToolCatalog
 from .trajectory_agent import PRECISE_ARTICLE_TYPES, TrajectoryAgent
-from .validators import ValidationResult, validate_tool_route, validate_trajectory
-
-
-def _critic_failure_reasons(label: str, result, minimum: float) -> list[str]:
-    """Produit toujours un motif exploitable pour un Critic sous le seuil."""
-    reasons: list[str] = []
-    if not result.accepted:
-        reasons.append(f"{label}: décision rejected")
-    if result.score < minimum:
-        reasons.append(f"{label}: score {result.score:.2f} inférieur au seuil {minimum:.2f}")
-    reasons.extend(f"{label}: {issue}" for issue in result.issues)
-    reasons.extend(f"{label}: affirmation non étayée: {claim}"
-                   for claim in result.unsupported_claims)
-    reasons.extend(f"{label}: source manquante: {source}"
-                   for source in result.missing_sources)
-    return reasons
+from .acceptance import compute_acceptance_status
+from .validators import (
+    ValidationResult, validate_tool_route, validate_trajectory,
+    validate_tool_sequence_logic,
+)
 
 
 @dataclass
@@ -128,9 +119,10 @@ class AgenticOrchestrator:
                     content=f"<tool_call>\n{call.render()}\n</tool_call>"))
                 state.status = StateStatus.waiting_tool
                 if isinstance(self.executor.transport, MockMCPTransport):
-                    if scenario.failure_mode == "panne_mcp" and not state.tool_history:
+                    fm = getattr(scenario, "planned_failure_mode", None) or getattr(scenario, "failure_mode", None)
+                    if fm == "tool_error" and not state.tool_history:
                         self.executor.transport.fail_next = MCPExecutionError("panne MCP simulée explicitement")
-                    elif (scenario.failure_mode == "resultat_vide" and
+                    elif (fm == "empty_result" and
                           call.name in {"semantic_search_ccq", "semantic_search_cpc"} and
                           sum(o.tool_name == call.name for o in state.tool_history) < 2):
                         self.executor.transport.empty_next = True
@@ -143,13 +135,43 @@ class AgenticOrchestrator:
                 )
                 state.tool_history.append(observation)
                 state.sources.extend(observation.source_urls)
+                if call.name in {"get_ccq_articles", "get_cpc_articles"} and observation.ok:
+                    state.official_rule_retrieved = True
+                    state.official_rule_sources.append(call.name)
+                if call.name == "search_quebec_jurisprudence" and observation.ok:
+                    article_nums = [
+                        str(o.arguments.get("start_article", ""))
+                        for o in state.tool_history
+                        if o.tool_name in {"get_ccq_articles", "get_cpc_articles"}
+                        and o.ok and o.arguments.get("start_article")
+                    ]
+                    usable_cases, status = gate_search_results(
+                        observation.normalized_response,
+                        article_nums,
+                        state.scenario.user_query,
+                    )
+                    state.usable_case_sources.extend(usable_cases)
+                    state.case_law_search_status = status
                 state.messages.append(Message(role=Role.tool, name=call.name,
                                               content=observation.normalized_response))
                 state.status = StateStatus.planning
 
+            exempt_tools: list[str] = []
+            for search_tool, fetch_tool in [
+                ("semantic_search_ccq", "get_ccq_articles"),
+                ("semantic_search_cpc", "get_cpc_articles"),
+            ]:
+                searches = [o for o in state.tool_history
+                            if o.tool_name == search_tool]
+                if len(searches) >= 2 and all(
+                    not o.ok or (o.normalized_response or "").strip() in ("", "[]", "{}")
+                    for o in searches
+                ):
+                    exempt_tools.append(fetch_tool)
             route_errors = validate_tool_route(
                 scenario.request_type,
                 [observation.tool_name for observation in state.tool_history],
+                exempt_tools=exempt_tools,
             )
             if route_errors:
                 return self._reject(scenario, "planner", route_errors)
@@ -180,6 +202,8 @@ class AgenticOrchestrator:
             else:
                 legal = self.legal_critic.evaluate(state, answer)
                 agentic = self.agentic_critic.evaluate(state, answer)
+            # ── Repair loop ──────────────────────────────────────────
+            repair_report = RepairReport()
             repair_instructions = []
             if legal and (not legal.accepted or legal.score < self.config.legal_min_score):
                 repair_instructions.extend(
@@ -192,8 +216,9 @@ class AgenticOrchestrator:
                     agentic.repair_instructions or agentic.issues or
                     ["Corriger la réponse sans ajouter de recherche ou de source absente."]
                 )
-            repaired = False
+
             if repair_instructions and self.config.max_repairs > 0:
+                repair_report.attempted = True
                 self.progress("Trajectory Agent: réparation de la réponse...")
                 repaired_thinking, repaired_answer = self.trajectory_agent.repair(
                     state, answer, final_thinking, repair_instructions)
@@ -204,10 +229,21 @@ class AgenticOrchestrator:
                         content=repaired_answer)
                     answer = repaired_answer
                     final_thinking = repaired_thinking
-                    repaired = True
-                    legal = self.legal_critic.evaluate(state, answer)
-                    agentic = self.agentic_critic.evaluate(state, answer)
+                    repair_report.status = "successful"
+                    repair_report.changes = list(repair_instructions)
+                    # Re-evaluate with both critics after repair
+                    if not self.config.no_critics and scenario.request_type not in PRECISE_ARTICLE_TYPES:
+                        legal = self.legal_critic.evaluate(state, answer)
+                        agentic = self.agentic_critic.evaluate(state, answer)
+                else:
+                    repair_report.status = "failed"
+                    repair_report.reason = "la réparation n'a pas modifié la réponse"
+            elif repair_instructions:
+                repair_report.attempted = False
+                repair_report.status = "not_repairable"
+                repair_report.reason = "max_repairs=0"
 
+            # ── Build trajectory ─────────────────────────────────────
             trajectory = TrainingTrajectory(
                 scenario_id=scenario.scenario_id,
                 scenario_family_id=scenario.scenario_family_id,
@@ -233,30 +269,53 @@ class AgenticOrchestrator:
                 quality=QualityReport(
                     legal_critic_score=legal.score if legal else None,
                     agentic_critic_score=agentic.score if agentic else None,
-                    repaired=repaired,
+                    repair=repair_report,
+                    repaired=repair_report.attempted and repair_report.status == "successful",
+                    repair_status=repair_report.status,
                 ),
             )
+
+            # ── Deterministic validation ─────────────────────────────
             validation = validate_trajectory(
                 trajectory, self.catalog,
                 allow_mock=self.config.offline or self.config.dry_run,
                 max_tool_calls=state.max_tool_calls,
                 seen_fingerprints=self.seen_fingerprints,
+                exempt_tools=exempt_tools,
             )
-            critics_ok = ((not legal or (legal.accepted and legal.score >= self.config.legal_min_score)) and
-                          (not agentic or (agentic.accepted and agentic.score >= self.config.agentic_min_score)))
             trajectory.quality.deterministic_validation = validation.valid
-            if not validation.valid or not critics_ok:
-                reasons = list(validation.errors)
-                if legal and (not legal.accepted or legal.score < self.config.legal_min_score):
-                    reasons.extend(_critic_failure_reasons(
-                        "legal_critic", legal, self.config.legal_min_score))
-                if agentic and (not agentic.accepted or
-                                agentic.score < self.config.agentic_min_score):
-                    reasons.extend(_critic_failure_reasons(
-                        "agentic_critic", agentic, self.config.agentic_min_score))
-                return self._reject(scenario, "validator", reasons, trajectory, validation)
+
+            # ── Tool sequence warnings ───────────────────────────────
+            seq_warnings = validate_tool_sequence_logic(
+                scenario.request_type,
+                [o.tool_name for o in state.tool_history],
+            )
+            validation.warnings.extend(seq_warnings)
+
+            # ── Centralized acceptance ───────────────────────────────
+            acceptance = compute_acceptance_status(
+                trajectory, validation, legal, agentic,
+                legal_min_score=self.config.legal_min_score,
+                agentic_min_score=self.config.agentic_min_score,
+                state=state,
+            )
+            trajectory.quality.acceptance = acceptance
+            trajectory.quality.accepted_for_intermediate = acceptance.accepted
+
+            if not acceptance.accepted:
+                trajectory.quality.rejection_detail = RejectionDetail(
+                    scenario_id=scenario.scenario_id,
+                    blocking_reason=acceptance.blocking_errors[0] if acceptance.blocking_errors else "",
+                    repair_attempted=repair_report.attempted,
+                    repair_successful=repair_report.status == "successful",
+                )
+                return self._reject(
+                    scenario, "validator", acceptance.blocking_errors,
+                    trajectory, validation)
+
             state.status = StateStatus.accepted
-            return OrchestrationResult(accepted=True, trajectory=trajectory, validation=validation)
+            return OrchestrationResult(
+                accepted=True, trajectory=trajectory, validation=validation)
         except Exception as exc:
             return self._reject(scenario, "orchestrator", [f"{type(exc).__name__}: {exc}"])
 

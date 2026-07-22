@@ -1,7 +1,7 @@
 from collections import Counter
 import json
 
-from agentic_generation.cli import _next_category
+from agentic_generation.cli import _next_request_type
 from agentic_generation.agentic_critic import AgenticCritic
 from agentic_generation.legal_critic import LegalCritic
 from agentic_generation.planner_agent import PlannerAgent
@@ -16,7 +16,7 @@ from agentic_generation.schemas import (
     ToolObservation,
     TrainingTrajectory,
 )
-from agentic_generation.taxonomy import CATEGORIES, target_category_counts
+from agentic_generation.taxonomy import REQUEST_TYPES, target_request_type_counts
 from agentic_generation.trajectory_agent import TrajectoryAgent
 from agentic_generation.validators import validate_trajectory
 
@@ -24,13 +24,13 @@ from agentic_generation.validators import validate_trajectory
 ARTICLE_TEXT = "Article 1457\nToute personne a le devoir de respecter les règles de conduite."
 
 
-def _article_state(request_type="article_ccq_precis"):
+def _article_state(request_type="exact_text_retrieval"):
     scenario = ScenarioSpec(
         scenario_id="s",
         scenario_family_id="f",
         request_type=request_type,
         user_query="Peux-tu me donner le texte de l'article 1457?",
-        expected_route=CATEGORIES[request_type].expected_route,
+        expected_route=REQUEST_TYPES[request_type].expected_route,
     )
     observation = ToolObservation(
         tool_name="get_ccq_articles",
@@ -61,7 +61,7 @@ def test_article_explanation_keeps_the_complete_official_text():
         def complete(self, *args, **kwargs):
             return "Cet article présente le principe général."
 
-    state = _article_state("explication_article")
+    state = _article_state("article_explanation")
     _thinking, answer = TrajectoryAgent(client=TextClient()).final_answer(state)
     assert answer.startswith(ARTICLE_TEXT + "\n\nExplication\n")
     assert answer.count(ARTICLE_TEXT) == 1
@@ -73,7 +73,7 @@ def test_article_explanation_removes_a_duplicate_returned_by_teacher():
             return f"{ARTICLE_TEXT}\n\nExplication\nLe devoir décrit est général."
 
     _thinking, answer = TrajectoryAgent(client=TextClient()).final_answer(
-        _article_state("explication_article")
+        _article_state("article_explanation")
     )
     assert answer.count(ARTICLE_TEXT) == 1
     assert answer.endswith("Le devoir décrit est général.")
@@ -85,7 +85,7 @@ def test_precise_article_paraphrase_is_deterministically_rejected(catalog):
     row = TrainingTrajectory(
         scenario_id="s",
         scenario_family_id="f",
-        request_type="article_ccq_precis",
+        request_type="exact_text_retrieval",
         messages=[
             Message(role=Role.user, content=state.scenario.user_query),
             Message(
@@ -102,7 +102,7 @@ def test_precise_article_paraphrase_is_deterministically_rejected(catalog):
 
 
 def test_semantic_candidate_is_not_a_citable_article(catalog):
-    scenario = ScenarioGenerator(seed=3407, offline=True).generate("recherche_theme_ccq")
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate("topic_research")
     semantic = ToolObservation(
         tool_name="semantic_search_ccq", arguments={"query": scenario.user_query},
         raw_response={"results": [{"article_number": "1726"}]},
@@ -115,7 +115,7 @@ def test_semantic_candidate_is_not_a_citable_article(catalog):
     ).finalize_hash()
     row = TrainingTrajectory(
         scenario_id="rag", scenario_family_id="rag-family",
-        request_type="recherche_theme_ccq",
+        request_type="topic_research",
         messages=[
             Message(role=Role.user, content=scenario.user_query),
             Message(role=Role.assistant, content=(
@@ -140,7 +140,7 @@ def test_semantic_candidate_is_not_a_citable_article(catalog):
 
 
 def test_legal_critic_scope_removes_false_verbatim_requirement():
-    state = _article_state("explication_article")
+    state = _article_state("article_explanation")
     answer = ARTICLE_TEXT + "\n\nExplication\nLe texte protège le consentement."
     result = CriticResult(
         critic="legal", accepted=False, score=0.5,
@@ -155,13 +155,13 @@ def test_legal_critic_scope_removes_false_verbatim_requirement():
 
 def test_agentic_critic_does_not_reask_an_already_handled_clarification():
     scenario = ScenarioGenerator(seed=3407, offline=True).generate(
-        "clarification_puis_recherche")
+        "topic_research")
     state = ResearchState(
         scenario=scenario,
         messages=[
             Message(role=Role.user, content=scenario.user_query),
             Message(role=Role.assistant, content="Pouvez-vous préciser l'empiètement?"),
-            Message(role=Role.user, content=scenario.clarification_answer or "Oui."),
+            Message(role=Role.user, content=scenario.effective_clarification_answer or "Oui."),
         ],
     )
     result = CriticResult(
@@ -174,7 +174,7 @@ def test_agentic_critic_does_not_reask_an_already_handled_clarification():
 
 
 def test_agentic_critic_does_not_reject_answer_style():
-    state = _article_state("explication_article")
+    state = _article_state("article_explanation")
     result = CriticResult(
         critic="agentic", accepted=False, score=0.6,
         issues=["L'assistant aurait dû fournir une réponse plus directe et concise."],
@@ -185,7 +185,7 @@ def test_agentic_critic_does_not_reject_answer_style():
 
 
 def test_agentic_critic_does_not_require_every_semantic_candidate():
-    state = _article_state("explication_article")
+    state = _article_state("article_explanation")
     result = CriticResult(
         critic="agentic", accepted=False, score=0.6,
         issues=["L'assistant aurait dû récupérer tous les articles pertinents."],
@@ -195,31 +195,24 @@ def test_agentic_critic_does_not_require_every_semantic_candidate():
     assert corrected.issues == []
 
 
-def test_planner_forces_fetch_when_teacher_skips_required_tool(catalog):
-    """When the teacher says final_answer but a required tool (fetch_document)
-    hasn't been called yet, _guard_required_tools overrides to call_tool."""
+def test_planner_forces_required_tool_when_teacher_skips(catalog):
+    """When the teacher says final_answer but a required tool hasn't been
+    called yet, _guard_required_tools overrides to call_tool."""
     class JsonClient:
         def complete_json(self, *args, **kwargs):
             return {
-                "thinking_text": "J'ai trouvé la loi, je peux conclure.",
-                "request_type": "loi_federale",
-                "jurisdiction": "Canada (fédéral)",
+                "thinking_text": "J'ai trouvé le règlement, je peux conclure.",
+                "request_type": "law_or_regulation_identification",
+                "jurisdiction": "Québec",
                 "decision": "final_answer",
             }
 
-    scenario = ScenarioGenerator(seed=3407, offline=True).generate("loi_federale")
-    scenario.user_query = "Que prévoit la Loi sur les banques?"
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate("law_or_regulation_identification")
     search = ToolObservation(
-        tool_name="search_legal_documents",
-        arguments={"query": "Bank Act", "search_type": "name",
-                   "doc_type": "laws", "search_language": "en",
-                   "dataset": "LEGISLATION-FED", "size": 5},
-        raw_response={"results": []},
-        normalized_response=json.dumps({"results": [{
-            "citation_en": "SC 1991, c 46", "citation_fr": "LC 1991, c 46",
-            "dataset": "LEGISLATION-FED", "name_en": "Bank Act",
-            "name_fr": "Loi sur les banques",
-        }]}, ensure_ascii=False),
+        tool_name="search_quebec_regulations",
+        arguments={"query": "environnement"},
+        raw_response="Q-2, r. 17.1",
+        normalized_response="Q-2, r. 17.1 — règlement de fixture.\nhttps://www.legisquebec.gouv.qc.ca/fr/document/rc/Q-2,%20r.%2017.1",
         mock=True,
     ).finalize_hash()
     state = ResearchState(
@@ -229,7 +222,7 @@ def test_planner_forces_fetch_when_teacher_skips_required_tool(catalog):
     )
     decision = PlannerAgent(catalog, client=JsonClient()).decide(state)
     assert decision.decision == Decision.call_tool
-    assert decision.next_tool == "fetch_document"
+    assert decision.next_tool == "get_quebec_regulation"
     assert decision.thinking_text
 
 
@@ -240,7 +233,7 @@ def test_planner_rejects_repeated_identical_tool_call_from_teacher(catalog):
         def complete_json(self, *args, **kwargs):
             return {
                 "thinking_text": "Je dois récupérer l'article.",
-                "request_type": "article_ccq_precis",
+                "request_type": "exact_text_retrieval",
                 "jurisdiction": "Québec",
                 "decision": "call_tool",
                 "next_tool": "get_ccq_articles",
@@ -259,14 +252,14 @@ def test_non_legal_question_guard_converts_to_final_answer(catalog):
         def complete_json(self, *args, **kwargs):
             return {
                 "thinking_text": "Je vais chercher dans le CCQ.",
-                "request_type": "question_non_juridique",
+                "request_type": "non_legal",
                 "jurisdiction": "sans objet",
                 "decision": "call_tool",
                 "next_tool": "get_ccq_articles",
                 "arguments": {"start_article": 1},
             }
 
-    scenario = ScenarioGenerator(seed=3407, offline=True).generate("question_non_juridique")
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate("non_legal")
     state = ResearchState(
         scenario=scenario,
         messages=[Message(role=Role.user, content=scenario.user_query)],
@@ -291,7 +284,7 @@ def test_critics_never_receive_raw_mcp_response():
                 "repair_instructions": [],
             }
 
-    state = _article_state("explication_article")
+    state = _article_state("article_explanation")
     state.tool_history[0].raw_response = "RAW_SECRET_MARKER" * 50_000
     client = RecordingClient()
     LegalCritic(client=client).evaluate(state, "Réponse")
@@ -306,7 +299,7 @@ def test_critics_never_receive_raw_mcp_response():
 
 def test_semantic_search_uses_full_question_and_topic_fallback(catalog):
     planner = PlannerAgent(catalog, offline=True)
-    scenario = ScenarioGenerator(seed=3407, offline=True).generate("recherche_theme_ccq")
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate("topic_research")
     scenario.user_query = "Je cherche des informations sur les baux résidentiels au Québec."
     state = ResearchState(
         scenario=scenario,
@@ -337,7 +330,7 @@ def test_semantic_search_uses_full_question_and_topic_fallback(catalog):
 
 def test_article_is_selected_only_from_actual_search_result(catalog):
     planner = PlannerAgent(catalog, offline=True)
-    scenario = ScenarioGenerator(seed=3407, offline=True).generate("recherche_theme_ccq")
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate("topic_research")
     state = ResearchState(
         scenario=scenario,
         messages=[Message(role=Role.user, content=scenario.user_query)],
@@ -355,7 +348,7 @@ def test_article_is_selected_only_from_actual_search_result(catalog):
 def test_neighboring_top_cpc_candidates_are_fetched_as_official_range(catalog):
     planner = PlannerAgent(catalog, offline=True)
     scenario = ScenarioGenerator(seed=3407, offline=True).generate(
-        "cas_procedure_quebecoise")
+        "procedure_guidance")
     state = ResearchState(
         scenario=scenario,
         messages=[Message(role=Role.user, content=scenario.user_query)],
@@ -377,7 +370,7 @@ def test_neighboring_top_cpc_candidates_are_fetched_as_official_range(catalog):
 
 def test_federal_bankruptcy_query_uses_the_statute_name(catalog):
     planner = PlannerAgent(catalog, offline=True)
-    scenario = ScenarioGenerator(seed=3407, offline=True).generate("cas_federal_concret")
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate("case_analysis")
     scenario.user_query = "Je pense devoir déclarer faillite; quelles sont les étapes?"
     state = ResearchState(
         scenario=scenario,
@@ -393,7 +386,7 @@ def test_federal_bankruptcy_query_uses_the_statute_name(catalog):
 def test_federal_fetch_uses_fallback_citation_when_target_not_found(catalog):
     """When validated citation fails, _any_search_citation provides a fallback."""
     planner = PlannerAgent(catalog, offline=True)
-    scenario = ScenarioGenerator(seed=3407, offline=True).generate("cas_federal_concret")
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate("case_analysis")
     scenario.user_query = "Je pense devoir déclarer faillite; quelles sont les étapes?"
     wrong = ToolObservation(
         tool_name="search_legal_documents",
@@ -423,7 +416,7 @@ def test_federal_fetch_uses_fallback_citation_when_target_not_found(catalog):
 
 def test_bankruptcy_case_fetches_targeted_section_49(catalog):
     planner = PlannerAgent(catalog, offline=True)
-    scenario = ScenarioGenerator(seed=3407, offline=True).generate("cas_federal_concret")
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate("case_analysis")
     scenario.user_query = "Je pense devoir déclarer faillite; quelles sont les étapes?"
     search = ToolObservation(
         tool_name="search_legal_documents",
@@ -463,14 +456,14 @@ def test_civil_and_procedure_keyword_mappings_are_domain_specific():
 
 
 def test_acceptance_targets_cover_taxonomy_and_sum_exactly():
-    targets = target_category_counts(100)
-    assert set(targets) == set(CATEGORIES)
+    targets = target_request_type_counts(100)
+    assert set(targets) == set(REQUEST_TYPES)
     assert sum(targets.values()) == 100
     assert all(value >= 0 for value in targets.values())
 
 
-def test_scheduler_does_not_keep_selecting_an_already_filled_easy_category():
-    targets = {"article_ccq_precis": 2, "cas_federal_concret": 2}
-    accepted = Counter(article_ccq_precis=2, cas_federal_concret=0)
-    attempted = Counter(article_ccq_precis=2, cas_federal_concret=1)
-    assert _next_category(targets, accepted, attempted) == "cas_federal_concret"
+def test_scheduler_does_not_keep_selecting_an_already_filled_easy_request_type():
+    targets = {"exact_text_retrieval": 2, "case_analysis": 2}
+    accepted = Counter(exact_text_retrieval=2, case_analysis=0)
+    attempted = Counter(exact_text_retrieval=2, case_analysis=1)
+    assert _next_request_type(targets, accepted, attempted) == "case_analysis"

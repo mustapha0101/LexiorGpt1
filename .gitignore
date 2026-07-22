@@ -35,3 +35,12 @@ wandb/
 
 # Notebooks
 .ipynb_checkpoints
+
+# Frontend
+node_modules/
+dist/
+
+# Local artifacts
+nul
+Phase1_Data_Preparation/agentic_generation.zip
+.claude/

@@ -7,7 +7,7 @@ def _trajectory(tool_name="get_ccq_articles", arguments=None):
     obs = ToolObservation(tool_name=tool_name, arguments=arguments, raw_response="Article 1457",
                           normalized_response="Article 1457", mock=True).finalize_hash()
     return TrainingTrajectory(
-        scenario_id="s", scenario_family_id="f", request_type="article_ccq_precis",
+        scenario_id="s", scenario_family_id="f", request_type="exact_text_retrieval",
         expected_jurisdiction="Québec", resolved_jurisdiction="Québec",
         messages=[
             Message(role=Role.user, content="Texte officiel de 1457"),

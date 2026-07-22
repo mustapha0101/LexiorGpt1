@@ -1,0 +1,1 @@
+"""Lexior FastAPI backend."""

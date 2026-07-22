@@ -1,0 +1,109 @@
+generation:
+  seed: 3407
+  language: fr
+  target_accepted: 30
+  max_tool_calls: 4
+  max_tool_response_chars: 6000
+  max_doc_fetch_chars: 12000
+  near_duplicate_jaccard: 0.90
+  prompt_version: agentic-4.0-intermediate
+  max_search_reformulations: 1
+  max_thinking_words: 45
+  failure_injection_rate: 0.07
+
+  request_type_weights:
+    case_analysis: 0.25
+    procedure_guidance: 0.18
+    topic_research: 0.12
+    exact_text_retrieval: 0.07
+    article_explanation: 0.06
+    case_law_research: 0.10
+    law_or_regulation_identification: 0.07
+    legislative_status_verification: 0.05
+    document_analysis: 0.04
+    comparative_law: 0.0
+    dataset_coverage: 0.0
+    non_legal: 0.03
+
+  jurisdiction_weights:
+    supported_quebec: 0.58
+    supported_federal: 0.22
+    municipal_coverage_uncertain: 0.07
+    supported_other_canadian: 0.08
+    unsupported_foreign: 0.05
+
+  clarification_stage_weights:
+    none: 0.55
+    before_search: 0.20
+    after_initial_research: 0.25
+
+  failure_mode_weights:
+    irrelevant_results: 0.25
+    wrong_document_type: 0.20
+    empty_result: 0.15
+    truncated_source: 0.15
+    tool_error: 0.10
+    stale_source: 0.08
+    malformed_result: 0.04
+    coverage_gap: 0.03
+
+teacher:
+  base_url: "https://api.openai.com/v1"
+  model: "gpt-4o"
+  timeout: 120
+  max_retries: 3
+  concurrency: 2
+  temperature: 0.3
+
+critic:
+  base_url: ""
+  model: ""
+  temperature: 0.0
+
+rag:
+  enabled: true
+  index_dir: data/agentic/rag_index
+  dataset_name: intelliwork/canadian-quebec-law-corpus
+  dataset_split: train
+  embedding_base_url: https://api.openai.com/v1
+  embedding_model: text-embedding-3-small
+  embedding_batch_size: 128
+  embedding_price_per_1m_usd: 0.02
+  top_k: 8
+  candidate_k: 40
+  dense_weight: 0.60
+  llm_rerank_enabled: true
+  llm_rerank_k: 10
+
+critics:
+  legal_min_score: 0.70
+  agentic_min_score: 0.70
+  max_repairs: 1
+
+paths:
+  data_root: data/agentic
+  catalog: ../docs/mcp_tools_catalog.json
+  mcp_config: ../.mcp.json
+
+mix:
+  include_agentic_legal: true
+  include_identity_data: true
+  include_legacy_legal: false
+  agentic_ratio: 0.95
+  identity_ratio: 0.05
+
+split:
+  train: 0.90
+  validation: 0.05
+  test: 0.05
+  group_by:
+    - scenario_family_id
+    - source_id
+    - citations
+    - primary_article
+    - fact_template
+    - question_family
+  separate_agentic_evaluation: true
+
+hf:
+  dataset_repo_id: intelliwork/agentic_cot_data

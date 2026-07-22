@@ -6,17 +6,13 @@ from __future__ import annotations
 import json
 import re
 
-from .prompts import TRAJECTORY_ANSWER_SYSTEM
+from .prompts import CHAT_WRITER_SUPPLEMENT, TRAJECTORY_ANSWER_SYSTEM
 from .schemas import ResearchState
 
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.I | re.S)
-PRECISE_ARTICLE_TYPES = {"article_ccq_precis", "article_cpc_precis"}
-ARTICLE_TOOL_BY_TYPE = {
-    "article_ccq_precis": "get_ccq_articles",
-    "article_cpc_precis": "get_cpc_articles",
-    "explication_article": "get_ccq_articles",
-}
+PRECISE_ARTICLE_TYPES = {"exact_text_retrieval"}
+ARTICLE_FETCH_TOOLS = {"get_ccq_articles", "get_cpc_articles"}
 RETRIEVAL_ONLY_TOOLS = {"semantic_search_ccq", "semantic_search_cpc"}
 
 
@@ -34,9 +30,16 @@ def normalize_final_answer(text: str) -> str:
 
 
 class TrajectoryAgent:
-    def __init__(self, client=None, offline: bool = False):
+    def __init__(self, client=None, offline: bool = False,
+                 chat_mode: bool = False):
         self.client = client
         self.offline = offline
+        self.chat_mode = chat_mode
+
+    def _system_prompt(self) -> str:
+        if self.chat_mode:
+            return TRAJECTORY_ANSWER_SYSTEM + CHAT_WRITER_SUPPLEMENT
+        return TRAJECTORY_ANSWER_SYSTEM
 
     def final_answer(self, state: ResearchState) -> tuple[str, str]:
         """Retourne (thinking, answer) pour le tour final."""
@@ -44,11 +47,14 @@ class TrajectoryAgent:
         if state.scenario.request_type in PRECISE_ARTICLE_TYPES and official_text:
             art_nums = ", ".join(
                 str(a) for o in state.tool_history
-                if o.ok and o.tool_name in ARTICLE_TOOL_BY_TYPE.values()
+                if o.ok and o.tool_name in ARTICLE_FETCH_TOOLS
                 for a in [o.arguments.get("start_article", "")]
                 if a
             ) or "demandé"
-            code = ("Code civil du Québec" if "ccq" in state.scenario.request_type
+            used_tool = next(
+                (o.tool_name for o in state.tool_history
+                 if o.ok and o.tool_name in ARTICLE_FETCH_TOOLS), "")
+            code = ("Code civil du Québec" if "ccq" in used_tool
                     else "Code de procédure civile")
             thinking = (
                 f"L'utilisateur a demandé le texte officiel de l'article {art_nums} "
@@ -85,18 +91,18 @@ class TrajectoryAgent:
                 + (
                     "Rédige UNIQUEMENT l'explication du texte officiel fourni. "
                     "Ne recopie pas l'article : le contrôleur l'ajoutera mot pour mot."
-                    if state.scenario.request_type == "explication_article"
+                    if state.scenario.request_type == "article_explanation"
                     else "Adapte la structure à la question réellement posée."
                 )
             ),
         }
         result = self.client.complete("trajectory_writer", [
-            {"role": "system", "content": TRAJECTORY_ANSWER_SYSTEM},
+            {"role": "system", "content": self._system_prompt()},
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
         ], temperature=0.1)
         thinking, answer = self._split_thinking_answer(result)
         answer = normalize_final_answer(answer)
-        if state.scenario.request_type == "explication_article" and official_text:
+        if state.scenario.request_type == "article_explanation" and official_text:
             answer = self._package_explanation(official_text, answer)
         return thinking, answer
 
@@ -110,7 +116,7 @@ class TrajectoryAgent:
             return thinking, answer
         result = self.client.complete("repair", [
             {"role": "system", "content": (
-                TRAJECTORY_ANSWER_SYSTEM +
+                self._system_prompt() +
                 "\nRépare sans ajouter de fait, source, URL, article ou décision."
             )},
             {"role": "user", "content": json.dumps({"answer": answer, "instructions": instructions,
@@ -122,16 +128,40 @@ class TrajectoryAgent:
         ], temperature=0.0)
         repaired_thinking, repaired_answer = self._split_thinking_answer(result)
         repaired_answer = normalize_final_answer(repaired_answer)
-        if state.scenario.request_type == "explication_article" and official_text:
+        if state.scenario.request_type == "article_explanation" and official_text:
             repaired_answer = self._package_explanation(official_text, repaired_answer)
         return repaired_thinking or thinking, repaired_answer
 
-    @staticmethod
-    def _split_thinking_answer(text: str) -> tuple[str, str]:
-        """Sépare le raisonnement IRAC et la réponse finale via ---ANSWER---."""
+    _THINKING_LABEL_RE = re.compile(
+        r"^(?:\s*-{3,}\s*)*\s*RAISONNEMENT\s*:?\s*", re.I)
+    _ANSWER_LABEL_RE = re.compile(
+        r"^(?:\s*-{3,}\s*)*\s*R[ÉE]PONSE\s*:?\s*", re.I)
+    # Libellé avec deux-points (contenu sur la même ligne) OU titre nu en
+    # majuscules seul sur sa ligne (contenu à la ligne suivante).
+    _ANSWER_MARKER_RE = re.compile(
+        r"(?m)^(?:\s*-{3,}\s*\n)*[ \t]*R[ÉE]PONSE[ \t]*(?::[ \t]*|\n+)")
+
+    @classmethod
+    def _strip_labels(cls, thinking: str, answer: str) -> tuple[str, str]:
+        thinking = cls._THINKING_LABEL_RE.sub("", (thinking or "").strip())
+        thinking = re.sub(r"(?:\s*-{3,}\s*)+$", "", thinking).strip()
+        answer = cls._ANSWER_LABEL_RE.sub("", (answer or "").strip()).strip()
+        return thinking, answer
+
+    @classmethod
+    def _split_thinking_answer(cls, text: str) -> tuple[str, str]:
+        """Sépare le raisonnement IRAC et la réponse finale.
+
+        Contrat : ``---ANSWER---``.  Tolère aussi un libellé ``RÉPONSE :``
+        en début de ligne, qu'un modèle substitue parfois au séparateur.
+        """
         if "---ANSWER---" in text:
-            parts = text.split("---ANSWER---", 1)
-            return parts[0].strip(), parts[1].strip()
+            thinking, answer = text.split("---ANSWER---", 1)
+            return cls._strip_labels(thinking, answer)
+        matches = list(cls._ANSWER_MARKER_RE.finditer(text))
+        if matches:
+            marker = matches[-1]
+            return cls._strip_labels(text[:marker.start()], text[marker.end():])
         return "", normalize_final_answer(text)
 
     @staticmethod
@@ -147,25 +177,26 @@ class TrajectoryAgent:
 
     @staticmethod
     def _official_article_text(state: ResearchState) -> str:
-        expected_tool = ARTICLE_TOOL_BY_TYPE.get(state.scenario.request_type)
-        if not expected_tool:
+        if state.scenario.request_type not in (
+            PRECISE_ARTICLE_TYPES | {"article_explanation"}
+        ):
             return ""
         for observation in reversed(state.tool_history):
-            if (observation.tool_name == expected_tool and observation.ok and
+            if (observation.tool_name in ARTICLE_FETCH_TOOLS and observation.ok and
                     not observation.truncated and observation.normalized_response.strip()):
                 return observation.normalized_response.strip()
         return ""
 
     @staticmethod
     def _offline_answer(state: ResearchState) -> tuple[str, str]:
-        if state.scenario.request_type == "question_non_juridique":
+        if state.scenario.request_type == "non_legal":
             return (
                 "Cette demande n’est pas juridique. Je réponds directement sans "
                 "recherche dans les sources législatives.",
                 "Bonjour! Je peux vous aider à identifier et rechercher des sources "
                 "juridiques canadiennes ou québécoises.",
             )
-        if state.scenario.request_type == "explication_article":
+        if state.scenario.request_type == "article_explanation":
             official = TrajectoryAgent._official_article_text(state)
             if official:
                 return (

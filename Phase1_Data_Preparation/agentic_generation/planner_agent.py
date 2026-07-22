@@ -9,10 +9,10 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Optional
 
-from .prompts import planner_system_prompt
+from .prompts import CHAT_PLANNER_SUPPLEMENT, planner_system_prompt
 from .schemas import Decision, DecisionTrace, PlannerDecision, ResearchState
 from .tool_catalog import ToolCatalog
-from .validators import validate_planner_decision
+from .validators import validate_next_action, validate_planner_decision
 
 ARTICLE_RE = re.compile(r"\b(?:article\s+)?(\d{1,4}(?:\.\d+)?)\b", re.I)
 ARTICLE_LABEL_RE = re.compile(r"\barticle\s+(\d{1,4}(?:\.\d+)?)\b", re.I)
@@ -148,35 +148,60 @@ FEDERAL_KNOWN_CITATIONS: dict[str, str] = {
 
 
 class PlannerAgent:
-    def __init__(self, catalog: ToolCatalog, client=None, offline: bool = False):
+    def __init__(self, catalog: ToolCatalog, client=None, offline: bool = False,
+                 chat_mode: bool = False):
         self.catalog = catalog
         self.client = client
         self.offline = offline
+        # chat_mode : requête libre sans route scriptée — les gardes fondés
+        # sur expected_route/request_type ne s'appliquent pas.
+        self.chat_mode = chat_mode
 
     def decide(self, state: ResearchState) -> PlannerDecision:
-        decision = self._offline_decide(state) if self.offline else self._teacher_decide(state)
-        if not self.offline:
-            decision = self._guard_clarification(state, decision)
-            decision = self._guard_federal_fetch(state, decision)
-            decision = self._guard_failed_tool(state, decision)
-            if decision.decision == Decision.call_tool and decision.next_tool:
-                decision = self._validate_arguments(state, decision)
-            decision = self._guard_duplicate_call(state, decision)
-            decision = self._guard_tool_compatibility(state, decision)
-            decision = self._guard_required_tools(state, decision)
+        if self.offline:
+            decision = self._offline_decide(state)
+            self._raise_if_invalid(state, decision)
+            return decision
+        feedback = ""
+        while True:
+            try:
+                decision = self._teacher_decide(state, feedback=feedback)
+                if not self.chat_mode:
+                    decision = self._guard_clarification(state, decision)
+                decision = self._guard_federal_fetch(state, decision)
+                decision = self._guard_failed_tool(state, decision)
+                if (decision.decision == Decision.call_tool
+                        and decision.next_tool and not self.chat_mode):
+                    # chat : les arguments du modèle passent tels quels; la
+                    # reconstruction déterministe est calibrée pour les
+                    # scénarios scriptés et détruit les requêtes libres.
+                    decision = self._validate_arguments(state, decision)
+                decision = self._guard_duplicate_call(state, decision)
+                if not self.chat_mode:
+                    decision = self._guard_tool_compatibility(state, decision)
+                    decision = self._guard_required_tools(state, decision)
+                decision = self._guard_budget(state, decision)
+                self._raise_if_invalid(state, decision)
+                return decision
+            except ValueError as exc:
+                # ValidationError pydantic incluse (sous-classe de ValueError).
+                if feedback:
+                    raise
+                feedback = str(exc) or "décision invalide"
+
+    def _raise_if_invalid(self, state: ResearchState,
+                          decision: PlannerDecision) -> None:
         errors = validate_planner_decision(decision, self.catalog)
-        if decision.decision == Decision.call_tool and decision.next_tool:
-            allowed = set(state.scenario.expected_route.allowed_tools())
-            if decision.next_tool not in allowed:
-                errors.append(
-                    f"outil {decision.next_tool} incompatible avec la catégorie "
-                    f"{state.scenario.request_type}"
-                )
-        if state.scenario.expected_route.no_tool and decision.decision == Decision.call_tool:
+        if (decision.decision == Decision.call_tool and decision.next_tool
+                and not self.chat_mode):
+            errors.extend(validate_next_action(
+                state.scenario.request_type, decision.next_tool))
+        if (state.scenario.expected_route.no_tool
+                and decision.decision == Decision.call_tool
+                and not self.chat_mode):
             errors.append("appel d'outil interdit pour cette demande")
         if errors:
             raise ValueError("décision Planner invalide : " + "; ".join(errors))
-        return decision
 
     def _guard_clarification(self, state: ResearchState,
                              decision: PlannerDecision) -> PlannerDecision:
@@ -279,10 +304,10 @@ class PlannerAgent:
             return decision
         if decision.next_tool != "search_legal_documents":
             return decision
-        if state.scenario.request_type not in {
-            "loi_federale", "cas_federal_concret", "source_trop_longue",
-            "jurisprudence_federale",
-        }:
+        jurisdiction = getattr(state.scenario, "jurisdiction_status", "")
+        is_federal = (jurisdiction == "supported_federal"
+                      or state.scenario.request_type == "comparative_law")
+        if not is_federal:
             return decision
         search_calls = [
             o for o in state.tool_history
@@ -376,6 +401,30 @@ class PlannerAgent:
                 )
         return decision
 
+    def _guard_budget(self, state: ResearchState,
+                      decision: PlannerDecision) -> PlannerDecision:
+        """Budget d'outils épuisé : forcer la synthèse au lieu d'un appel."""
+        if decision.decision != Decision.call_tool:
+            return decision
+        if len(state.tool_history) < state.max_tool_calls:
+            return decision
+        return PlannerDecision(
+            request_type=decision.request_type,
+            jurisdiction=decision.jurisdiction,
+            missing_critical_facts=decision.missing_critical_facts,
+            required_sources=decision.required_sources,
+            decision=Decision.final_answer,
+            thinking_text=(
+                "Le budget d'appels d'outils est épuisé; je synthétise "
+                "à partir des résultats déjà obtenus."
+            ),
+            decision_trace=DecisionTrace(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                need="budget d'outils épuisé",
+                next_action="final_answer"),
+        )
+
     def _guard_duplicate_call(self, state: ResearchState,
                              decision: PlannerDecision) -> PlannerDecision:
         """Prevent calling the same tool with identical arguments."""
@@ -431,7 +480,7 @@ class PlannerAgent:
 
     def _guard_tool_compatibility(self, state: ResearchState,
                                   decision: PlannerDecision) -> PlannerDecision:
-        """Redirect to a compatible tool when Qwen picks one not in the route."""
+        """Redirect to a compatible tool when the teacher picks a forbidden one."""
         if decision.decision != Decision.call_tool or not decision.next_tool:
             return decision
         if state.scenario.expected_route.no_tool:
@@ -450,9 +499,16 @@ class PlannerAgent:
                     need="pas d'outil attendu",
                     next_action="final_answer"),
             )
-        allowed = set(state.scenario.expected_route.allowed_tools())
-        if decision.next_tool in allowed:
-            return decision
+        from .taxonomy import REQUEST_TYPES
+        rt = REQUEST_TYPES.get(state.scenario.request_type)
+        policy = rt.route_policy if rt else None
+        if policy and policy.required_capabilities:
+            if policy.allows_tool(decision.next_tool):
+                return decision
+        else:
+            allowed = set(state.scenario.expected_route.allowed_tools())
+            if decision.next_tool in allowed:
+                return decision
         route = self._effective_route(state)
         for candidate in route:
             if any(o.tool_name == candidate and o.ok for o in state.tool_history):
@@ -527,7 +583,8 @@ class PlannerAgent:
             for index in range(len(state.messages) - 1)
         )
 
-    def _teacher_decide(self, state: ResearchState) -> PlannerDecision:
+    def _teacher_decide(self, state: ResearchState,
+                        feedback: str = "") -> PlannerDecision:
         if self.client is None:
             raise RuntimeError("client Teacher requis hors mode offline")
         visible = {
@@ -550,10 +607,26 @@ class PlannerAgent:
             } for o in state.tool_history],
             "remaining_tool_calls": state.max_tool_calls - len(state.tool_history),
         }
-        raw = self.client.complete_json("planner", [
-            {"role": "system", "content": planner_system_prompt(self.catalog)},
+        system_content = planner_system_prompt(self.catalog)
+        if self.chat_mode:
+            system_content += CHAT_PLANNER_SUPPLEMENT
+        messages = [
+            {"role": "system", "content": system_content},
             {"role": "user", "content": json.dumps(visible, ensure_ascii=False)},
-        ], temperature=0.0)
+        ]
+        if feedback:
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"Ta décision précédente était invalide : {feedback}. "
+                    "Renvoie un JSON corrigé qui respecte strictement le "
+                    "schéma demandé (next_tool obligatoire pour call_tool, "
+                    "aucune valeur null)."
+                ),
+            })
+        raw = self.client.complete_json("planner", messages, temperature=0.0)
+        # Les null renvoyés par le Teacher retombent sur les défauts du schéma.
+        raw = {k: v for k, v in raw.items() if v is not None}
         raw_decision = raw.get("decision")
         if isinstance(raw_decision, str) and raw_decision in self.catalog.tools:
             raw.setdefault("next_tool", raw_decision)
@@ -573,7 +646,11 @@ class PlannerAgent:
         jurisdiction = self._infer_jurisdiction(scenario.user_query, request_type)
         clarified = any(m.role.value == "user" and m.content == scenario.clarification_answer
                         for m in state.messages if scenario.clarification_answer)
-        if scenario.expected_route.requires_clarification and not clarified:
+        needs_clarification = (
+            scenario.expected_route.requires_clarification
+            or scenario.clarification_stage in ("before_search", "after_initial_research")
+        )
+        if needs_clarification and not clarified:
             return PlannerDecision(
                 request_type=request_type, jurisdiction=jurisdiction,
                 missing_critical_facts=scenario.facts_missing or ["faits essentiels"],
@@ -640,7 +717,7 @@ class PlannerAgent:
         thinking = self._generate_offline_thinking(tool, args, state)
         return PlannerDecision(
             request_type=request_type, jurisdiction=jurisdiction,
-            required_sources=scenario.expected_source_types,
+            required_sources=getattr(scenario, "source_intent", []),
             decision=Decision.call_tool, next_tool=tool, arguments=args,
             thinking_text=thinking,
             decision_trace=DecisionTrace(request_type=request_type, jurisdiction=jurisdiction,
@@ -714,38 +791,46 @@ class PlannerAgent:
         )
 
     def _effective_route(self, state: ResearchState) -> list[str]:
-        category = state.scenario.request_type
+        request_type = state.scenario.request_type
         steps = state.scenario.expected_route.steps
+        jurisdiction = getattr(state.scenario, "jurisdiction_status", "")
+        failure_mode = getattr(state.scenario, "planned_failure_mode", None) or getattr(state.scenario, "failure_mode", None)
+        clarification_stage = getattr(state.scenario, "clarification_stage", "none")
         route: list[str] = []
         for step in steps:
             if not step.optional:
                 route.append(step.tool)
                 continue
-            if (category in {"cas_civil_quebecois", "clarification_puis_recherche"}
+            if (request_type == "case_analysis"
                     and step.tool == "semantic_search_ccq"):
                 route.append(step.tool)
-            elif (category == "cas_procedure_quebecoise" and
-                  step.tool == "semantic_search_cpc"):
+            elif (request_type == "procedure_guidance"
+                  and step.tool == "semantic_search_cpc"):
                 route.append(step.tool)
-            elif category == "jurisprudence_federale" and step.tool == "fetch_document":
+            elif (jurisdiction == "supported_federal"
+                  and step.tool == "fetch_document"):
                 route.append(step.tool)
-            elif category == "source_trop_longue" and step.tool == "fetch_document":
-                route.append(step.tool)
-            elif category == "resultat_vide" and step.tool == "semantic_search_ccq" and state.tool_history:
-                route.append(step.tool)
-        # Une recherche thématique sans résultat autorise exactement une
-        # reformulation. La seconde recherche reste dans la route lors des
-        # tours suivants, ce qui permet ensuite de récupérer l'article trouvé.
-        if category != "resultat_vide":
-            for search_tool in ("semantic_search_ccq", "semantic_search_cpc"):
-                if search_tool not in route or route.count(search_tool) > 1:
-                    continue
-                searches = [
-                    observation for observation in state.tool_history
-                    if observation.tool_name == search_tool
-                ]
-                if searches and self._no_result(searches[0].normalized_response):
-                    route.insert(route.index(search_tool) + 1, search_tool)
+        for search_tool in ("semantic_search_ccq", "semantic_search_cpc"):
+            if search_tool not in route or route.count(search_tool) > 1:
+                continue
+            searches = [
+                o for o in state.tool_history
+                if o.tool_name == search_tool
+            ]
+            if searches and self._no_result(searches[0].normalized_response):
+                route.insert(route.index(search_tool) + 1, search_tool)
+        _SEARCH_TO_FETCH = {
+            "semantic_search_ccq": "get_ccq_articles",
+            "semantic_search_cpc": "get_cpc_articles",
+        }
+        for search_tool, fetch_tool in _SEARCH_TO_FETCH.items():
+            if fetch_tool not in route:
+                continue
+            searches = [o for o in state.tool_history if o.tool_name == search_tool]
+            if len(searches) >= 2 and all(
+                self._no_result(s.normalized_response) for s in searches
+            ):
+                route = [t for t in route if t != fetch_tool]
         return route
 
     def _arguments(self, tool: str, state: ResearchState,
@@ -850,7 +935,7 @@ class PlannerAgent:
         if tool == "search_legal_documents":
             intent = self._extract_search_intent(thinking)
             req = state.scenario.request_type
-            if req == "cas_federal_concret":
+            if req == "case_analysis":
                 prior_searches = [o for o in state.tool_history
                                   if o.tool_name == "search_legal_documents"]
                 if prior_searches:
@@ -859,9 +944,9 @@ class PlannerAgent:
                     doc_type = "cases"
                 else:
                     doc_type = "laws"
-            elif req in {"loi_federale", "source_trop_longue"}:
+            elif req == "law_or_regulation_identification":
                 doc_type = "laws"
-            elif req == "jurisprudence_federale":
+            elif req == "case_law_research":
                 doc_type = "cases"
             else:
                 doc_type = "cases"
@@ -888,7 +973,7 @@ class PlannerAgent:
                     "search_language": "fr",
                     "dataset": "LEGISLATION-FED", "size": 5,
                 }
-            if req == "jurisprudence_federale":
+            if req == "case_law_research":
                 target = self._federal_statute_target(query)
                 if target:
                     return {"query": target[0], "doc_type": "cases",
@@ -898,7 +983,7 @@ class PlannerAgent:
                     "search_language": "fr", "size": 5}
         if tool == "fetch_document":
             is_law = state.scenario.request_type in {
-                "loi_federale", "cas_federal_concret", "source_trop_longue"
+                "law_or_regulation_identification", "case_analysis",
             }
             if is_law:
                 citation = self._validated_federal_law_citation(state, query)
@@ -919,7 +1004,7 @@ class PlannerAgent:
             args = {"citation": citation, "output_language": "fr",
                     "doc_type": "laws" if is_law else "cases"}
             target = self._federal_statute_target(query) if is_law else None
-            if (state.scenario.request_type == "cas_federal_concret" and target and
+            if (state.scenario.request_type == "case_analysis" and target and
                     target[0] == "Bankruptcy and Insolvency Act"):
                 # L'art. 49 décrit la cession volontaire, les documents, le
                 # séquestre officiel et la nomination du syndic. Une section
@@ -930,7 +1015,7 @@ class PlannerAgent:
                 return None
             if previous_fetches:
                 args.update({"start_char": 6000, "end_char": 12000})
-            elif state.scenario.request_type == "source_trop_longue":
+            elif getattr(state.scenario, "planned_failure_mode", None) == "truncated_source":
                 args.update({"start_char": 0, "end_char": 6000})
             return args
         return None
@@ -1210,14 +1295,11 @@ class PlannerAgent:
 
     @staticmethod
     def _infer_jurisdiction(query: str, request_type: str) -> str:
-        if request_type == "comparaison_quebec_federal":
+        if request_type == "comparative_law":
             return "Québec et Canada (fédéral)"
-        if request_type in {"loi_federale", "jurisprudence_federale",
-                            "cas_federal_concret", "couverture_dataset"} or "banque" in query.casefold():
+        if request_type == "dataset_coverage" or "banque" in query.casefold():
             return "Canada (fédéral)"
-        if request_type in {"juridiction_ambigue", "question_incomplete"}:
-            return "indéterminée"
-        if request_type == "question_non_juridique":
+        if request_type == "non_legal":
             return "sans objet"
         return "Québec"
 

@@ -6,11 +6,50 @@ generation:
   max_tool_response_chars: 6000
   max_doc_fetch_chars: 12000
   near_duplicate_jaccard: 0.90
-  prompt_version: agentic-2.8-guarded
+  prompt_version: agentic-4.0-intermediate
+  max_search_reformulations: 1
+  max_thinking_words: 45
+  failure_injection_rate: 0.07
+
+  request_type_weights:
+    case_analysis: 0.25
+    procedure_guidance: 0.18
+    topic_research: 0.12
+    exact_text_retrieval: 0.07
+    article_explanation: 0.06
+    case_law_research: 0.10
+    law_or_regulation_identification: 0.07
+    legislative_status_verification: 0.05
+    document_analysis: 0.04
+    comparative_law: 0.02
+    dataset_coverage: 0.01
+    non_legal: 0.03
+
+  jurisdiction_weights:
+    supported_quebec: 0.58
+    supported_federal: 0.22
+    municipal_coverage_uncertain: 0.07
+    supported_other_canadian: 0.08
+    unsupported_foreign: 0.05
+
+  clarification_stage_weights:
+    none: 0.55
+    before_search: 0.20
+    after_initial_research: 0.25
+
+  failure_mode_weights:
+    irrelevant_results: 0.25
+    wrong_document_type: 0.20
+    empty_result: 0.15
+    truncated_source: 0.15
+    tool_error: 0.10
+    stale_source: 0.08
+    malformed_result: 0.04
+    coverage_gap: 0.03
 
 teacher:
-  base_url: ""
-  model: "Qwen/Qwen2.5-32B-Instruct-AWQ"
+  base_url: "https://api.openai.com/v1"
+  model: "gpt-4o-mini"
   timeout: 120
   max_retries: 3
   concurrency: 4
@@ -47,32 +86,6 @@ paths:
   data_root: data/agentic
   catalog: ../docs/mcp_tools_catalog.json
   mcp_config: ../.mcp.json
-
-taxonomy:
-  proportions:
-    article_ccq_precis: 2.0
-    article_cpc_precis: 1.5
-    explication_article: 1.5
-    recherche_theme_ccq: 2.0
-    recherche_theme_cpc: 1.5
-    cas_civil_quebecois: 2.0
-    cas_procedure_quebecoise: 1.0
-    reglement_quebecois_connu: 1.0
-    reglement_quebecois_inconnu: 1.0
-    jurisprudence_quebecoise: 1.0
-    loi_federale: 0
-    jurisprudence_federale: 0
-    cas_federal_concret: 0
-    comparaison_quebec_federal: 0
-    juridiction_ambigue: 1.0
-    question_incomplete: 1.0
-    verification_entree_en_vigueur: 0.7
-    couverture_dataset: 0
-    question_non_juridique: 0.7
-    panne_mcp: 0.5
-    resultat_vide: 0.5
-    source_trop_longue: 0
-    clarification_puis_recherche: 1.0
 
 mix:
   include_agentic_legal: true

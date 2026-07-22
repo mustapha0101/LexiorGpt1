@@ -10,7 +10,9 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from .schemas import GenerationManifest, RejectionRecord, TrainingTrajectory
+from .schemas import (
+    GenerationManifest, PreferencePair, RejectionRecord, TrainingTrajectory,
+)
 
 
 def stable_hash(value: Any) -> str:
@@ -53,7 +55,11 @@ class JsonCache:
 
 
 class RunStorage:
-    SUBDIRS = ("raw", "accepted", "rejected", "checkpoints", "manifests", "cache")
+    SUBDIRS = (
+        "raw", "accepted", "rejected", "repaired",
+        "preference_pairs", "regression_cases",
+        "checkpoints", "manifests", "cache",
+    )
 
     def __init__(self, data_root: str | Path, run_id: str):
         self.root = Path(data_root)
@@ -63,8 +69,12 @@ class RunStorage:
         self.raw_path = self.root / "raw" / f"{run_id}.jsonl"
         self.accepted_path = self.root / "accepted" / f"{run_id}.jsonl"
         self.rejected_path = self.root / "rejected" / f"{run_id}.jsonl"
+        self.repaired_path = self.root / "repaired" / f"{run_id}.jsonl"
+        self.preference_pairs_path = self.root / "preference_pairs" / f"{run_id}.jsonl"
+        self.regression_cases_path = self.root / "regression_cases" / f"{run_id}.jsonl"
         self.checkpoint_path = self.root / "checkpoints" / f"{run_id}.json"
         self.manifest_path = self.root / "manifests" / f"{run_id}.json"
+        self.summary_path = self.root / "manifests" / f"{run_id}_summary.json"
         self._lock = threading.Lock()
 
     @staticmethod
@@ -81,13 +91,25 @@ class RunStorage:
         with self._lock:
             self._append(self.raw_path, payload)
 
-    def append_accepted(self, trajectory: TrainingTrajectory) -> None:
+    def append_accepted(self, record) -> None:
         with self._lock:
-            self._append(self.accepted_path, trajectory)
+            self._append(self.accepted_path, record)
 
     def append_rejected(self, rejection: RejectionRecord) -> None:
         with self._lock:
             self._append(self.rejected_path, rejection)
+
+    def append_repaired(self, record) -> None:
+        with self._lock:
+            self._append(self.repaired_path, record)
+
+    def append_preference_pair(self, pair: PreferencePair) -> None:
+        with self._lock:
+            self._append(self.preference_pairs_path, pair)
+
+    def append_regression_case(self, case) -> None:
+        with self._lock:
+            self._append(self.regression_cases_path, case)
 
     def completed_scenario_ids(self) -> set[str]:
         done: set[str] = set()
@@ -151,6 +173,9 @@ class RunStorage:
 
     def save_manifest(self, manifest: GenerationManifest) -> None:
         self._atomic_json(self.manifest_path, manifest.model_dump(mode="json"))
+
+    def save_summary(self, summary: dict[str, Any]) -> None:
+        self._atomic_json(self.summary_path, summary)
 
     @staticmethod
     def _atomic_json(path: Path, payload: Any) -> None:
