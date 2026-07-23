@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lexior"
+version = "0.1.0"
+description = "Multi-agent legal assistant framework for Canadian law"
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "openai>=1.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

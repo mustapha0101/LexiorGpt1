@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "lexior.api.app:app", "--port", "8000", "--reload"],
+      "port": 8000,
+      "cwd": "Phase1_Data_Preparation"
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "Phase1_Data_Preparation/src/lexior/web",
+      "port": 5173
+    }
+  ]
+}
