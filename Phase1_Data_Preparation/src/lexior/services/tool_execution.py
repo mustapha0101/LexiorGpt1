@@ -10,14 +10,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from agentic_generation.mcp_executor import (
+from lexior.agentic.mcp_executor import (
     MCPExecutionError,
     MCPExecutor,
     MockMCPTransport,
     RealMCPTransport,
 )
-from agentic_generation.schemas import ToolCall, ToolObservation
-from agentic_generation.tool_catalog import ToolCatalog
+from lexior.agentic.schemas import ToolCall, ToolObservation
+from lexior.agentic.tool_catalog import ToolCatalog
 
 
 class ToolExecutionService:

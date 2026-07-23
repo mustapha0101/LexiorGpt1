@@ -18,13 +18,13 @@ from typing import Any, Callable, Iterator, Optional
 
 from langgraph.types import Command
 
-from agentic_generation.prompts import agent_system_prompt
-from agentic_generation.schemas import (
+from lexior.agentic.prompts import agent_system_prompt
+from lexior.agentic.schemas import (
     RejectionRecord,
     ScenarioSpec,
     TrainingTrajectory,
 )
-from agentic_generation.validators import ValidationResult
+from lexior.agentic.validators import ValidationResult
 
 from .checkpointing import create_memory_checkpointer
 from .context import GraphContext
@@ -167,7 +167,7 @@ class GraphRunner:
                          system_prompt: Optional[str] = None,
                          request_type: str = "case_analysis") -> dict:
         """État initial d'un tour live (historique client inclus)."""
-        from agentic_generation.schemas import Message, Role
+        from lexior.agentic.schemas import Message, Role
 
         scenario = ScenarioSpec(
             scenario_id=f"live-{uuid.uuid4().hex[:8]}",

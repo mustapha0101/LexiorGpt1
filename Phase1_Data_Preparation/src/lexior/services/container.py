@@ -10,8 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from agentic_generation.config import AgenticConfig
-from agentic_generation.tool_catalog import ToolCatalog
+from lexior.agentic.config import AgenticConfig
+from lexior.agentic.tool_catalog import ToolCatalog
 
 from .answer_generation import AnswerGenerationService
 from .clarification import ClarificationService
@@ -60,8 +60,8 @@ def build_services(
     ``teacher`` peut être ``None`` en mode offline (planner et rédacteur
     scriptés). ``critic_client`` retombe sur ``teacher`` si absent.
     """
-    from agentic_generation.agentic_critic import AgenticCritic
-    from agentic_generation.legal_critic import LegalCritic
+    from lexior.agentic.agentic_critic import AgenticCritic
+    from lexior.agentic.legal_critic import LegalCritic
 
     offline = bool(config.offline)
     critic_client = critic_client or teacher

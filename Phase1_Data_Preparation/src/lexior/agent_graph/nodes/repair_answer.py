@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentic_generation.schemas import Message, RepairReport, Role
+from lexior.agentic.schemas import Message, RepairReport, Role
 from lexior.services.critics import CriticsOutcome
 
 from ..context import GraphContext

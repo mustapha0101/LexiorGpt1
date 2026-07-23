@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from agentic_generation.schemas import ResearchState
-from agentic_generation.trajectory_agent import (
+from lexior.agentic.schemas import ResearchState
+from lexior.agentic.trajectory_agent import (
     PRECISE_ARTICLE_TYPES,
     TrajectoryAgent,
 )

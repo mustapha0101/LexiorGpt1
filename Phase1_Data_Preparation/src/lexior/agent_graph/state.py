@@ -24,7 +24,7 @@ try:
 except ImportError:  # pragma: no cover
     from typing_extensions import TypedDict
 
-from agentic_generation.schemas import (
+from lexior.agentic.schemas import (
     AcceptanceResult,
     CaseRelevanceResult,
     CriticResult,

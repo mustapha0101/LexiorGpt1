@@ -13,13 +13,13 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from agentic_generation.schemas import (
+from lexior.agentic.schemas import (
     CaseRelevanceResult,
     CaseLawSearchStatus,
     SearchResultStatus,
     ToolObservation,
 )
-from agentic_generation.case_law_gate import (
+from lexior.agentic.case_law_gate import (
     classify_case_result as _classify_case,
     gate_search_results as _gate_search,
     filter_usable_cases,

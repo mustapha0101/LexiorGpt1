@@ -9,7 +9,7 @@ route, ce service formule.
 
 from __future__ import annotations
 
-from agentic_generation.schemas import SearchResultStatus
+from lexior.agentic.schemas import SearchResultStatus
 
 from .result_verification import ToolResultAssessment
 

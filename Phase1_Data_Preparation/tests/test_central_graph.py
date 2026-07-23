@@ -285,7 +285,7 @@ def test_legacy_orchestrator_contains_no_orchestration_loop():
 
 
 def test_cli_does_not_run_the_old_engine():
-    import agentic_generation.cli as cli
+    import lexior.agentic.cli as cli
 
     source = inspect.getsource(cli)
     assert "AgenticOrchestrator" not in source

@@ -13,7 +13,7 @@ from typing import Any
 
 from langgraph.types import interrupt
 
-from agentic_generation.schemas import Message, PlannerDecision, Role
+from lexior.agentic.schemas import Message, PlannerDecision, Role
 from lexior.services.modes import is_live
 
 from ..context import GraphContext

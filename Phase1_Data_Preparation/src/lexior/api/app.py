@@ -35,10 +35,10 @@ from pydantic import BaseModel
 
 import dataclasses
 
-from agentic_generation.config import load_config
-from agentic_generation.storage import JsonCache
-from agentic_generation.teacher_client import TeacherClient
-from agentic_generation.tool_catalog import ToolCatalog, load_catalog
+from lexior.agentic.config import load_config
+from lexior.agentic.storage import JsonCache
+from lexior.agentic.teacher_client import TeacherClient
+from lexior.agentic.tool_catalog import ToolCatalog, load_catalog
 from lexior.agent_graph import GraphRunner, build_context
 from lexior.agent_graph.checkpointing import create_memory_checkpointer
 from lexior.services import build_real_executor, build_services
@@ -98,7 +98,7 @@ _SYSTEM_PROMPT = (
 _RAG = None
 if _CFG.rag.enabled:
     try:
-        from agentic_generation.legal_rag import (
+        from lexior.agentic.legal_rag import (
             LegalRAG, OpenAIEmbedder, index_exists,
         )
         if index_exists(_CFG.rag.index_dir):

@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-from agentic_generation.schemas import (
+from lexior.agentic.schemas import (
     AcceptanceResult,
     CriticResult,
     Decision,
@@ -29,17 +29,17 @@ from agentic_generation.schemas import (
     ToolObservation,
     TrainingTrajectory,
 )
-from agentic_generation.acceptance import (
+from lexior.agentic.acceptance import (
     compute_acceptance_status,
     _check_jurisdiction_consistency,
     _check_clarification_consistency,
     _check_article_grounding,
 )
-from agentic_generation.response_verifier import (
+from lexior.agentic.response_verifier import (
     verify_observation as _verify_observation,
 )
-from agentic_generation.tool_catalog import ToolCatalog
-from agentic_generation.validators import (
+from lexior.agentic.tool_catalog import ToolCatalog
+from lexior.agentic.validators import (
     ARTICLE_CITATION_RE,
     CERTAINTY_RE,
     CITATION_MARK_RE,
@@ -396,7 +396,7 @@ class StepVerifier:
 
         Returns ``None`` if the trajectory has no invalid steps.
         """
-        from agentic_generation.taxonomy import REQUEST_TYPES
+        from lexior.agentic.taxonomy import REQUEST_TYPES
 
         if not tool_history:
             return None

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentic_generation.schemas import GenerationMetadata, StateStatus
+from lexior.agentic.schemas import GenerationMetadata, StateStatus
 from lexior.services.modes import normalize_mode
 
 from ..context import GraphContext

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from agentic_generation.schemas import (
+from lexior.agentic.schemas import (
     AcceptanceResult,
     CriticResult,
     PlannerDecision,
@@ -19,8 +19,8 @@ from agentic_generation.schemas import (
     ToolObservation,
     TrainingTrajectory,
 )
-from agentic_generation.tool_catalog import ToolCatalog
-from agentic_generation.validators import ValidationResult
+from lexior.agentic.tool_catalog import ToolCatalog
+from lexior.agentic.validators import ValidationResult
 from lexior.agent_graph.step_verifier import (
     ProposalVerdict,
     StepVerifier,

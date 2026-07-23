@@ -12,10 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from agentic_generation.agentic_critic import AgenticCritic
-from agentic_generation.legal_critic import LegalCritic
-from agentic_generation.schemas import CriticResult, ResearchState
-from agentic_generation.trajectory_agent import PRECISE_ARTICLE_TYPES
+from lexior.agentic.agentic_critic import AgenticCritic
+from lexior.agentic.legal_critic import LegalCritic
+from lexior.agentic.schemas import CriticResult, ResearchState
+from lexior.agentic.trajectory_agent import PRECISE_ARTICLE_TYPES
 
 
 @dataclass

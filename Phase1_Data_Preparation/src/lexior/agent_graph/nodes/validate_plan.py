@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentic_generation.schemas import Decision, DecisionTrace, PlannerDecision
+from lexior.agentic.schemas import Decision, DecisionTrace, PlannerDecision
 from lexior.services.evidence import AcceptanceBlocker, CoverageGap
 from lexior.services.jurisdiction import QC_ONLY_TOOLS, allows_quebec_tools
 from lexior.services.modes import is_live

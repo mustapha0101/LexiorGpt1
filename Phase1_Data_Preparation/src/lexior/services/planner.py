@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from agentic_generation.planner_agent import PlannerAgent
-from agentic_generation.schemas import PlannerDecision, ResearchState
-from agentic_generation.tool_catalog import ToolCatalog
+from lexior.agentic.planner_agent import PlannerAgent
+from lexior.agentic.schemas import PlannerDecision, ResearchState
+from lexior.agentic.tool_catalog import ToolCatalog
 
 from .modes import LIVE, normalize_mode
 
@@ -71,7 +71,7 @@ class PlannerService:
         if feedback and not self.offline:
             # Le PlannerAgent en ligne relit tout l'historique; le
             # feedback est ajouté comme message utilisateur transitoire.
-            from agentic_generation.schemas import Message, Role
+            from lexior.agentic.schemas import Message, Role
             state = state.model_copy(deep=True)
             state.messages.append(Message(
                 role=Role.user,

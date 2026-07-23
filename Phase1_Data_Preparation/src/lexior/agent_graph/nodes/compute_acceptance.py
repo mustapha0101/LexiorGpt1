@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentic_generation.schemas import (
+from lexior.agentic.schemas import (
     AcceptanceResult,
     GroundingEntry,
     RejectionDetail,

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentic_generation.case_law_gate import gate_search_results
+from lexior.agentic.case_law_gate import gate_search_results
 
 from ..context import GraphContext
 from ..state import LexiorState

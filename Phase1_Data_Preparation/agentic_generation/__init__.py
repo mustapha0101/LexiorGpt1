@@ -1,20 +1,6 @@
-# -*- coding: utf-8 -*-
-
-"""
-Pipeline de génération de données agentiques multi-agent pour LexiorGPT.
-
-Remplace la génération juridique one-shot par une machine à états contrôlée :
-
-    Scenario Generator -> Planner -> MCP Executor -> Trajectory Agent
-    -> Legal Critic -> Agentic Critic -> Validateur déterministe -> Stockage
-
-Le dataset produit apprend au modèle une POLITIQUE (reconnaître la demande,
-choisir la juridiction, décider d'une clarification, appeler le bon outil MCP
-avec des arguments valides, s'arrêter au bon moment, répondre à partir des
-sources réellement récupérées) — pas la récitation des lois depuis ses poids.
-
-Point d'entrée : python -m agentic_generation.cli --help
-"""
-
-SCHEMA_VERSION = "agentic-2.0"
-DATASET_TYPE = "agentic_legal_intermediate"
+# Compatibility wrapper — canonical source: src/lexior/agentic/__init__.py
+import os as _os, sys as _sys
+_src = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "src")
+if _src not in _sys.path:
+    _sys.path.insert(0, _src)
+from lexior.agentic import SCHEMA_VERSION, DATASET_TYPE  # noqa: F401

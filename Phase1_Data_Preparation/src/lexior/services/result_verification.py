@@ -20,9 +20,9 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Optional
 
-from agentic_generation.planner_agent import FEDERAL_STATUTES
-from agentic_generation.response_verifier import verify_observation
-from agentic_generation.schemas import (
+from lexior.agentic.planner_agent import FEDERAL_STATUTES
+from lexior.agentic.response_verifier import verify_observation
+from lexior.agentic.schemas import (
     SearchEvaluation,
     SearchResultStatus,
     ToolObservation,

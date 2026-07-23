@@ -18,8 +18,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from agentic_generation.schemas import ResearchState
-from agentic_generation.trajectory_agent import TrajectoryAgent
+from lexior.agentic.schemas import ResearchState
+from lexior.agentic.trajectory_agent import TrajectoryAgent
 
 from .critics import CriticsOutcome
 from .modes import LIVE, normalize_mode

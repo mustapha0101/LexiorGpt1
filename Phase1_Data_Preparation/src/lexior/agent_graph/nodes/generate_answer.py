@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentic_generation.schemas import Message, Role
+from lexior.agentic.schemas import Message, Role
 
 from ..context import GraphContext
 from ..state import LexiorState, to_research_state

@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from agentic_generation.schemas import Message
+from lexior.agentic.schemas import Message
 
 _GREETING_RE = re.compile(
     r"^\s*(bonjour|salut|allo|hello|hi|merci)\b[\s!.,]*$", re.I)

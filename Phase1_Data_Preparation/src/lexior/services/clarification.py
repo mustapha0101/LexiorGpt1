@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from agentic_generation.schemas import PlannerDecision, ScenarioSpec
+from lexior.agentic.schemas import PlannerDecision, ScenarioSpec
 
 DEFAULT_QUESTION = "Pouvez-vous préciser?"
 

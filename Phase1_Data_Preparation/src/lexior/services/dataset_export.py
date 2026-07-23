@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from agentic_generation.schemas import RejectionRecord, TrainingTrajectory
-from agentic_generation.storage import RunStorage
+from lexior.agentic.schemas import RejectionRecord, TrainingTrajectory
+from lexior.agentic.storage import RunStorage
 
 
 class DatasetExportService:

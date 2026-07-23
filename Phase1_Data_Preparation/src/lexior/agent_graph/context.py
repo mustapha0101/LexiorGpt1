@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from agentic_generation.config import AgenticConfig
-from agentic_generation.tool_catalog import ToolCatalog
+from lexior.agentic.config import AgenticConfig
+from lexior.agentic.tool_catalog import ToolCatalog
 from lexior.services import LexiorServices
 
 
