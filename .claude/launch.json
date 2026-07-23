@@ -12,7 +12,7 @@
       "name": "frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "cwd": "Phase1_Data_Preparation/src/lexior/web",
+      "cwd": "Phase1_Data_Preparation/apps/chat-web",
       "port": 5173
     }
   ]
