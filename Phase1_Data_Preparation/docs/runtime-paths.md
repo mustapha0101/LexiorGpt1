@@ -1,15 +1,15 @@
 # Runtime Paths
 
-Two runtime modes share a single LangGraph (`lexior/agent_graph/graph.py`).
+Two runtime modes share a single LangGraph (`src/lexior/agent_graph/graph.py`).
 
 ## Live request
 
 ```
 User message
-→ FastAPI  (lexior/api/app.py)
-→ GraphRunner.run_live()  (lexior/agent_graph/runner.py)
+→ FastAPI  (src/lexior/api/app.py)
+→ GraphRunner.run_live()  (src/lexior/agent_graph/runner.py)
 → Central LangGraph  (25 nodes, compiled once)
-→ Shared services  (lexior/services/*)
+→ Shared services  (src/lexior/services/*)
 → interrupt() / Command(resume=...)  for clarification
 → SSE stream  (type: status | decision | tool_call | tool_result | thinking | done)
 → return_live_answer node
@@ -18,9 +18,9 @@ User message
 ## Dataset scenario
 
 ```
-CLI  (agentic_generation/cli.py → python -m agentic_generation.cli generate)
+CLI  (src/lexior/agentic/cli.py → python -m agentic_generation.cli generate)
 → AgenticOrchestrator  (thin wrapper, deprecated)
-→ GraphRunner.run_dataset()  (lexior/agent_graph/runner.py)
+→ GraphRunner.run_dataset()  (src/lexior/agent_graph/runner.py)
 → Same Central LangGraph  (same 25 nodes)
 → Same shared services
 → Synthetic clarification  (no interrupt)
@@ -36,3 +36,6 @@ CLI  (agentic_generation/cli.py → python -m agentic_generation.cli generate)
   synthetic answers from ScenarioSpec.
 - The coverage gate, evidence classification, and acceptance blockers apply
   identically in both modes.
+- All Python code lives under `src/lexior/` (installable via `pip install -e .`).
+- `agentic_generation/` at root is a compatibility wrapper layer — all modules
+  re-export from `lexior.agentic` to ensure single Pydantic class identity.

@@ -50,39 +50,16 @@ Baseline: 315 tests passing (2026-07-23).
 | `lexior/evaluation/` | `src/lexior/evaluation/` | move | Comparison tool |
 | `lexior/web/` | `apps/chat-web/` | move | Active chat frontend |
 
-### agentic_generation/ → src/lexior/ subpackages
+### agentic_generation/ → src/lexior/agentic/
+
+All 29 modules moved as a single package to preserve the dense internal import
+graph (60+ relative imports). Splitting into domain/dataset/critics/etc. would
+require rewriting every cross-import and risks Pydantic class-identity failures.
 
 | Old path | New path | Status | Wrapper | Reason |
 |---|---|---|---|---|
-| `schemas.py` | `src/lexior/domain/schemas.py` | move | yes | Shared schemas |
-| `taxonomy.py` | `src/lexior/domain/taxonomy.py` | move | yes | Request type taxonomy |
-| `config.py` | `src/lexior/config.py` | move | yes | Shared configuration |
-| `tool_catalog.py` | `src/lexior/tools/catalog.py` | move | yes | Tool catalog |
-| `teacher_client.py` | `src/lexior/models/client.py` | move | yes | Model client |
-| `scenario_generator.py` | `src/lexior/dataset/scenario_generator.py` | move | yes | Dataset generation |
-| `storage.py` | `src/lexior/dataset/storage.py` | move | yes | Run storage |
-| `publisher.py` | `src/lexior/dataset/publisher.py` | move | yes | HF publisher |
-| `training_formatter.py` | `src/lexior/dataset/formatter.py` | move | yes | ChatML formatter |
-| `anchor_bank.py` | `src/lexior/dataset/anchor_bank.py` | move | yes | Anchor bank |
-| `fixtures.py` | `src/lexior/dataset/fixtures.py` | move | yes | Mock MCP fixtures |
-| `migration.py` | `src/lexior/dataset/migration.py` | move | yes | Schema migration |
-| `legal_rag.py` | `src/lexior/retrieval/legal_rag.py` | move | yes | RAG retrieval |
-| `case_law_gate.py` | `src/lexior/validation/case_law.py` | move | yes | Case law gate |
-| `response_verifier.py` | `src/lexior/validation/tool_results.py` | move | yes | Response verification |
-| `validators.py` | `src/lexior/validation/trajectory.py` | move | yes | Trajectory validation |
-| `acceptance.py` | `src/lexior/validation/acceptance.py` | move | yes | Acceptance logic |
-| `legal_critic.py` | `src/lexior/critics/legal.py` | move | yes | Legal critic |
-| `agentic_critic.py` | `src/lexior/critics/agentic.py` | move | yes | Agentic critic |
-| `critic_context.py` | `src/lexior/critics/context.py` | move | yes | Critic context |
-| `critic_profiles.py` | `src/lexior/critics/profiles.py` | move | yes | Critic profiles |
-| `prompts.py` | `src/lexior/prompts/` (split) | move | yes | Prompt templates |
-| `planner_agent.py` | `src/lexior/services/planner.py` (merge) | move | yes | Planner implementation |
-| `mcp_executor.py` | `src/lexior/services/tool_execution.py` (merge) | move | yes | Tool executor |
-| `trajectory_agent.py` | `src/lexior/services/answer_generation.py` (merge) | move | yes | Answer writer |
-| `orchestrator.py` | `legacy/orchestrator.py` | move | yes | Deprecated thin wrapper |
-| `cli.py` | keep (updated imports) | keep | no | CLI entry point |
-| `__init__.py` | keep (re-exports) | keep | no | Package init |
-| `__main__.py` | keep | keep | no | Module entry |
+| `agentic_generation/*.py` (29 modules) | `src/lexior/agentic/*.py` | move | yes | All modules moved as a package |
+| `agentic_generation/*.py` (old paths) | compatibility wrappers | wrapper | — | Re-export from lexior.agentic to ensure single class identity |
 
 ### configs/
 
@@ -114,12 +91,51 @@ Baseline: 315 tests passing (2026-07-23).
 | `node_modules/` | gitignore | Package manager |
 | `dist/` | gitignore | Build output |
 
-## Migration phases
+## Final structure
 
-1. **Commit 1** — This document + runtime-paths.md + test baseline (no moves)
-2. **Commit 2** — Notebooks, root tests, deployment, shell scripts, results viewer, .gitignore
-3. **Commit 3** — Data scripts (cleaning, generation, processing, identity, HuggingFace)
-4. **Commit 4** — src/lexior layout (central package move + pyproject.toml)
-5. **Commit 5** — agentic_generation → src/lexior subpackages (schemas, config, tools, dataset, validation, critics, prompts)
-6. **Commit 6** — Frontend consolidation (apps/chat-web/)
-7. **Commit 7** — Legacy cleanup, final docs, full test verification
+```
+Phase1_Data_Preparation/
+├── src/lexior/                  # Installable package (pip install -e .)
+│   ├── agent_graph/             # LangGraph 25-node central graph
+│   │   ├── nodes/               # Individual graph nodes
+│   │   ├── runner.py            # GraphRunner (live + dataset)
+│   │   ├── state.py             # LexiorState
+│   │   └── ...
+│   ├── agentic/                 # Pipeline implementation (ex-agentic_generation)
+│   │   ├── schemas.py           # Pydantic models
+│   │   ├── config.py            # Configuration
+│   │   ├── tool_catalog.py      # MCP tool catalog
+│   │   ├── teacher_client.py    # LLM client
+│   │   └── ... (29 modules)
+│   ├── api/                     # FastAPI backend
+│   ├── services/                # Shared service layer
+│   ├── data/                    # Data cleaning/identity libraries
+│   ├── evaluation/              # Comparison tools
+│   └── observability/           # Cost tracking
+├── agentic_generation/          # Compatibility wrappers → lexior.agentic
+├── apps/
+│   ├── chat-web/                # React/Vite chat frontend
+│   └── results-viewer/          # Results UI
+├── scripts/
+│   ├── dataset_generation/      # CCQ, A2AJ, identity generators
+│   ├── dataset_processing/      # Format, mix, audit
+│   ├── huggingface/             # Push/resume from HF
+│   └── run/                     # Shell pipeline scripts
+├── tests/                       # 315 tests
+├── configs/                     # YAML configs
+├── deployment/                  # RunPod deployment
+├── notebooks/                   # Jupyter notebooks
+├── docs/                        # Documentation
+├── pyproject.toml               # Package config (src layout)
+└── *.py                         # Root compatibility wrappers (5 files)
+```
+
+## Commits
+
+1. **Commit 1** — Inventory: migration-map.md, runtime-paths.md, test baseline
+2. **Commit 2** — Safe root cleanup: notebooks, root tests, deployment, shell scripts, results viewer, .gitignore
+3. **Commit 3** — Data scripts: cleaning, generation, processing, identity, HuggingFace libraries
+4. **Commit 4** — src/lexior layout: central package move + pyproject.toml + editable install
+5. **Commit 5** — agentic_generation → src/lexior/agentic + compatibility wrappers
+6. **Commit 6** — Frontend consolidation: apps/chat-web/
+7. **Commit 7** — Final cleanup, docs update, test verification
