@@ -101,7 +101,10 @@ if [ -z "$OPENAI_API_KEY" ]; then
     exit 1
 fi
 
-python3 resume_from_hf.py \
+# Resolve project root (two levels up from scripts/run/).
+PHASE1_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+python3 "$PHASE1_DIR/scripts/huggingface/resume_generation.py" \
     --dataset "$DATASET" \
     --limit "$LIMIT" \
     --max_rows "$MAX_ROWS_FED" \
@@ -116,7 +119,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo -e "\n${YELLOW}[2b/3] Génération de cas pratiques basés sur le droit québécois (CCQ + CPC)...${NC}"
-python3 generate_ccq_data.py \
+python3 "$PHASE1_DIR/scripts/dataset_generation/generate_ccq.py" \
     --model "$MODEL" \
     --scenarios_per_article 10 \
     --max_rows "$MAX_ROWS_QC" \
@@ -128,7 +131,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo -e "\n${YELLOW}[3/6] Génération du vivier d'identité (aucun appel API)...${NC}"
-python3 generate_identity_data.py \
+python3 "$PHASE1_DIR/scripts/dataset_generation/generate_identity.py" \
     --count "$IDENTITY_POOL_SIZE" \
     --seed "$IDENTITY_SEED" \
     --output_file "data/processed/generated_identity_cot.jsonl"
@@ -143,13 +146,13 @@ fi
 # C'est cette version brute qui sert de point de reprise et de validation.
 if [ -n "$HF_TOKEN" ]; then
     echo -e "\n${YELLOW}[4/6] Téléversement des trois corpus sources (dépôts privés)...${NC}"
-    python3 push_to_hf.py \
+    python3 "$PHASE1_DIR/scripts/huggingface/push_dataset.py" \
         --input_file "data/processed/generated_a2aj_cot.jsonl" \
         --repo_id "${HF_REPO_FEDERAL:-intelliwork/canadian-cot-dataset-federal-french}"
-    python3 push_to_hf.py \
+    python3 "$PHASE1_DIR/scripts/huggingface/push_dataset.py" \
         --input_file "data/processed/generated_ccq_cot.jsonl" \
         --repo_id "${HF_REPO_QUEBEC:-intelliwork/canadian-cot-dataset-quebec-french}"
-    python3 push_to_hf.py \
+    python3 "$PHASE1_DIR/scripts/huggingface/push_dataset.py" \
         --input_file "data/processed/generated_identity_cot.jsonl" \
         --repo_id "${HF_REPO_IDENTITY:-intelliwork/canadian-cot-dataset-identity-french}"
 else
@@ -161,7 +164,7 @@ fi
 # accidentelle : elle valait ce que les fichiers contenaient. Ici elle est
 # demandée, vérifiée, et consignée dans un manifeste.
 echo -e "\n${YELLOW}[5/6] Mélange des trois sources (mix_datasets.py)...${NC}"
-python3 mix_datasets.py \
+python3 "$PHASE1_DIR/scripts/dataset_processing/mix_datasets.py" \
     --federal_file "data/processed/generated_a2aj_cot.jsonl" \
     --quebec_file "data/processed/generated_ccq_cot.jsonl" \
     --identity_file "data/processed/generated_identity_cot.jsonl" \
@@ -180,7 +183,7 @@ fi
 
 # --- Formatage -----------------------------------------------------------
 echo -e "\n${YELLOW}[6/6] Formatage conversationnel du corpus mélangé...${NC}"
-python3 dataset_formatter.py \
+python3 "$PHASE1_DIR/scripts/dataset_processing/format_dataset.py" \
     --local_file "data/processed/combined_raw_cot.jsonl" \
     --output_dir "data/processed" \
     --test_size "$TEST_SIZE" \
@@ -196,7 +199,7 @@ fi
 # Ne jamais affirmer que le jeu d'identité est présent : le vérifier.
 # Sortie non nulle => on n'envoie rien.
 echo -e "\n${YELLOW}[Audit] Vérification du dataset d'entraînement...${NC}"
-python3 audit_training_dataset.py \
+python3 "$PHASE1_DIR/scripts/dataset_processing/audit_dataset.py" \
     --files "data/processed/train_dataset.jsonl" "data/processed/test_dataset.jsonl" \
     --require_identity_in_test \
     --report_file "data/processed/audit_report.json" \
@@ -217,5 +220,5 @@ echo -e "${GREEN}===============================================================
 # Téléversement du dataset combiné formaté (facultatif).
 if [ -n "$HF_DATASET_REPO_ID" ] && [ -n "$HF_TOKEN" ]; then
     echo -e "\n${YELLOW}[Facultatif] Téléversement du dataset combiné formaté...${NC}"
-    python3 push_to_hf.py --repo_id "$HF_DATASET_REPO_ID"
+    python3 "$PHASE1_DIR/scripts/huggingface/push_dataset.py" --repo_id "$HF_DATASET_REPO_ID"
 fi
