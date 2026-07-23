@@ -23,35 +23,13 @@ NO_RESULT_RE = re.compile(
 )
 
 # ── Garde-fou juridictionnel du mode chat ────────────────────────────────
-# Outils dont les sources sont exclusivement québécoises.
-QC_ONLY_TOOLS = {
-    "semantic_search_ccq", "semantic_search_cpc",
-    "get_ccq_articles", "get_cpc_articles",
-    "search_ccq_keywords", "search_cpc_keywords",
-    "search_quebec_regulations", "get_quebec_regulation",
-    "get_quebec_legal_info", "search_quebec_jurisprudence",
-}
-
-_PROVINCE_RE = re.compile(
-    r"\b(ontario|alberta|manitoba|saskatchewan|"
-    r"colombie[- ]britannique|british columbia|"
-    r"nouvelle[- ][ée]cosse|nova scotia|"
-    r"nouveau[- ]brunswick|new brunswick|"
-    r"terre[- ]neuve(?:[- ]et[- ]labrador)?|newfoundland|"
-    r"[îi]le[- ]du[- ]prince[- ][ée]douard|prince edward island|"
-    r"yukon|nunavut|territoires du nord[- ]ouest|northwest territories)\b",
-    re.I,
+# Implémentation canonique : lexior.services.jurisdiction (une seule
+# source de vérité; ré-exportée ici pour compatibilité).
+from lexior.services.jurisdiction import (  # noqa: E402
+    QC_ONLY_TOOLS,
+    QuebecToolsBlocked,
+    detect_jurisdiction_hint,
 )
-_QC_MENTION_RE = re.compile(
-    r"\b(qu[ée]bec|montr[ée]al|gatineau|laval|sherbrooke|trois[- ]rivi[èe]res)\b",
-    re.I,
-)
-_YES_RE = re.compile(r"^\s*(oui|yes|ouais|exactement|c'est ça)\s*[.!]?\s*$", re.I)
-_NO_RE = re.compile(r"^\s*(non|no|nope|pas au qu[ée]bec)\s*[.!]?\s*$", re.I)
-
-
-class QuebecToolsBlocked(ValueError):
-    """Outil québécois choisi alors que l'utilisateur n'est pas au Québec."""
 
 # ---------------------------------------------------------------------------
 # Thinking-text extraction helpers
@@ -191,7 +169,7 @@ class PlannerAgent:
     def decide(self, state: ResearchState) -> PlannerDecision:
         if self.offline:
             decision = self._offline_decide(state)
-            self._raise_if_invalid(state, decision)
+            decision = self._raise_if_invalid(state, decision)
             return decision
         feedback = ""
         while True:
@@ -215,7 +193,7 @@ class PlannerAgent:
                     decision = self._guard_chat_jurisdiction(
                         state, decision, retried=bool(feedback))
                 decision = self._guard_budget(state, decision)
-                self._raise_if_invalid(state, decision)
+                decision = self._raise_if_invalid(state, decision)
                 return decision
             except ValueError as exc:
                 # ValidationError pydantic incluse (sous-classe de ValueError).
@@ -224,7 +202,7 @@ class PlannerAgent:
                 feedback = str(exc) or "décision invalide"
 
     def _raise_if_invalid(self, state: ResearchState,
-                          decision: PlannerDecision) -> None:
+                          decision: PlannerDecision) -> PlannerDecision:
         errors = validate_planner_decision(decision, self.catalog)
         if (decision.decision == Decision.call_tool and decision.next_tool
                 and not self.chat_mode):
@@ -235,7 +213,25 @@ class PlannerAgent:
                 and not self.chat_mode):
             errors.append("appel d'outil interdit pour cette demande")
         if errors:
+            if self.chat_mode and all("outil inconnu" in e for e in errors):
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    missing_critical_facts=decision.missing_critical_facts,
+                    required_sources=decision.required_sources,
+                    decision=Decision.final_answer,
+                    thinking_text=(
+                        f"L'outil « {decision.next_tool} » n'est pas "
+                        "disponible en mode chat. Je réponds avec les "
+                        "informations déjà obtenues."),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need="outil indisponible en chat",
+                        next_action="final_answer"),
+                )
             raise ValueError("décision Planner invalide : " + "; ".join(errors))
+        return decision
 
     def _guard_clarification(self, state: ResearchState,
                              decision: PlannerDecision) -> PlannerDecision:
@@ -439,34 +435,10 @@ class PlannerAgent:
     def _chat_jurisdiction_hint(state: ResearchState) -> Optional[str]:
         """Juridiction déduite DÉTERMINISTIQUEMENT de la conversation.
 
-        Parcourt les messages dans l'ordre; le signal le plus récent
-        l'emporte. Retourne « Québec », un nom de province, ou
-        « hors Québec (province non précisée) » — None si rien ne tranche.
+        Délègue à ``lexior.services.jurisdiction.detect_jurisdiction_hint``
+        (implémentation canonique, partagée avec le graphe central).
         """
-        hint: Optional[str] = None
-        messages = state.messages
-        for index, message in enumerate(messages):
-            if message.role.value != "user":
-                continue
-            province = _PROVINCE_RE.search(message.content)
-            if province:
-                hint = province.group(0).title()
-                continue
-            if _QC_MENTION_RE.search(message.content):
-                hint = "Québec"
-                continue
-            previous_is_quebec_question = (
-                index > 0
-                and messages[index - 1].role.value == "assistant"
-                and "québec" in messages[index - 1].content.lower()
-                and messages[index - 1].content.rstrip().endswith("?")
-            )
-            if previous_is_quebec_question:
-                if _YES_RE.match(message.content):
-                    hint = "Québec"
-                elif _NO_RE.match(message.content):
-                    hint = "hors Québec (province non précisée)"
-        return hint
+        return detect_jurisdiction_hint(state.messages)
 
     def _guard_chat_jurisdiction(self, state: ResearchState,
                                  decision: PlannerDecision,

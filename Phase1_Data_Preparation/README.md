@@ -402,45 +402,85 @@ Key CLI flags:
 
 ---
 
-## Lexior Agent System — LangGraph + Live Chat (`lexior/`)
+## Lexior Agent System — one central LangGraph, two modes (`lexior/`)
 
-The agentic pipeline is also exposed as a reusable **LangGraph** multi-agent
-system with two modes sharing the same graph:
+The repository is built around **one** LangGraph `StateGraph` shared by two
+execution modes — there is no separate dataset engine and no separate chat
+engine:
 
-- **Dataset mode** — the orchestrator behaviour: scripted scenarios,
-  synthetic clarification answers, strict route validation, dual critics,
-  acceptance gates.
-- **Chat mode** — a live legal assistant (FastAPI backend + React frontend)
-  where a real user converses with the agent over the same legal tools.
+- **`mode="dataset"`** — a `ScenarioSpec` enters, a validated training
+  trajectory exits (intermediate JSONL; ChatML conversion stays a separate
+  deterministic step in `training_formatter.py`).
+- **`mode="live"`** — a real user message enters, a sourced answer exits
+  (FastAPI SSE backend + React frontend). Clarifications use LangGraph
+  `interrupt()`: the graph suspends and the next message on the same
+  `thread_id` resumes it with `Command(resume=...)`.
+
+The graph lives in `lexior/agent_graph/` (one module per node under
+`nodes/`, all routing in `routing.py`); the business logic lives in
+`lexior/services/` (planner, jurisdiction, tool execution, result
+verification, critics, validation, repair, export). Services compute;
+**LangGraph owns all routing**. The old `AgenticOrchestrator` is a thin
+deprecated facade over `GraphRunner.run_dataset` with no loop of its own.
 
 ### Graph topology
 
 ```mermaid
-flowchart LR
-    plan -->|call_tool| execute_tool --> plan
-    plan -->|ask_clarification| handle_clarification
-    handle_clarification -->|dataset : réponse scriptée| plan
-    handle_clarification -->|chat : question au vrai utilisateur| E1[END]
-    plan -->|final_answer / cannot_conclude| generate_answer --> run_critics
-    run_critics -->|score < seuil, repair ≤ 1| repair --> run_critics
-    run_critics --> validate_final
-    validate_final -->|accepté| export --> E2[END]
-    validate_final -->|refusé| reject --> E3[END]
-    plan -->|erreur / budget| reject
+flowchart TB
+    START --> initialize --> classify_request --> classify_follow_up
+    classify_follow_up --> update_active_task --> resolve_jurisdiction
+    resolve_jurisdiction --> analyze_facts --> plan --> validate_plan
+    validate_plan -->|call_tool autorisé| execute_tool
+    validate_plan -->|clarification| handle_clarification
+    validate_plan -->|final_answer / cannot_conclude| build_answer_contract
+    validate_plan -->|invalide| reject
+    handle_clarification -->|réponse (synthétique ou resume)| resolve_jurisdiction
+    handle_clarification -->|dataset sans réponse : la question est l'exemple| build_answer_contract
+    execute_tool --> verify_tool_result --> classify_tool_result
+    classify_tool_result -->|usable| update_research_state --> plan
+    classify_tool_result -->|irrelevant / empty| reformulate_search --> plan
+    classify_tool_result -->|wrong_document_type| repair_trajectory
+    build_answer_contract --> generate_answer --> run_critics --> classify_failures
+    classify_failures -->|writing / grounding| repair_answer --> run_critics
+    classify_failures -->|retrieval| repair_trajectory --> plan
+    classify_failures -->|jurisdiction| resolve_jurisdiction
+    classify_failures -->|missing fact| handle_clarification
+    classify_failures -->|aucun bloqueur| validate_final --> compute_acceptance
+    compute_acceptance -->|accepté + dataset| export_dataset --> E1[END]
+    compute_acceptance -->|accepté + live| return_live_answer --> E2[END]
+    compute_acceptance -->|rejet réparable| repair_trajectory
+    compute_acceptance -->|rejet final| reject --> E3[END]
 ```
 
-### Chat mode vs dataset mode
+### The two modes, one system
 
-| Aspect | Dataset | Chat |
+Identical in both modes: planner service, jurisdiction resolver,
+clarification question logic, tool catalog + MCP executor, result verifier
+and classifier, critics, grounding rules, repair engine, deterministic
+validation, acceptance computation, and the compiled graph itself
+(`tests/test_central_graph.py` proves both modes run through the same
+`CompiledStateGraph` and the same service instances).
+
+| Aspect | `dataset` | `live` |
 |---|---|---|
-| Scenario | scripted from the taxonomy | free user query + conversation history |
-| Clarifications | synthetic answer injected, planning resumes | the question ends the turn; the real user answers in the next message |
-| Route guards / required tools | enforced per category | skipped (`chat_mode=True` on the Planner) |
-| Tool arguments | deterministically reconstructed | the model's own arguments pass through (schema-validated only) |
-| Acceptance | validators + fingerprints + critics | auto-accepted after critics |
-| Teacher model | `teacher:` config (gpt-4o-mini) | `CHAT_TEACHER_MODEL` env (default `gpt-4o`) |
-| Tools | mock fixtures (offline) or real MCP | real MCP (`.mcp.json`) + local CCQ/CPC RAG index + shared cache |
-| Planner errors | fail the trajectory | one corrective retry with the validation error as feedback |
+| Input | `ScenarioSpec` from the taxonomy | user message + history + persistent `thread_id` |
+| Clarification delivery | synthetic answer consumed (or the question becomes the training example) | `interrupt()` → real answer resumes the thread |
+| Route guards | scripted route enforced in `validate_plan` | structural + jurisdiction guards only (no scripted route exists) |
+| Jurisdiction | scenario seed, refined by planner | deterministic detection over the conversation; explicit signals **lock** the value |
+| Acceptance | validators + fingerprints + critic thresholds | delivery if an answer exists; issues stay visible in state |
+| Output | intermediate JSONL (`agentic-2.0`) via `export_dataset` | streamed SSE + sources via `return_live_answer`; never auto-exported |
+
+### Tool-result verification (first-class stage)
+
+`execute_tool → verify_tool_result → classify_tool_result` separates
+technical success, legal relevance, document type, and usability as
+evidence. The overtime regression is now structural: a search for
+« heures supplémentaires Code canadien du travail » that returns the
+*Loi sur l'équité salariale* is classified `irrelevant`
+(`expected_document` vs `returned_document`), routed to
+`reformulate_search`, and can never ground a substantive answer — the
+answer contract switches to `no_evidence` mode when nothing usable was
+retrieved.
 
 ### Jurisdiction handling in chat
 
@@ -480,16 +520,23 @@ under the conversation, and collapsible tool-call cards.
 
 | File | Role |
 |---|---|
-| `lexior/agent_graph/state.py` | `LexiorState` TypedDict + converters to/from pipeline schemas |
-| `lexior/agent_graph/nodes.py` | The 9 node functions bound to pipeline dependencies (chat/dataset aware) |
-| `lexior/agent_graph/graph.py` | StateGraph assembly and conditional routing |
-| `lexior/agent_graph/step_verifier.py` | Per-step proposal verification, trajectory validation, acceptance |
-| `lexior/agent_graph/result_classifier.py` | Tool-result quality classification |
-| `lexior/agent_graph/checkpointing.py` | SQLite checkpointers for graph persistence |
-| `lexior/api/app.py` | FastAPI backend: SSE chat (real MCP + RAG + gpt-4o), dataset-run endpoints |
-| `lexior/web/` | React + Vite + Tailwind chat UI (agent log, stepper, tool cards) |
+| `lexior/agent_graph/state.py` | `LexiorState` — the single authoritative state (jurisdiction lock, answer contract, failure reports, repair history) + projections to pipeline schemas |
+| `lexior/agent_graph/nodes/` | One module per node (25 nodes: initialize → … → compute_acceptance → export/deliver/reject) |
+| `lexior/agent_graph/routing.py` | ALL conditional routes (pure functions over state) + route table |
+| `lexior/agent_graph/graph.py` | `build_graph(context)` — the one StateGraph both modes compile from |
+| `lexior/agent_graph/runner.py` | `GraphRunner` — `run_dataset()`, `stream_live()`, `resume_live()` (interrupt/resume) |
+| `lexior/agent_graph/context.py` | `GraphContext` — services injected into nodes (state stays serializable) |
+| `lexior/agent_graph/events.py` | SSE event translation produced from `graph.stream()` chunks |
+| `lexior/agent_graph/checkpointing.py` | Memory / SQLite checkpointers (required for `interrupt()`) |
+| `lexior/agent_graph/step_verifier.py` | Consolidated deterministic validation (used via `services/validation.py`) |
+| `lexior/agent_graph/result_classifier.py` | 8-status tool-result classification (used via `services/result_verification.py`) |
+| `lexior/services/` | The shared service layer: `planner`, `jurisdiction` (canonical province detection + `QC_ONLY_TOOLS`), `tool_execution`, `result_verification` (expected vs returned document), `legal_research` (reformulation feedback), `clarification`, `answer_generation`, `critics`, `validation`, `repair` (failure classification → target node), `dataset_export` |
+| `lexior/api/app.py` | FastAPI backend: SSE chat through `GraphRunner.stream_live` (real MCP + RAG, model selector), dataset-run endpoints |
+| `lexior/web/` | React + Vite + Tailwind chat UI (decision trace, raw SSE view, stepper, tool cards, per-conversation `thread_id`) |
 | `lexior/evaluation/comparison.py` | Stratified old-vs-new pipeline comparison reports |
-| `tests/test_graph.py` | Routing-function and initial-state tests |
+| `agentic_generation/orchestrator.py` | **Deprecated facade** — delegates to `GraphRunner.run_dataset`; contains no loop |
+| `tests/test_central_graph.py` | The migration proofs: shared graph, shared services, interrupt/resume, wrong-statute classification, locked jurisdiction, follow-up contracts, JSONL/ChatML compatibility, graph streaming |
+| `tests/test_graph.py` | Routing-function and initial-state tests (new topology) |
 | `tests/test_step_verifier.py`, `tests/test_result_classifier.py`, `tests/test_acceptance.py`, `tests/test_comparison.py` | Verifier / classifier / acceptance / comparison suites |
 
 ---

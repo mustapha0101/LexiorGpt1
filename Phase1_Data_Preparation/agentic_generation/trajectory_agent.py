@@ -41,8 +41,15 @@ class TrajectoryAgent:
             return TRAJECTORY_ANSWER_SYSTEM + CHAT_WRITER_SUPPLEMENT
         return TRAJECTORY_ANSWER_SYSTEM
 
-    def final_answer(self, state: ResearchState) -> tuple[str, str]:
-        """Retourne (thinking, answer) pour le tour final."""
+    def final_answer(self, state: ResearchState,
+                     contract: dict | None = None) -> tuple[str, str]:
+        """Retourne (thinking, answer) pour le tour final.
+
+        ``contract`` : contrat de réponse optionnel construit par le graphe
+        (nœud ``build_answer_contract``) — objectif du tour, preuves
+        utilisables, type de sortie demandé. Injecté dans le prompt du
+        rédacteur; ignoré en mode offline.
+        """
         official_text = self._official_article_text(state)
         if state.scenario.request_type in PRECISE_ARTICLE_TYPES and official_text:
             art_nums = ", ".join(
@@ -102,6 +109,8 @@ class TrajectoryAgent:
                 )
             ),
         }
+        if contract:
+            prompt["contrat_de_reponse"] = contract
         result = self.client.complete("trajectory_writer", [
             {"role": "system", "content": self._system_prompt()},
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
@@ -138,6 +147,9 @@ class TrajectoryAgent:
             repaired_answer = self._package_explanation(official_text, repaired_answer)
         return repaired_thinking or thinking, repaired_answer
 
+    # Séparateur officiel, tolérant aux sauts de ligne insérés par un
+    # petit modèle : « ---ANSWER--- », « ---\n\nANSWER--- », etc.
+    _ANSWER_SEPARATOR_RE = re.compile(r"-{3,}\s*ANSWER\s*-{3,}", re.I)
     _THINKING_LABEL_RE = re.compile(
         r"^(?:\s*-{3,}\s*)*\s*RAISONNEMENT\s*:?\s*", re.I)
     _ANSWER_LABEL_RE = re.compile(
@@ -161,8 +173,10 @@ class TrajectoryAgent:
         Contrat : ``---ANSWER---``.  Tolère aussi un libellé ``RÉPONSE :``
         en début de ligne, qu'un modèle substitue parfois au séparateur.
         """
-        if "---ANSWER---" in text:
-            thinking, answer = text.split("---ANSWER---", 1)
+        separator = cls._ANSWER_SEPARATOR_RE.search(text)
+        if separator:
+            thinking = text[:separator.start()]
+            answer = text[separator.end():]
             return cls._strip_labels(thinking, answer)
         matches = list(cls._ANSWER_MARKER_RE.finditer(text))
         if matches:

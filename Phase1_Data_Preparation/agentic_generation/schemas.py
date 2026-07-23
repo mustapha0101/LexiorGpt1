@@ -122,7 +122,11 @@ class FailureMode(str, Enum):
 
 
 class SearchResultStatus(str, Enum):
+    exact_match = "exact_match"
     usable = "usable"
+    alternative_only = "alternative_only"
+    wrong_jurisdiction = "wrong_jurisdiction"
+    wrong_court_scope = "wrong_court_scope"
     irrelevant = "irrelevant"
     empty = "empty"
     wrong_document_type = "wrong_document_type"
@@ -130,6 +134,7 @@ class SearchResultStatus(str, Enum):
     malformed = "malformed"
     tool_error = "tool_error"
     stale = "stale"
+    coverage_unavailable = "coverage_unavailable"
 
 
 class ClaimType(str, Enum):

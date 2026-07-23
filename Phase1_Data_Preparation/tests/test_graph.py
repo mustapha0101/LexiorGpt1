@@ -1,26 +1,27 @@
 # -*- coding: utf-8 -*-
-"""Tests for the LangGraph agent graph (Phase 2).
+"""Tests du routage du graphe central (sans appels LLM).
 
-Tests routing logic and graph compilation without requiring LLM calls.
+Ancien contenu : topologie 9 nœuds (plan → execute → ... → export).
+Réécrit pour la topologie centrale (initialize → ... →
+compute_acceptance) — couverture équivalente, routes actuelles.
 """
 
 import pytest
 
 from agentic_generation.schemas import (
     AcceptanceResult,
-    CriticResult,
-    Message,
-    RepairReport,
     Role,
     ScenarioSpec,
-    StateStatus,
 )
-from lexior.agent_graph.graph import (
-    _route_after_critics,
-    _route_after_execute,
-    _route_after_final,
-    _route_after_generate,
-    _route_after_plan,
+from lexior.agent_graph.routing import (
+    route_after_acceptance,
+    route_after_classification,
+    route_after_clarification,
+    route_after_execute,
+    route_after_failures,
+    route_after_generate,
+    route_after_plan,
+    route_after_validate_plan,
 )
 from lexior.agent_graph.state import initial_state
 
@@ -42,148 +43,188 @@ def _state(**overrides):
     return s
 
 
-# ── Route after plan ─────────────────────────────────────────────────────
+# ── Après plan / validate_plan ───────────────────────────────────────────
 
 
-class TestRouteAfterPlan:
+class TestRouteAfterValidatePlan:
     def test_call_tool(self):
-        state = _state(current_decision={"decision": "call_tool"})
-        assert _route_after_plan(state) == "execute_tool"
+        state = _state(latest_decision={"decision": "call_tool"})
+        assert route_after_validate_plan(state) == "execute_tool"
 
     def test_ask_clarification(self):
         state = _state(
-            current_decision={"decision": "ask_clarification"},
+            latest_decision={"decision": "ask_clarification"},
             clarification_count=0,
         )
-        assert _route_after_plan(state) == "handle_clarification"
-
-    def test_clarification_already_done(self):
-        state = _state(
-            current_decision={"decision": "ask_clarification"},
-            clarification_count=1,
-        )
-        assert _route_after_plan(state) == "reject"
+        assert route_after_validate_plan(state) == "handle_clarification"
 
     def test_final_answer(self):
-        state = _state(current_decision={"decision": "final_answer"})
-        assert _route_after_plan(state) == "generate_answer"
+        state = _state(latest_decision={"decision": "final_answer"})
+        assert route_after_validate_plan(state) == "build_answer_contract"
 
     def test_cannot_conclude(self):
-        state = _state(current_decision={"decision": "cannot_conclude"})
-        assert _route_after_plan(state) == "generate_answer"
+        state = _state(latest_decision={"decision": "cannot_conclude"})
+        assert route_after_validate_plan(state) == "build_answer_contract"
 
     def test_rejected_status(self):
         state = _state(
             status="rejected",
-            current_decision={"decision": "call_tool"},
+            latest_decision={"decision": "call_tool"},
         )
-        assert _route_after_plan(state) == "reject"
-
-    def test_step_limit(self):
-        state = _state(
-            step=10, max_tool_calls=4,
-            current_decision={"decision": "call_tool"},
-        )
-        assert _route_after_plan(state) == "reject"
+        assert route_after_validate_plan(state) == "reject"
 
     def test_unknown_decision(self):
-        state = _state(current_decision={"decision": "unknown"})
-        assert _route_after_plan(state) == "reject"
+        state = _state(latest_decision={"decision": "unknown"})
+        assert route_after_validate_plan(state) == "reject"
 
     def test_no_decision(self):
-        state = _state(current_decision=None)
-        assert _route_after_plan(state) == "reject"
+        state = _state(latest_decision=None)
+        assert route_after_validate_plan(state) == "reject"
+
+    def test_planner_exception_routes_to_reject(self):
+        state = _state(status="rejected")
+        assert route_after_plan(state) == "reject"
+
+    def test_plan_goes_to_validate(self):
+        state = _state()
+        assert route_after_plan(state) == "validate_plan"
 
 
-# ── Route after execute ──────────────────────────────────────────────────
+# ── Après clarification ──────────────────────────────────────────────────
+
+
+class TestRouteAfterClarification:
+    def test_synthetic_answer_reenters_cycle(self):
+        state = _state(clarification_answer="Oui, au Québec.")
+        assert route_after_clarification(state) == "resolve_jurisdiction"
+
+    def test_question_only_trajectory_goes_to_answer(self):
+        state = _state(stop_reason="clarification_required")
+        assert route_after_clarification(state) == "build_answer_contract"
+
+
+# ── Route outil ──────────────────────────────────────────────────────────
 
 
 class TestRouteAfterExecute:
     def test_normal(self):
         state = _state(status="planning")
-        assert _route_after_execute(state) == "plan"
+        assert route_after_execute(state) == "verify_tool_result"
 
     def test_rejected(self):
         state = _state(status="rejected")
-        assert _route_after_execute(state) == "reject"
+        assert route_after_execute(state) == "reject"
 
 
-# ── Route after generate ─────────────────────────────────────────────────
+class TestRouteAfterClassification:
+    def test_usable_records_evidence(self):
+        state = _state(last_tool_result_status="usable")
+        assert route_after_classification(state) == "update_research_state"
+
+    def test_irrelevant_reformulates(self):
+        state = _state(last_tool_result_status="irrelevant",
+                       reformulation_count=0, max_reformulations=1)
+        assert route_after_classification(state) == "reformulate_search"
+
+    def test_empty_reformulates(self):
+        state = _state(last_tool_result_status="empty",
+                       reformulation_count=0, max_reformulations=1)
+        assert route_after_classification(state) == "reformulate_search"
+
+    def test_reformulation_budget_exhausted(self):
+        state = _state(last_tool_result_status="empty",
+                       reformulation_count=1, max_reformulations=1)
+        assert route_after_classification(state) == "update_research_state"
+
+    def test_wrong_document_type_repairs_trajectory(self):
+        state = _state(last_tool_result_status="wrong_document_type",
+                       repair_count=0, max_repairs=1)
+        assert route_after_classification(state) == "repair_trajectory"
+
+    def test_tool_error_falls_through_to_planner(self):
+        state = _state(last_tool_result_status="tool_error")
+        assert route_after_classification(state) == "update_research_state"
+
+
+# ── Route réponse ────────────────────────────────────────────────────────
 
 
 class TestRouteAfterGenerate:
     def test_normal(self):
         state = _state(status="answering")
-        assert _route_after_generate(state) == "run_critics"
+        assert route_after_generate(state) == "run_critics"
 
     def test_rejected(self):
         state = _state(status="rejected")
-        assert _route_after_generate(state) == "reject"
+        assert route_after_generate(state) == "reject"
 
 
-# ── Route after critics ──────────────────────────────────────────────────
+class TestRouteAfterFailures:
+    def test_no_failure_validates(self):
+        state = _state(repair_from_node="validate_final")
+        assert route_after_failures(state) == "validate_final"
+
+    def test_writing_failure_repairs_answer(self):
+        state = _state(repair_from_node="repair_answer")
+        assert route_after_failures(state) == "repair_answer"
+
+    def test_retrieval_failure_repairs_trajectory(self):
+        state = _state(repair_from_node="repair_trajectory")
+        assert route_after_failures(state) == "repair_trajectory"
+
+    def test_jurisdiction_failure_resolves_jurisdiction(self):
+        state = _state(repair_from_node="resolve_jurisdiction")
+        assert route_after_failures(state) == "resolve_jurisdiction"
+
+    def test_clarification_failure_asks(self):
+        state = _state(repair_from_node="handle_clarification")
+        assert route_after_failures(state) == "handle_clarification"
 
 
-class TestRouteAfterCritics:
-    def test_no_critics(self):
-        state = _state()
-        assert _route_after_critics(state) == "validate_final"
+# ── Route finale ─────────────────────────────────────────────────────────
 
-    def test_both_pass(self):
+
+class TestRouteAfterAcceptance:
+    def test_accepted_dataset_exports(self):
+        state = _state(acceptance_result=AcceptanceResult(accepted=True))
+        assert route_after_acceptance(state) == "export_dataset"
+
+    def test_accepted_live_returns_answer(self):
+        state = _state(mode="live",
+                       acceptance_result=AcceptanceResult(accepted=True))
+        assert route_after_acceptance(state) == "return_live_answer"
+
+    def test_final_rejection(self):
         state = _state(
-            legal_critic_result=CriticResult(
-                critic="legal", accepted=True, score=0.9),
-            agentic_critic_result=CriticResult(
-                critic="agentic", accepted=True, score=0.9),
+            acceptance_result=AcceptanceResult(accepted=False),
+            first_invalid_step=None,
         )
-        assert _route_after_critics(state) == "validate_final"
+        assert route_after_acceptance(state) == "reject"
 
-    def test_legal_fails_triggers_repair(self):
+    def test_repairable_rejection_repairs_trajectory(self):
         state = _state(
-            legal_critic_result=CriticResult(
-                critic="legal", accepted=False, score=0.5),
-            agentic_critic_result=CriticResult(
-                critic="agentic", accepted=True, score=0.9),
+            acceptance_result=AcceptanceResult(accepted=False),
+            first_invalid_step=1,
             repair_count=0,
+            max_repairs=1,
         )
-        assert _route_after_critics(state) == "repair"
+        assert route_after_acceptance(state) == "repair_trajectory"
 
-    def test_repair_exhausted(self):
+    def test_repair_budget_exhausted_rejects(self):
         state = _state(
-            legal_critic_result=CriticResult(
-                critic="legal", accepted=False, score=0.5),
+            acceptance_result=AcceptanceResult(accepted=False),
+            first_invalid_step=1,
             repair_count=1,
+            max_repairs=1,
         )
-        assert _route_after_critics(state) == "validate_final"
+        assert route_after_acceptance(state) == "reject"
 
-    def test_precise_article_type_skips_critics(self):
-        scenario = _scenario(request_type="exact_text_retrieval")
-        s = initial_state(scenario, system_prompt="test")
-        s["legal_critic_result"] = CriticResult(
-            critic="legal", accepted=False, score=0.3)
-        assert _route_after_critics(s) == "validate_final"
-
-
-# ── Route after final validation ─────────────────────────────────────────
-
-
-class TestRouteAfterFinal:
-    def test_accepted(self):
-        state = _state(
-            acceptance=AcceptanceResult(accepted=True))
-        assert _route_after_final(state) == "export"
-
-    def test_rejected(self):
-        state = _state(
-            acceptance=AcceptanceResult(accepted=False))
-        assert _route_after_final(state) == "reject"
-
-    def test_no_acceptance(self):
+    def test_no_acceptance_rejects(self):
         state = _state()
-        assert _route_after_final(state) == "reject"
+        assert route_after_acceptance(state) == "reject"
 
 
-# ── Initial state ────────────────────────────────────────────────────────
+# ── État initial ─────────────────────────────────────────────────────────
 
 
 class TestInitialState:
@@ -196,15 +237,17 @@ class TestInitialState:
         state = initial_state(_scenario(), system_prompt="sys")
         assert state["mode"] == "dataset"
 
-    def test_chat_mode(self):
+    def test_live_mode(self):
         state = initial_state(
-            _scenario(), mode="chat", system_prompt="sys")
-        assert state["mode"] == "chat"
+            _scenario(), mode="live", system_prompt="sys")
+        assert state["mode"] == "live"
 
     def test_defaults(self):
         state = initial_state(_scenario(), system_prompt="sys")
         assert state["step"] == 0
         assert state["status"] == "planning"
         assert state["repair_count"] == 0
-        assert state["current_decision"] is None
+        assert state["latest_decision"] is None
         assert state["final_answer"] == ""
+        assert state["jurisdiction_locked"] is False
+        assert state["answer_contract"] is None

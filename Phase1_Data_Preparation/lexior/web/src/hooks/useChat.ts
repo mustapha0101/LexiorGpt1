@@ -13,6 +13,12 @@ function uid(): string {
   return `msg_${Date.now()}_${nextId++}`;
 }
 
+function newThreadId(): string {
+  return `live-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
 export interface UseChatReturn {
   messages: ChatMessage[];
   streaming: boolean;
@@ -53,6 +59,9 @@ export function useChat(): UseChatReturn {
   messagesRef.current = messages;
   const modelRef = useRef(model);
   modelRef.current = model;
+  /* Thread LangGraph de la conversation : permet au backend de
+     reprendre une clarification en attente (interrupt/resume). */
+  const threadIdRef = useRef<string>(newThreadId());
 
   const setModel = useCallback((next: ChatModelId) => {
     setModelState(next);
@@ -121,7 +130,8 @@ export function useChat(): UseChatReturn {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             query,
-            mode: "chat",
+            mode: "live",
+            thread_id: threadIdRef.current,
             history,
             model: modelRef.current,
           }),
@@ -332,6 +342,7 @@ export function useChat(): UseChatReturn {
     setCurrentNode(null);
     setVisitedNodes([]);
     setRawEvents([]);
+    threadIdRef.current = newThreadId();
   }, []);
 
   return {

@@ -13,15 +13,11 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .agentic_critic import AgenticCritic
 from .config import load_config
 from .fixtures import MOCK_MCP_FIXTURES
-from .legal_critic import LegalCritic
 from .legal_rag import (LegalRAG, OpenAIEmbedder, RAGError, build_index,
                         index_exists)
 from .mcp_executor import MCPExecutor, MockMCPTransport, RealMCPTransport
-from .orchestrator import AgenticOrchestrator
-from .planner_agent import PlannerAgent
 from .anchor_bank import AnchorBank, build_anchor_bank
 from .scenario_generator import ScenarioGenerator
 from .schemas import GenerationManifest
@@ -29,7 +25,6 @@ from .storage import JsonCache, RunStorage
 from .teacher_client import TeacherClient
 from .taxonomy import target_request_type_counts
 from .tool_catalog import load_catalog
-from .trajectory_agent import TrajectoryAgent
 
 
 def _usage_snapshot(*clients) -> dict[str, float | int]:
@@ -307,11 +302,14 @@ def generate(args) -> int:
         failure_injection_rate=cfg.failure_injection_rate,
         anchor_bank=anchor_bank,
     )
-    orchestrator = AgenticOrchestrator(
-        cfg, catalog, PlannerAgent(catalog, teacher, cfg.offline), executor,
-        TrajectoryAgent(teacher, cfg.offline), LegalCritic(critic_client, cfg.offline),
-        AgenticCritic(critic_client, cfg.offline),
-        progress=lambda message: print(f"  [agent] {message}", flush=True))
+    # Génération via le graphe LangGraph central — l'unique moteur.
+    from lexior.agent_graph import GraphRunner, build_context
+    from lexior.services import build_services
+
+    services = build_services(
+        cfg, catalog, executor=executor,
+        teacher=teacher, critic_client=critic_client)
+    graph_runner = GraphRunner(build_context(cfg, catalog, services))
     done = storage.completed_scenario_ids() if cfg.resume else set()
     previous_rejected, previous_reasons = storage.rejection_summary() if cfg.resume else (0, {})
     counts = Counter(accepted=storage.accepted_count() if cfg.resume else 0,
@@ -349,7 +347,10 @@ def generate(args) -> int:
             f"({scenario.request_type}); planification, outils et critiques...",
             flush=True,
         )
-        result = orchestrator.run(scenario)
+        result = graph_runner.run_dataset(
+            scenario,
+            progress=lambda message: print(f"  [agent] {message}",
+                                           flush=True))
         storage.append_raw({"scenario": scenario.model_dump(mode="json"),
                             "accepted": result.accepted,
                             "trajectory": result.trajectory.model_dump(mode="json") if result.trajectory else None})

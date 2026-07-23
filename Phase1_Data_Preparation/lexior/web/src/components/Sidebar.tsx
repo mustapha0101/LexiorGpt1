@@ -93,14 +93,30 @@ function DashboardIcon() {
 }
 
 const NODE_COLORS: Record<string, string> = {
+  initialize: "bg-slate-400",
+  classify_request: "bg-sky-400",
+  classify_follow_up: "bg-sky-400",
+  update_active_task: "bg-sky-400",
+  resolve_jurisdiction: "bg-indigo-400",
+  analyze_facts: "bg-sky-400",
   plan: "bg-blue-400",
+  validate_plan: "bg-blue-500",
   execute_tool: "bg-amber-400",
+  verify_tool_result: "bg-amber-500",
+  classify_tool_result: "bg-yellow-400",
+  update_research_state: "bg-lime-400",
+  reformulate_search: "bg-orange-300",
+  build_answer_contract: "bg-emerald-300",
   handle_clarification: "bg-purple-400",
   generate_answer: "bg-emerald-400",
   run_critics: "bg-cyan-400",
-  repair: "bg-orange-400",
+  classify_failures: "bg-rose-300",
+  repair_answer: "bg-orange-400",
+  repair_trajectory: "bg-orange-500",
   validate_final: "bg-teal-400",
-  export: "bg-green-500",
+  compute_acceptance: "bg-teal-500",
+  export_dataset: "bg-green-500",
+  return_live_answer: "bg-green-500",
   reject: "bg-red-400",
 };
 

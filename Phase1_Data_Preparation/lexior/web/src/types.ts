@@ -47,6 +47,10 @@ export interface DecisionEvent {
 export interface DoneEvent {
   type: "done";
   accepted: boolean;
+  /** Le graphe est suspendu sur une clarification (interrupt LangGraph) */
+  pending_clarification?: boolean;
+  /** Thread LangGraph de la conversation */
+  thread_id?: string;
 }
 
 export interface ErrorEvent {

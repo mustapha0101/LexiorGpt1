@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Checkpoint configuration for the Lexior agent graph.
+"""Checkpointing du graphe central.
 
-SQLite for local development; PostgreSQL for production (Phase 2+).
+Un checkpointer est REQUIS pour ``interrupt()`` (clarifications live).
+Mémoire par défaut (threads de conversation en cours de processus);
+SQLite pour la persistance locale; PostgreSQL en production.
 """
 
 from __future__ import annotations
 
-from typing import Optional
+
+def create_memory_checkpointer():
+    """Checkpointer en mémoire — défaut de l'API live."""
+    from langgraph.checkpoint.memory import MemorySaver
+    return MemorySaver()
 
 
 def create_sqlite_checkpointer(db_path: str = ":memory:"):

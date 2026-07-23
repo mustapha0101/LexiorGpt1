@@ -164,6 +164,16 @@ def test_split_official_separator_still_works():
     assert answer == "la réponse"
 
 
+def test_split_separator_with_inner_newlines():
+    """Un petit modèle insère parfois des sauts de ligne dans le
+    séparateur : « ---\\n\\nANSWER--- » doit séparer quand même."""
+    thinking, answer = TrajectoryAgent._split_thinking_answer(
+        "RAISONNEMENT : analyse détaillée.\n\n---\n\nANSWER---\n\n"
+        "La réponse finale.")
+    assert thinking == "analyse détaillée."
+    assert answer == "La réponse finale."
+
+
 def test_split_reponse_label_still_works():
     thinking, answer = TrajectoryAgent._split_thinking_answer(
         "RAISONNEMENT : analyse.\n\n---\n\nRÉPONSE : la réponse finale.")

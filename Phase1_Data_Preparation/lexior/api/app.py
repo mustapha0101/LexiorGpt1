@@ -2,10 +2,16 @@
 """FastAPI backend for the Lexior multi-agent legal assistant.
 
 Endpoints:
-    POST /api/chat           — SSE-streamed chat with the agent graph
+    POST /api/chat           — SSE-streamed chat with the CENTRAL agent graph
     POST /api/dataset/generate — launch a dataset generation run
     GET  /api/dataset/runs   — list completed runs
     GET  /api/dataset/runs/{run_id}/rejections — rejection details for a run
+
+Le backend ne contient AUCUNE logique d'orchestration : chaque tour de
+chat est un run du graphe central (``lexior.agent_graph.GraphRunner``),
+qui produit lui-même les événements streamés. Les clarifications live
+utilisent ``interrupt()`` : le thread LangGraph reste suspendu et le
+message suivant du même ``thread_id`` reprend l'exécution.
 """
 
 from __future__ import annotations
@@ -30,17 +36,12 @@ from pydantic import BaseModel
 import dataclasses
 
 from agentic_generation.config import load_config
-from agentic_generation.schemas import (
-    Message,
-    Role,
-    ScenarioSpec,
-)
+from agentic_generation.storage import JsonCache
 from agentic_generation.teacher_client import TeacherClient
-from agentic_generation.tool_catalog import load_catalog
-from lexior.agent_graph import (
-    build_graph,
-    initial_state,
-)
+from agentic_generation.tool_catalog import ToolCatalog, load_catalog
+from lexior.agent_graph import GraphRunner, build_context
+from lexior.agent_graph.checkpointing import create_memory_checkpointer
+from lexior.services import build_real_executor, build_services
 
 # ── Resolve paths and build shared objects once at import time ───────────
 _PHASE1 = Path(__file__).resolve().parents[2]
@@ -56,8 +57,6 @@ _CATALOG = load_catalog(_CATALOG_PATH)
 # Catalogue du chat : sans search_quebec_jurisprudence (serveur instable,
 # renvoie des lois au lieu de décisions). La jurisprudence passe par
 # search_legal_documents (a2aj).
-from agentic_generation.tool_catalog import ToolCatalog  # noqa: E402
-
 _CHAT_CATALOG = ToolCatalog(
     {
         **_CATALOG.raw,
@@ -84,26 +83,14 @@ _LOCAL_BASE_URL = os.environ.get(
     "LOCAL_MODEL_BASE_URL", "http://localhost:11434/v1")
 _LOCAL_MODEL_NAME = os.environ.get("LOCAL_MODEL_NAME", "qwen2.5:7b-16k")
 
-_CHAT_CLIENTS: dict[str, TeacherClient] = {}
-
-
-def _chat_client(model_id: Optional[str]) -> TeacherClient:
-    key = (model_id
-           if model_id in ("gpt-4o", "gpt-4o-mini", "qwen-local")
-           else _DEFAULT_CHAT_MODEL)
-    if key not in _CHAT_CLIENTS:
-        if key == "qwen-local":
-            endpoint = dataclasses.replace(
-                _CFG.teacher,
-                base_url=_LOCAL_BASE_URL,
-                api_key="not-needed",
-                model=_LOCAL_MODEL_NAME,
-                timeout=600.0,
-            )
-        else:
-            endpoint = dataclasses.replace(_CFG.teacher, model=key)
-        _CHAT_CLIENTS[key] = TeacherClient(endpoint, allow_remote_calls=True)
-    return _CHAT_CLIENTS[key]
+_SYSTEM_PROMPT = (
+    "Tu es Lexior, un assistant juridique canadien couvrant le "
+    "droit québécois (CCQ, CPC, règlements) et le droit fédéral "
+    "(lois fédérales, Code criminel). Réponds en français en "
+    "citant les dispositions pertinentes. Quand la réponse "
+    "dépend de la province et qu'elle est inconnue, demande où "
+    "vit l'utilisateur avant de conclure."
+)
 
 # RAG local pour semantic_search_ccq/cpc (None tant que l'index n'est
 # pas construit : ces deux outils renvoient alors une erreur d'outil,
@@ -123,7 +110,54 @@ if _CFG.rag.enabled:
     except Exception as exc:
         print(f"[api] RAG indisponible: {type(exc).__name__}", flush=True)
 
-app = FastAPI(title="Lexior API", version="0.1.0")
+# ── Un runner par modèle de chat — MÊME graphe, MÊMES services ───────────
+# Le checkpointer est PARTAGÉ : un thread de conversation garde ses
+# clarifications en attente même si l'utilisateur change de modèle.
+_CHECKPOINTER = create_memory_checkpointer()
+_RUNNERS: dict[str, GraphRunner] = {}
+_RUNNERS_LOCK = threading.Lock()
+
+
+def _chat_client(model_id: str) -> TeacherClient:
+    if model_id == "qwen-local":
+        endpoint = dataclasses.replace(
+            _CFG.teacher,
+            base_url=_LOCAL_BASE_URL,
+            api_key="not-needed",
+            model=_LOCAL_MODEL_NAME,
+            timeout=600.0,
+        )
+    else:
+        endpoint = dataclasses.replace(_CFG.teacher, model=model_id)
+    return TeacherClient(endpoint, allow_remote_calls=True)
+
+
+def _runner_for(model_id: Optional[str]) -> GraphRunner:
+    key = (model_id
+           if model_id in ("gpt-4o", "gpt-4o-mini", "qwen-local")
+           else _DEFAULT_CHAT_MODEL)
+    with _RUNNERS_LOCK:
+        if key not in _RUNNERS:
+            executor = build_real_executor(
+                _CHAT_CATALOG, _CFG.mcp_config_path,
+                cache=JsonCache(Path(_CFG.data_root) / "cache" / "mcp-real"),
+                max_response_chars=_CFG.max_tool_response_chars,
+                rag=_RAG,
+            )
+            services = build_services(
+                _CFG, _CHAT_CATALOG,
+                executor=executor,
+                teacher=_chat_client(key),
+                critic_client=_CRITIC,
+            )
+            _RUNNERS[key] = GraphRunner(
+                build_context(_CFG, _CHAT_CATALOG, services),
+                checkpointer=_CHECKPOINTER,
+            )
+        return _RUNNERS[key]
+
+
+app = FastAPI(title="Lexior API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -133,18 +167,6 @@ app.add_middleware(
 )
 
 _DATA_ROOT = Path("data/runs")
-
-_NODE_LABELS = {
-    "plan": "Planning next step",
-    "execute_tool": "Executing tool",
-    "handle_clarification": "Handling clarification",
-    "generate_answer": "Generating answer",
-    "run_critics": "Evaluating quality",
-    "repair": "Repairing answer",
-    "validate_final": "Validating trajectory",
-    "export": "Exporting result",
-    "reject": "Processing rejection",
-}
 
 
 class ChatTurn(BaseModel):
@@ -156,8 +178,8 @@ class ChatRequest(BaseModel):
     query: Optional[str] = None
     message: Optional[str] = None
     thread_id: Optional[str] = None
-    mode: Optional[str] = "chat"
-    jurisdiction: str = "quebec"
+    mode: Optional[str] = "live"
+    jurisdiction: str = ""
     history: list[ChatTurn] = []
     model: Optional[str] = None  # "gpt-4o" | "gpt-4o-mini" | "qwen-local"
 
@@ -171,11 +193,11 @@ class DatasetGenerateRequest(BaseModel):
     count: int = 10
 
 
-# ── SSE helper ───────────────────────────────────────────────────────────
+# ── SSE helpers ──────────────────────────────────────────────────────────
 
 
-def _sse(event_type: str, **fields) -> str:
-    return json.dumps({"type": event_type, **fields}, ensure_ascii=False)
+def _sse(event: dict[str, Any]) -> str:
+    return json.dumps(event, ensure_ascii=False)
 
 
 # ── Chat endpoint ────────────────────────────────────────────────────────
@@ -185,183 +207,54 @@ def _sse(event_type: str, **fields) -> str:
 async def chat(request: ChatRequest):
     from sse_starlette.sse import EventSourceResponse
 
+    runner = _runner_for(request.model)
+    thread_id = request.thread_id or f"live-{uuid.uuid4().hex[:8]}"
+    history = [
+        {"role": turn.role, "content": turn.content}
+        for turn in request.history
+    ]
+    # Un 7B local peut mettre plusieurs minutes par décision.
+    queue_timeout = 900 if request.model == "qwen-local" else 120
+
     async def _stream():
-        scenario = ScenarioSpec(
-            scenario_id=f"chat-{uuid.uuid4().hex[:8]}",
-            scenario_family_id="chat",
-            request_type="case_analysis",
-            language="fr",
-            user_query=request.text,
-            jurisdiction=request.jurisdiction,
-        )
+        yield _sse({"type": "thinking",
+                    "content": "Analyse de la question..."})
 
-        state = initial_state(
-            scenario, mode="chat", max_tool_calls=4,
-            system_prompt=(
-                "Tu es Lexior, un assistant juridique canadien couvrant le "
-                "droit québécois (CCQ, CPC, règlements) et le droit fédéral "
-                "(lois fédérales, Code criminel). Réponds en français en "
-                "citant les dispositions pertinentes. Quand la réponse "
-                "dépend de la province et qu'elle est inconnue, demande où "
-                "vit l'utilisateur avant de conclure."
-            ),
-        )
+        events: queue.Queue = queue.Queue()
 
-        # Contexte multi-tours : insérer l'historique avant le dernier
-        # message utilisateur.
-        hist_messages = []
-        for turn in request.history:
-            content = (turn.content or "").strip()
-            if not content:
-                continue
-            role = Role.user if turn.role == "user" else Role.assistant
-            hist_messages.append(Message(role=role, content=content))
-        if hist_messages:
-            msgs = state["messages"]
-            state["messages"] = msgs[:-1] + hist_messages + msgs[-1:]
+        def _run_graph():
+            try:
+                for event in runner.stream_live(
+                        request.text,
+                        thread_id=thread_id,
+                        history=history,
+                        system_prompt=_SYSTEM_PROMPT):
+                    events.put(("event", event))
+                events.put(("end", None))
+            except Exception as exc:  # noqa: BLE001 — remonté au client
+                events.put(("error", exc))
 
-        yield _sse("thinking", content="Analyse de la question...")
-        yield _sse("status", node="plan", label="Planning next step")
+        thread = threading.Thread(target=_run_graph, daemon=True)
+        thread.start()
 
-        try:
-            from agentic_generation.planner_agent import PlannerAgent
-            from agentic_generation.mcp_executor import MCPExecutor, RealMCPTransport
-            from agentic_generation.trajectory_agent import TrajectoryAgent
-            from agentic_generation.legal_critic import LegalCritic
-            from agentic_generation.agentic_critic import AgenticCritic
-            from agentic_generation.storage import JsonCache
+        while True:
+            try:
+                kind, data = await asyncio.to_thread(
+                    events.get, timeout=queue_timeout)
+            except Exception:
+                yield _sse({"type": "error",
+                            "message": "Timeout waiting for graph"})
+                break
 
-            chat_client = _chat_client(request.model)
-            planner = PlannerAgent(_CHAT_CATALOG, client=chat_client,
-                                   chat_mode=True)
-            transport = RealMCPTransport(_CFG.mcp_config_path)
-            executor = MCPExecutor(
-                _CHAT_CATALOG, transport=transport, allow_remote_calls=True,
-                cache=JsonCache(Path(_CFG.data_root) / "cache" / "mcp-real"),
-                max_response_chars=_CFG.max_tool_response_chars,
-                rag=_RAG,
-            )
-            trajectory_agent = TrajectoryAgent(client=chat_client,
-                                               chat_mode=True)
-            legal_critic = LegalCritic(client=_CRITIC)
-            agentic_critic = AgenticCritic(client=_CRITIC)
+            if kind == "error":
+                yield _sse({"type": "error", "message": str(data)})
+                break
+            if kind == "end":
+                break
 
-            graph = build_graph(
-                _CFG, _CHAT_CATALOG, planner, executor,
-                trajectory_agent, legal_critic, agentic_critic,
-            )
-
-            q: queue.Queue = queue.Queue()
-
-            def _run_graph():
-                try:
-                    for chunk in graph.stream(state):
-                        q.put(("chunk", chunk))
-                    q.put(("end", None))
-                except Exception as exc:
-                    q.put(("error", exc))
-
-            thread = threading.Thread(target=_run_graph, daemon=True)
-            thread.start()
-
-            prev_tool_count = 0
-            final_answer = ""
-            final_thinking = ""
-            rejection_reason = ""
-            clarification_question = ""
-            # Un 7B local peut mettre plusieurs minutes par décision.
-            queue_timeout = 900 if request.model == "qwen-local" else 120
-
-            while True:
-                try:
-                    kind, data = await asyncio.to_thread(
-                        q.get, timeout=queue_timeout)
-                except Exception:
-                    yield _sse("error", message="Timeout waiting for graph")
-                    break
-
-                if kind == "error":
-                    yield _sse("error", message=str(data))
-                    break
-
-                if kind == "end":
-                    break
-
-                if not isinstance(data, dict):
-                    continue
-
-                for node_name, node_state in data.items():
-                    if not isinstance(node_state, dict):
-                        continue
-
-                    label = _NODE_LABELS.get(node_name, node_name)
-                    yield _sse("status", node=node_name, label=label)
-
-                    if node_name == "plan":
-                        raw_decision = node_state.get("current_decision")
-                        if isinstance(raw_decision, dict):
-                            yield _sse(
-                                "decision",
-                                step=node_state.get("step", 0),
-                                decision=raw_decision.get("decision", ""),
-                                tool=raw_decision.get("next_tool"),
-                                args=raw_decision.get("arguments", {}),
-                                jurisdiction=raw_decision.get(
-                                    "jurisdiction", ""),
-                                thinking=(raw_decision.get("thinking_text")
-                                          or "")[:280],
-                            )
-
-                    tool_history = node_state.get("tool_history", [])
-                    if len(tool_history) > prev_tool_count:
-                        for obs in tool_history[prev_tool_count:]:
-                            yield _sse(
-                                "tool_call",
-                                tool=obs.tool_name,
-                                args=obs.arguments,
-                            )
-                            yield _sse(
-                                "tool_result",
-                                tool=obs.tool_name,
-                                result=obs.normalized_response[:500],
-                                ok=obs.ok,
-                            )
-                        prev_tool_count = len(tool_history)
-
-                    if node_state.get("final_answer"):
-                        final_answer = node_state["final_answer"]
-
-                    if node_state.get("final_thinking"):
-                        final_thinking = node_state["final_thinking"]
-
-                    if node_state.get("status") == "clarification":
-                        clarification_question = node_state.get(
-                            "final_answer", "")
-
-                    if (node_state.get("status") == "rejected"
-                            and node_state.get("stop_reason")):
-                        rejection_reason = node_state["stop_reason"]
-
-            if clarification_question:
-                yield _sse("clarification", question=clarification_question)
-                yield _sse("done", accepted=True)
-            elif final_answer:
-                if final_thinking:
-                    yield _sse("thinking", content=f"\n\n{final_thinking}")
-                for i in range(0, len(final_answer), 20):
-                    yield _sse("token", content=final_answer[i:i + 20])
-                    await asyncio.sleep(0.01)
-                yield _sse("done", accepted=True)
-            elif rejection_reason:
-                yield _sse("token",
-                           content=f"Request could not be completed: "
-                                   f"{rejection_reason}")
-                yield _sse("done", accepted=False)
-            else:
-                yield _sse("done", accepted=True)
-
-        except Exception as exc:
-            yield _sse("error", message=str(exc))
+            yield _sse(data)
+            if data.get("type") == "token":
+                await asyncio.sleep(0.01)
 
     return EventSourceResponse(_stream())
 
