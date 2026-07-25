@@ -9,6 +9,27 @@ par ccq_cleaner.py, et génère des paires d'entraînement CoT (IRAC) en frança
 québécois, permettant au modèle d'apprendre la substance de ces codes.
 """
 
+# --- Clés d'API : chargées depuis LexiorGpt1/.env ------------------------
+# Source unique : Phase1_Data_Preparation/src/lexior/env.py. L'environnement
+# réel reste prioritaire; l'absence de .env n'est pas une erreur.
+import sys as _sys
+from pathlib import Path as _Path
+
+for _parent in _Path(__file__).resolve().parents:
+    _lexior_src = _parent / "Phase1_Data_Preparation" / "src"
+    if _lexior_src.is_dir():
+        if str(_lexior_src) not in _sys.path:
+            _sys.path.insert(0, str(_lexior_src))
+        break
+try:
+    from lexior.env import load_project_env as _load_project_env
+
+    _load_project_env()
+except Exception:  # amorçage best-effort : ne bloque jamais un script
+    pass
+# ------------------------------------------------------------------------
+
+
 import os
 import sys
 import json

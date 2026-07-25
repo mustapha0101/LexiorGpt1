@@ -172,7 +172,9 @@ def test_minmax_score_is_never_shown_as_relevance(tmp_path):
     Le score exposé doit rester le score absolu, sinon la trajectoire
     apprend qu'un résultat hors sujet est parfaitement pertinent.
     """
-    rag = _off_topic_rag(tmp_path)
+    # Planchers explicitement désactivés : ce test isole l'effet du
+    # min-max, indépendamment du calibrage de production.
+    rag = _off_topic_rag(tmp_path, min_dense_score=0.0, min_hybrid_score=0.0)
 
     payload = rag.call("semantic_search_ccq", {
         "query": "Mon locateur refuse que j'apporte mon chat.", "top_k": 5})

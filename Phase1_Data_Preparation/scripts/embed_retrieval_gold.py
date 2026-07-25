@@ -35,6 +35,8 @@ for candidate in (str(PHASE1 / "src"), str(PHASE1)):
     if candidate not in sys.path:
         sys.path.insert(0, candidate)
 
+# Importer lexior charge le .env du dépôt (voir lexior/env.py) : rien à
+# faire ici.
 from lexior.agentic.config import load_config  # noqa: E402
 from lexior.agentic.legal_rag import OpenAIEmbedder, RAGError  # noqa: E402
 

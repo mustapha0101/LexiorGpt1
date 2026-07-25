@@ -74,8 +74,13 @@ rag:
   llm_rerank_enabled: true
   llm_rerank_k: 10
   # Planchers de pertinence sur l'echelle absolue (0.0 = desactive).
-  # Calibres sur tests/fixtures/retrieval_gold.jsonl.
-  min_dense_score: 0.0
+  # Calibres le 2026-07-25 sur tests/fixtures/retrieval_gold.jsonl.
+  # min_dense_score 0.40 : ameliore le classement (MRR 0.340 -> 0.397,
+  # recall@8 0.487 -> 0.525) en ecartant les candidats sans rapport.
+  # min_hybrid_score reste desactive : toute valeur positive detruit le
+  # rappel (0.55 -> 7 questions repondables vidées) sans faire baisser les
+  # faux positifs en dessous de 0.50. Voir retrieval_gold_baseline.json.
+  min_dense_score: 0.40
   min_hybrid_score: 0.0
 
 critics:

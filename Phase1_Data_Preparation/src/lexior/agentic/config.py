@@ -126,7 +126,9 @@ class RAGConfig:
     # Planchers de pertinence sur l'échelle ABSOLUE (la normalisation min-max
     # ramène toujours le meilleur candidat à 1.0, même quand il est hors
     # sujet). Un corpus sans réponse doit produire une liste vide.
-    min_dense_score: float = 0.0
+    # Calibrés le 2026-07-25 sur tests/fixtures/retrieval_gold.jsonl — voir
+    # le commentaire des YAML pour le compromis mesuré.
+    min_dense_score: float = 0.40
     min_hybrid_score: float = 0.0
 
     def redacted(self) -> dict[str, Any]:

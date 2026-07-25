@@ -99,10 +99,19 @@ def _build_rag(**overrides) -> LegalRAG:
         for position, identifier in enumerate(cached["ids"])
         if str(identifier) in by_id
     }
+    # Les planchers viennent du YAML de production : mesurer avec les
+    # défauts de la dataclasse reviendrait à mesurer autre chose que ce
+    # qui tourne.
+    from lexior.agentic.config import load_config
+
+    production = load_config(
+        str(PHASE1 / "configs" / "agentic_generation.yaml")).rag
     settings = {
         "index_dir": str(INDEX_DIR),
         "llm_rerank_enabled": False,
         "top_k": max(K_VALUES),
+        "min_dense_score": production.min_dense_score,
+        "min_hybrid_score": production.min_hybrid_score,
     }
     settings.update(overrides)
     cfg = RAGConfig(**settings)
@@ -236,9 +245,14 @@ def test_retrieval_metrics_do_not_regress():
         f"{report['false_positive_rate']} > {ceiling} "
         f"({report['false_positive_ids']})")
 
-    assert not report["empty_on_answerable_ids"], (
-        "des questions répondables ne retournent plus rien : "
-        f"{report['empty_on_answerable_ids']}")
+    # Un plancher de pertinence vide forcément quelques questions dont
+    # aucun candidat ne dépasse le seuil. C'est assumé — mais budgété : la
+    # liste exacte est enregistrée, toute nouvelle perte échoue.
+    known_empty = set(baseline.get("empty_on_answerable_ids", []))
+    new_empty = sorted(set(report["empty_on_answerable_ids"]) - known_empty)
+    assert not new_empty, (
+        f"de nouvelles questions répondables ne retournent plus rien : "
+        f"{new_empty}")
 
 
 if __name__ == "__main__":  # pragma: no cover - outil de calibrage
