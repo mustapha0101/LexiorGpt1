@@ -42,9 +42,13 @@ from lexior.agentic.tool_catalog import ToolCatalog, load_catalog
 from lexior.agent_graph import GraphRunner, build_context
 from lexior.agent_graph.checkpointing import create_memory_checkpointer
 from lexior.services import build_real_executor, build_services
+from lexior.services.tool_coverage import get_coverage
 
 # ── Resolve paths and build shared objects once at import time ───────────
-_PHASE1 = Path(__file__).resolve().parents[2]
+# src/lexior/api/app.py -> api -> lexior -> src -> Phase1_Data_Preparation.
+# parents[2] désignait `src` depuis la migration vers src/ : le catalogue
+# était introuvable et load_config retombait en silence sur ses défauts.
+_PHASE1 = Path(__file__).resolve().parents[3]
 _REPO = _PHASE1.parent
 
 _CFG = load_config(str(_PHASE1 / "configs" / "agentic_generation.yaml"))
@@ -54,15 +58,27 @@ if not Path(_CATALOG_PATH).exists():
     _CATALOG_PATH = str(_PHASE1 / "docs" / "mcp_tools_catalog.json")
 _CATALOG = load_catalog(_CATALOG_PATH)
 
-# Catalogue du chat : sans search_quebec_jurisprudence (serveur instable,
-# renvoie des lois au lieu de décisions). La jurisprudence passe par
-# search_legal_documents (a2aj).
+
+def _available_in_chat(tool_name: str) -> bool:
+    """Un outil est-il exposé au chat ? ``tool_coverage`` fait foi.
+
+    Un outil sans entrée de couverture est conservé : l'absence d'avis
+    n'est pas un refus.
+    """
+    entry = get_coverage(tool_name)
+    return entry is None or entry.is_available("live")
+
+# Catalogue du chat : dérivé de la couverture déclarée, jamais d'une liste
+# d'exclusion écrite ici. Une exclusion codée en dur avait survécu à la
+# réactivation de search_quebec_jurisprudence, qui restait donc
+# inaccessible en production alors que tool_coverage.py l'annonçait
+# disponible — deux sources de vérité, une seule mise à jour.
 _CHAT_CATALOG = ToolCatalog(
     {
         **_CATALOG.raw,
         "tools": [
-            t for t in _CATALOG.raw.get("tools", [])
-            if t.get("canonicalName") != "search_quebec_jurisprudence"
+            tool for tool in _CATALOG.raw.get("tools", [])
+            if _available_in_chat(tool.get("canonicalName", ""))
         ],
     },
     path=_CATALOG_PATH,
