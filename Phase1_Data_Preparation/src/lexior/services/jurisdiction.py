@@ -51,6 +51,30 @@ _QC_MENTION_RE = re.compile(
     r"\b(qu[ée]bec|montr[ée]al|gatineau|laval|sherbrooke|trois[- ]rivi[èe]res)\b",
     re.I,
 )
+
+# Les usagers nomment leur ville, pas leur province : « je loue à Toronto »
+# ne disait rien au détecteur, qui concluait « juridiction inconnue » là où
+# la province est parfaitement déterminée. Les villes québécoises sont déjà
+# couvertes par _QC_MENTION_RE.
+# Seules des villes sans homonyme courant ailleurs figurent ici : London,
+# Windsor et Victoria en sont écartées à dessein.
+_CITY_TO_PROVINCE: dict[str, str] = {
+    "toronto": "Ontario", "ottawa": "Ontario", "mississauga": "Ontario",
+    "brampton": "Ontario", "hamilton": "Ontario", "kitchener": "Ontario",
+    "oshawa": "Ontario", "kingston": "Ontario", "sudbury": "Ontario",
+    "vancouver": "Colombie-Britannique", "surrey": "Colombie-Britannique",
+    "burnaby": "Colombie-Britannique", "kelowna": "Colombie-Britannique",
+    "calgary": "Alberta", "edmonton": "Alberta", "lethbridge": "Alberta",
+    "winnipeg": "Manitoba",
+    "saskatoon": "Saskatchewan", "regina": "Saskatchewan",
+    "halifax": "Nouvelle-Écosse", "sydney": "Nouvelle-Écosse",
+    "moncton": "Nouveau-Brunswick", "fredericton": "Nouveau-Brunswick",
+    "charlottetown": "Île-du-Prince-Édouard",
+    "whitehorse": "Yukon", "yellowknife": "Territoires du Nord-Ouest",
+    "iqaluit": "Nunavut",
+}
+_CITY_RE = re.compile(
+    r"\b(" + "|".join(sorted(_CITY_TO_PROVINCE)) + r")\b", re.I)
 _YES_RE = re.compile(r"^\s*(oui|yes|ouais|exactement|c'est ça)\s*[.!]?\s*$", re.I)
 _NO_RE = re.compile(r"^\s*(non|no|nope|pas au qu[ée]bec)\s*[.!]?\s*$", re.I)
 
@@ -76,6 +100,10 @@ def detect_jurisdiction_hint(messages: Sequence) -> Optional[str]:
             continue
         if _QC_MENTION_RE.search(message.content):
             hint = "Québec"
+            continue
+        city = _CITY_RE.search(message.content)
+        if city:
+            hint = _CITY_TO_PROVINCE[city.group(0).casefold()]
             continue
         if index > 0:
             previous = messages[index - 1]

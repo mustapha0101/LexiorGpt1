@@ -148,3 +148,69 @@ def test_the_planner_cannot_skip_the_clarification(runner):
     update = node.run(state, runner.context)
 
     assert update["latest_decision"]["decision"] == "ask_clarification"
+
+
+# ── Détection par nom de ville ───────────────────────────────────────────
+#
+# Vérification demandée : le garde-fou intercepte-t-il vraiment les
+# questions hors Québec du jeu de test ? Réponse mesurée, pas supposée.
+
+
+def _hint(text: str):
+    from lexior.agentic.schemas import Message, Role
+    from lexior.services.jurisdiction import detect_jurisdiction_hint
+
+    return detect_jurisdiction_hint([Message(role=Role.user, content=text)])
+
+
+@pytest.mark.parametrize("city,province", [
+    ("Toronto", "Ontario"),
+    ("Ottawa", "Ontario"),
+    ("Vancouver", "Colombie-Britannique"),
+    ("Calgary", "Alberta"),
+    ("Winnipeg", "Manitoba"),
+    ("Halifax", "Nouvelle-Écosse"),
+    ("Moncton", "Nouveau-Brunswick"),
+])
+def test_a_city_name_establishes_the_province(city, province):
+    """Les usagers nomment leur ville, pas leur province."""
+    assert _hint(f"Je loue un appartement à {city} et mon bail se termine.") == (
+        province)
+
+
+def test_a_quebec_city_still_resolves_to_quebec():
+    assert _hint("J'habite à Montréal depuis dix ans.") == "Québec"
+
+
+@pytest.mark.parametrize("city", ["London", "Windsor", "Victoria"])
+def test_ambiguous_city_names_are_deliberately_absent(city):
+    """Homonymes hors Canada : mieux vaut demander que se tromper."""
+    assert _hint(f"J'habite à {city}.") is None
+
+
+def test_the_toronto_question_is_now_declined():
+    """« Je loue à Toronto » : la province est déterminée, donc refusée.
+
+    Avant l'ajout des villes, la détection retournait None et le système
+    posait une question de clarification au lieu de dire que le droit
+    ontarien n'est pas couvert.
+    """
+    question = ("Je loue un appartement à Toronto et mon propriétaire veut "
+                "augmenter le loyer de 20 % cette année. Est-ce permis?")
+
+    hint = _hint(question)
+
+    assert hint == "Ontario"
+    assert coverage_action(hint) == "decline"
+
+
+def test_a_federal_court_question_is_not_declined_by_location():
+    """Aucune province n'y est nommée : on demande, on ne refuse pas.
+
+    Le refus serait faux — la Cour fédérale siège partout au Canada.
+    """
+    question = ("Quelles règles de procédure s'appliquent devant la Cour "
+                "fédérale du Canada pour déposer une demande?")
+
+    assert _hint(question) is None
+    assert coverage_action(_hint(question) or "") == "clarify"
