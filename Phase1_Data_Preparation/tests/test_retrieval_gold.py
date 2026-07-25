@@ -15,7 +15,6 @@ chose ne peut pas déclencher de reformulation.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -30,6 +29,9 @@ for _candidate in (str(Path(__file__).resolve().parents[1] / "src"),):
 
 from lexior.agentic.config import RAGConfig  # noqa: E402
 from lexior.agentic.legal_rag import LegalRAG, index_exists  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from embed_retrieval_gold import gold_digest  # noqa: E402
 
 PHASE1 = Path(__file__).resolve().parents[1]
 GOLD_PATH = PHASE1 / "tests" / "fixtures" / "retrieval_gold.jsonl"
@@ -86,7 +88,7 @@ def _build_rag(**overrides) -> LegalRAG:
             "cache de vecteurs absent : lancer "
             "`python scripts/embed_retrieval_gold.py --allow-remote-calls`")
     cached = np.load(QUERIES_PATH, allow_pickle=False)
-    digest = hashlib.sha256(GOLD_PATH.read_bytes()).hexdigest()
+    digest = gold_digest(GOLD_PATH.read_bytes())
     if str(cached["gold_sha256"]) != digest:
         raise GoldSetUnavailable(
             "cache de vecteurs périmé (le fixture a changé) : relancer "

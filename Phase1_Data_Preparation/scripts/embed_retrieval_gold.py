@@ -45,8 +45,18 @@ CACHE_PATH = PHASE1 / "tests" / "fixtures" / "retrieval_gold_queries.npz"
 
 
 def gold_digest(raw: bytes) -> str:
-    """Empreinte du fixture, pour détecter un cache devenu obsolète."""
-    return hashlib.sha256(raw).hexdigest()
+    """Empreinte des QUESTIONS, pour détecter un cache devenu obsolète.
+
+    Volontairement insensible aux annotations : les vecteurs ne dépendent
+    que du texte des questions. Une empreinte sur le fichier entier
+    invalidait le cache à chaque correction d'un ``expected_articles``, ce
+    qui imposait de tout ré-embarquer pour rien.
+    """
+    entries = [json.loads(line) for line in raw.decode("utf-8").splitlines()
+               if line.strip()]
+    material = "\n".join(f"{entry['id']}\t{entry['question']}"
+                         for entry in entries)
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 def main() -> int:

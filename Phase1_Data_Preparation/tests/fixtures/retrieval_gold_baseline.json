@@ -65,5 +65,8 @@
   },
   "_diagnostics": {
     "ccq-mise-en-demeure": "Vidée par le rerank, mais ce n'est PAS une régression : les articles attendus (1594, 1590) ne figuraient pas parmi les candidats, et restent inatteignables même avec candidate_k=400 et top-20. La question était déjà ratée sans rerank — il a converti huit articles hors sujet présentés comme réponses en « rien trouvé », ce qui déclenche la reformulation. L'écart de vocabulaire (« lettre d'avertissement » vs « demeure ») est un cas d'école pour la question du modèle d'embeddings."
-  }
+  },
+  "_corrections_posterieures": [
+    "2026-07-25 — ccq-construction-garantie : expected_articles ramené de [2118, 2120] à [2118]. La question porte sur des fissures structurelles trois ans après la livraison : l'art. 2118 couvre la perte de l'ouvrage pendant cinq ans et s'applique; l'art. 2120 ne vise que les malfaçons pendant un an, délai expiré. Le garder apprendrait à remonter un article hors délai. Les chiffres publiés ci-dessus PRÉCÈDENT cette correction et n'ont pas été re-mesurés."
+  ]
 }
