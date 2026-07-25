@@ -155,16 +155,21 @@ def test_scc_decision_concerning_quebec_law_is_alternative():
 
 # ── 6. Unavailable Quebec jurisprudence produces coverage limitation ─────
 
-def test_unavailable_quebec_jurisprudence_produces_coverage_gap():
+def test_quebec_jurisprudence_covers_the_quebec_courts():
+    """Réactivé le 2026-07-24 : l'échec était côté client (QCTAL manquant).
+
+    L'ancienne version de ce test verrouillait l'indisponibilité; elle
+    verrouillait en réalité un défaut de reconnaissance des citations.
+    """
     coverage = get_coverage("search_quebec_jurisprudence")
     assert coverage is not None
-    # In live mode, the tool is unavailable.
-    assert not coverage.is_available("live")
-    # The check_coverage method should report a gap for QCCA in live mode.
+    assert coverage.is_available("live")
+    assert coverage.is_available("dataset")
+
     covered, tools, gap = svc_check_coverage_qcca_live()
-    assert not covered
-    assert gap is not None
-    assert gap.requested_court_scope == "QCCA"
+    assert covered, "aucun autre outil ne couvre les cours québécoises"
+    assert "search_quebec_jurisprudence" in tools
+    assert gap is None
 
 
 def svc_check_coverage_qcca_live():
@@ -190,11 +195,9 @@ def test_coverage_failure_not_described_as_absence():
         "must NOT say 'aucune décision' — that implies decisions don't exist")
     assert "no decision" not in lower
     assert "no quebec decision" not in lower
-    # The gap reason from check_coverage should also be about coverage, not absence.
-    _, _, gap = svc_check_coverage_qcca_live()
-    assert gap is not None
-    gap_lower = gap.reason.lower()
-    assert "no active tool covers" in gap_lower or "unavailable" in gap_lower
+    # La couverture québécoise est assurée : plus aucun manque à signaler.
+    covered, _, gap = svc_check_coverage_qcca_live()
+    assert covered and gap is None
 
 
 # ── 8. search_legal_documents cannot satisfy QCCA/QCCS/QCCQ/QCTAL/QCTAT ─
@@ -417,3 +420,64 @@ def test_both_modes_use_same_verification_pipeline():
         "court_decision", "FCA", "Federal", "live")
     assert cov_dataset[0] == cov_live[0], (
         "FCA coverage must be identical in both modes")
+
+
+# ── 16. assess() se sert enfin de la question de l'usager ────────────────
+
+_ARTICLE_1466 = (
+    "Article 1466. Le propriétaire d'un animal est tenu de réparer le "
+    "préjudice que l'animal a causé, soit qu'il fût sous sa garde ou sous "
+    "celle d'un tiers."
+)
+
+
+def test_assess_rejects_a_result_foreign_to_the_question():
+    svc = _service()
+    obs = _obs("get_ccq_articles", response=_ARTICLE_1466,
+               arguments={"start_article": 1466})
+
+    a = svc.assess(obs, user_query="Quel délai ai-je pour aller en appel?")
+
+    assert a.search_status == SearchResultStatus.irrelevant.value
+    assert not a.relevant
+    assert not a.usable_as_evidence
+    assert a.reason, "un rejet doit être motivé"
+    # Officiel ne veut pas dire pertinent : la source reste citable.
+    assert a.official and a.citable
+
+
+def test_assess_keeps_a_result_that_answers_the_question():
+    svc = _service()
+    obs = _obs("get_ccq_articles", response=_ARTICLE_1466,
+               arguments={"start_article": 1466})
+
+    a = svc.assess(obs, user_query="Un chien m'a mordu, qui doit réparer le "
+                                   "préjudice causé par un animal?")
+
+    assert a.search_status == SearchResultStatus.usable.value
+    assert a.relevant and a.usable_as_evidence
+
+
+def test_assess_without_a_question_behaves_as_before():
+    svc = _service()
+    obs = _obs("get_ccq_articles", response=_ARTICLE_1466,
+               arguments={"start_article": 1466})
+
+    assert svc.assess(obs).search_status == SearchResultStatus.usable.value
+
+
+def test_an_off_topic_result_reaches_the_reformulation_route():
+    """Le câblage complet : verdict → état → route."""
+    from lexior.agent_graph.routing import route_after_classification
+
+    svc = _service()
+    a = svc.assess(
+        _obs("get_ccq_articles", response=_ARTICLE_1466),
+        user_query="Quel délai ai-je pour aller en appel?")
+    state = {
+        "last_tool_result_status": a.search_status,
+        "reformulation_count": 0,
+        "max_reformulations": 1,
+    }
+
+    assert route_after_classification(state) == "reformulate_search"

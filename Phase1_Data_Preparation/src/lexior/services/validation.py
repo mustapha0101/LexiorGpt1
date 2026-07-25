@@ -20,7 +20,7 @@ from lexior.agentic.schemas import (
     TrainingTrajectory,
 )
 from lexior.agentic.tool_catalog import ToolCatalog
-from lexior.agentic.validators import ValidationResult
+from lexior.agentic.validators import FingerprintIndex, ValidationResult
 from lexior.agent_graph.step_verifier import (
     ProposalVerdict,
     StepVerifier,
@@ -29,10 +29,14 @@ from lexior.agent_graph.step_verifier import (
 
 
 class ValidationService:
-    def __init__(self, catalog: ToolCatalog):
+    def __init__(self, catalog: ToolCatalog,
+                 near_duplicate_jaccard: float = 0.90,
+                 max_thinking_words: int = 0):
         self.catalog = catalog
         self.verifier = StepVerifier(catalog)
-        self.seen_fingerprints: set[str] = set()
+        self.near_duplicate_jaccard = near_duplicate_jaccard
+        self.max_thinking_words = max_thinking_words
+        self.seen_fingerprints = FingerprintIndex()
 
     # ── Autorisation d'une proposition du planner ────────────────────────
 
@@ -70,6 +74,8 @@ class ValidationService:
             max_tool_calls=max_tool_calls,
             seen_fingerprints=self.seen_fingerprints,
             exempt_tools=exempt_tools,
+            near_duplicate_jaccard=self.near_duplicate_jaccard,
+            max_thinking_words=self.max_thinking_words,
         )
 
     def compute_acceptance(self, trajectory: TrainingTrajectory,

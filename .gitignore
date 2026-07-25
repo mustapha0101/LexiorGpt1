@@ -44,3 +44,6 @@ dist/
 nul
 Phase1_Data_Preparation/agentic_generation.zip
 .claude/
+
+# Jeu de test de recherche : versionné malgré la règle *.jsonl ci-dessus.
+!Phase1_Data_Preparation/tests/fixtures/*.jsonl

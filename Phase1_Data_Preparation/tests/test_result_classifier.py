@@ -191,3 +191,72 @@ class TestGateSearchResults:
         assert status == CaseLawSearchStatus.usable
         usable = classifier.filter_usable(results)
         assert len(usable) >= 1
+
+
+# ── Pertinence thématique (la question fait partie du verdict) ───────────
+
+
+ARTICLE_1466 = (
+    "Article 1466. Le propriétaire d'un animal est tenu de réparer le "
+    "préjudice que l'animal a causé, soit qu'il fût sous sa garde ou sous "
+    "celle d'un tiers, soit qu'il fût égaré ou échappé."
+)
+
+
+class TestThematicRelevance:
+    def test_well_formed_but_off_topic_is_irrelevant(self, classifier):
+        assert classifier.classify(
+            "get_ccq_articles", ARTICLE_1466, ok=True,
+            user_query="Quel délai ai-je pour porter un jugement en appel?",
+        ) == SearchResultStatus.irrelevant
+
+    def test_on_topic_stays_usable(self, classifier):
+        assert classifier.classify(
+            "get_ccq_articles", ARTICLE_1466, ok=True,
+            user_query="Le chien de ma voisine m'a mordu, qui répare le "
+                       "préjudice causé par un animal?",
+        ) == SearchResultStatus.usable
+
+    def test_without_the_question_nothing_changes(self, classifier):
+        """Compatibilité ascendante : les appelants existants ne passent rien."""
+        assert classifier.classify(
+            "get_ccq_articles", ARTICLE_1466, ok=True,
+        ) == SearchResultStatus.usable
+
+    def test_a_question_without_content_words_is_not_judged(self, classifier):
+        assert classifier.classify(
+            "get_ccq_articles", ARTICLE_1466, ok=True, user_query="et donc?",
+        ) == SearchResultStatus.usable
+
+    @pytest.mark.parametrize(
+        "tool", ["semantic_search_ccq", "semantic_search_cpc"])
+    def test_score_only_responses_are_never_judged_lexically(
+            self, classifier, tool):
+        """Ces réponses ne contiennent que des libellés et des scores.
+
+        Leur pertinence relève des planchers absolus de legal_rag, pas d'une
+        comparaison de mots avec la question.
+        """
+        response = ("Article 1854 — score de pertinence 0.219\n\n"
+                    "Article 1863 — score de pertinence 0.060")
+        assert classifier.classify(
+            tool, response, ok=True,
+            user_query="Est-ce que mon locateur peut refuser mon chat?",
+        ) == SearchResultStatus.usable
+
+    def test_an_empty_result_stays_empty(self, classifier):
+        """La forme prime : un résultat vide n'est pas requalifié en hors sujet."""
+        assert classifier.classify(
+            "get_ccq_articles", "", ok=True, user_query="Puis-je avoir un chat?",
+        ) == SearchResultStatus.empty
+
+    def test_observation_carries_the_question(self, classifier):
+        observation = ToolObservation(
+            tool_name="get_ccq_articles",
+            normalized_response=ARTICLE_1466,
+            ok=True,
+        )
+        assert classifier.classify_observation(
+            observation,
+            user_query="Quel délai ai-je pour porter un jugement en appel?",
+        ) == SearchResultStatus.irrelevant

@@ -29,10 +29,17 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "query": { "type": "string" },
-          "top_k": { "type": "integer", "default": 8 }
+          "query": {
+            "type": "string"
+          },
+          "top_k": {
+            "type": "integer",
+            "default": 8
+          }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ]
       },
       "minimalValidExample": {
         "query": "Mon voisin a déplacé la clôture sur mon terrain; quels articles encadrent mes recours?",
@@ -50,10 +57,17 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "query": { "type": "string" },
-          "top_k": { "type": "integer", "default": 8 }
+          "query": {
+            "type": "string"
+          },
+          "top_k": {
+            "type": "integer",
+            "default": 8
+          }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ]
       },
       "minimalValidExample": {
         "query": "Comment assigner un témoin à comparaître dans une instance civile?",
@@ -72,22 +86,35 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "start_article": { "type": "number" },
-          "end_article": { "type": "number" }
+          "start_article": {
+            "type": "number"
+          },
+          "end_article": {
+            "type": "number"
+          }
         },
-        "required": ["start_article"]
+        "required": [
+          "start_article"
+        ]
       },
       "schemaDetails": {
-        "properties": ["start_article", "end_article"],
+        "properties": [
+          "start_article",
+          "end_article"
+        ],
         "types": {
           "start_article": "number",
           "end_article": "number"
         },
         "enumValues": {},
-        "required": ["start_article"],
+        "required": [
+          "start_article"
+        ],
         "additionalProperties": "not specified"
       },
-      "minimalValidExample": { "start_article": 1457 },
+      "minimalValidExample": {
+        "start_article": 1457
+      },
       "responseStructure": {
         "type": "text",
         "shape": "article heading followed by one or more article paragraphs",
@@ -101,17 +128,31 @@
       "description": "Recherche par mots-clés dans le texte des articles du Code civil du Québec (CCQ).",
       "inputSchema": {
         "type": "object",
-        "properties": { "keyword": { "type": "string" } },
-        "required": ["keyword"]
+        "properties": {
+          "keyword": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "keyword"
+        ]
       },
       "schemaDetails": {
-        "properties": ["keyword"],
-        "types": { "keyword": "string" },
+        "properties": [
+          "keyword"
+        ],
+        "types": {
+          "keyword": "string"
+        },
         "enumValues": {},
-        "required": ["keyword"],
+        "required": [
+          "keyword"
+        ],
         "additionalProperties": "not specified"
       },
-      "minimalValidExample": { "keyword": "contrat" },
+      "minimalValidExample": {
+        "keyword": "contrat"
+      },
       "responseStructure": {
         "type": "text",
         "shape": "ranked list of matching articles and excerpts",
@@ -125,17 +166,31 @@
       "description": "Recherche par mots-clés dans le texte des articles du Code de procédure civile du Québec (CPC / C-25.01).",
       "inputSchema": {
         "type": "object",
-        "properties": { "keyword": { "type": "string" } },
-        "required": ["keyword"]
+        "properties": {
+          "keyword": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "keyword"
+        ]
       },
       "schemaDetails": {
-        "properties": ["keyword"],
-        "types": { "keyword": "string" },
+        "properties": [
+          "keyword"
+        ],
+        "types": {
+          "keyword": "string"
+        },
         "enumValues": {},
-        "required": ["keyword"],
+        "required": [
+          "keyword"
+        ],
         "additionalProperties": "not specified"
       },
-      "minimalValidExample": { "keyword": "signification" },
+      "minimalValidExample": {
+        "keyword": "signification"
+      },
       "responseStructure": {
         "type": "text",
         "shape": "ranked list of matching CPC articles and excerpts",
@@ -150,22 +205,35 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "start_article": { "type": "number" },
-          "end_article": { "type": "number" }
+          "start_article": {
+            "type": "number"
+          },
+          "end_article": {
+            "type": "number"
+          }
         },
-        "required": ["start_article"]
+        "required": [
+          "start_article"
+        ]
       },
       "schemaDetails": {
-        "properties": ["start_article", "end_article"],
+        "properties": [
+          "start_article",
+          "end_article"
+        ],
         "types": {
           "start_article": "number",
           "end_article": "number"
         },
         "enumValues": {},
-        "required": ["start_article"],
+        "required": [
+          "start_article"
+        ],
         "additionalProperties": "not specified"
       },
-      "minimalValidExample": { "start_article": 1 },
+      "minimalValidExample": {
+        "start_article": 1
+      },
       "responseStructure": {
         "type": "text",
         "shape": "article heading followed by one or more article paragraphs",
@@ -182,19 +250,47 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["modlois", "modreg", "nevlois", "eevlois", "loisann", "regann", "decision"]
+            "enum": [
+              "modlois",
+              "modreg",
+              "nevlois",
+              "eevlois",
+              "loisann",
+              "regann",
+              "decision"
+            ]
           }
         },
-        "required": ["type"]
+        "required": [
+          "type"
+        ]
       },
       "schemaDetails": {
-        "properties": ["type"],
-        "types": { "type": "string" },
-        "enumValues": { "type": ["modlois", "modreg", "nevlois", "eevlois", "loisann", "regann", "decision"] },
-        "required": ["type"],
+        "properties": [
+          "type"
+        ],
+        "types": {
+          "type": "string"
+        },
+        "enumValues": {
+          "type": [
+            "modlois",
+            "modreg",
+            "nevlois",
+            "eevlois",
+            "loisann",
+            "regann",
+            "decision"
+          ]
+        },
+        "required": [
+          "type"
+        ],
         "additionalProperties": "not specified"
       },
-      "minimalValidExample": { "type": "decision" },
+      "minimalValidExample": {
+        "type": "decision"
+      },
       "responseStructure": {
         "type": "text",
         "shape": "informational page with headings and explanatory paragraphs",
@@ -208,17 +304,31 @@
       "description": "Recherche sémantique parmi les règlements du Québec sur LégisQuébec.",
       "inputSchema": {
         "type": "object",
-        "properties": { "keyword": { "type": "string" } },
-        "required": ["keyword"]
+        "properties": {
+          "keyword": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "keyword"
+        ]
       },
       "schemaDetails": {
-        "properties": ["keyword"],
-        "types": { "keyword": "string" },
+        "properties": [
+          "keyword"
+        ],
+        "types": {
+          "keyword": "string"
+        },
         "enumValues": {},
-        "required": ["keyword"],
+        "required": [
+          "keyword"
+        ],
         "additionalProperties": "not specified"
       },
-      "minimalValidExample": { "keyword": "environnement" },
+      "minimalValidExample": {
+        "keyword": "environnement"
+      },
       "responseStructure": {
         "type": "text",
         "shape": "search results list with regulation title, link, and summary",
@@ -232,17 +342,31 @@
       "description": "Récupère le contenu complet d'un règlement spécifique ou d'un acte législatif sur LégisQuébec à partir de son URL.",
       "inputSchema": {
         "type": "object",
-        "properties": { "url": { "type": "string" } },
-        "required": ["url"]
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
       },
       "schemaDetails": {
-        "properties": ["url"],
-        "types": { "url": "string" },
+        "properties": [
+          "url"
+        ],
+        "types": {
+          "url": "string"
+        },
         "enumValues": {},
-        "required": ["url"],
+        "required": [
+          "url"
+        ],
         "additionalProperties": "not specified"
       },
-      "minimalValidExample": { "url": "https://www.legisquebec.gouv.qc.ca/fr/document/rc/Q-2,%20r.%2017.1" },
+      "minimalValidExample": {
+        "url": "https://www.legisquebec.gouv.qc.ca/fr/document/rc/Q-2,%20r.%2017.1"
+      },
       "responseStructure": {
         "type": "text",
         "shape": "official regulation page with title, habilitating laws table, and numbered articles",
@@ -256,22 +380,37 @@
       "description": "Recherche de la jurisprudence (décisions de justice) québécoise sur CanLII et SOQUIJ.",
       "inputSchema": {
         "type": "object",
-        "properties": { "query": { "type": "string" } },
-        "required": ["query"]
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
       },
       "schemaDetails": {
-        "properties": ["query"],
-        "types": { "query": "string" },
+        "properties": [
+          "query"
+        ],
+        "types": {
+          "query": "string"
+        },
         "enumValues": {},
-        "required": ["query"],
+        "required": [
+          "query"
+        ],
         "additionalProperties": "not specified"
       },
-      "minimalValidExample": { "query": "responsabilité civile" },
+      "minimalValidExample": {
+        "query": "Tribunal administratif du logement décision résiliation de bail pour non-paiement de loyer"
+      },
       "responseStructure": {
         "type": "text",
-        "shape": "search results with case titles, links, and summaries",
-        "representativeResponse": "Code de procédure civile, RLRQ c C-25.01\nRésumé concis: Code de procédure civile, RLRQ c C-25.01 (Québec)\n\nCode civil du Québec, RLRQ c CCQ-1991\nRésumé: Summary:"
-      }
+        "shape": "decisions and legislation mixed; each entry has a CanLII link and an LLM-written summary (not source text)",
+        "representativeResponse": "### [D É C I S I O N](https://www.canlii.org/fr/qc/qctal/doc/2023/2023qctal37140/2023qctal37140.html)\n**Résumé :** Tribunal administratif du logement (Québec) — résiliation de bail pour non-paiement de loyer. Le tribunal accueille la demande du locateur, retient une dette de 3 953 $ et ordonne l'expulsion.\n\n### [2023 QCTAL 4889 (CanLII) | 9381-2451 Québec inc. c. Chabot](https://www.canlii.org/fr/qc/qctal/doc/2023/2023qctal4889/2023qctal4889.html)"
+      },
+      "notes": "Vérifié le 2026-07-24. La formulation de la requête gouverne le type de document retourné : nommer le tribunal et employer le mot « décision » ramène des décisions; une formulation doctrinale ramène des lois et des règlements. Les champs « Résumé » sont rédigés par un modèle côté serveur."
     },
     {
       "canonicalName": "coverage",
@@ -283,15 +422,27 @@
         "properties": {
           "doc_type": {
             "type": "string",
-            "enum": ["cases", "laws"],
+            "enum": [
+              "cases",
+              "laws"
+            ],
             "default": "cases"
           }
         }
       },
       "schemaDetails": {
-        "properties": ["doc_type"],
-        "types": { "doc_type": "string" },
-        "enumValues": { "doc_type": ["cases", "laws"] },
+        "properties": [
+          "doc_type"
+        ],
+        "types": {
+          "doc_type": "string"
+        },
+        "enumValues": {
+          "doc_type": [
+            "cases",
+            "laws"
+          ]
+        },
         "required": [],
         "additionalProperties": "not specified"
       },
@@ -321,17 +472,52 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "citation": { "type": "string" },
-          "doc_type": { "type": "string", "enum": ["cases", "laws"], "default": "cases" },
-          "output_language": { "type": "string", "enum": ["en", "fr", "both"], "default": "en" },
-          "section": { "type": "string", "default": "" },
-          "start_char": { "type": "integer", "default": 0 },
-          "end_char": { "type": "integer", "default": -1 }
+          "citation": {
+            "type": "string"
+          },
+          "doc_type": {
+            "type": "string",
+            "enum": [
+              "cases",
+              "laws"
+            ],
+            "default": "cases"
+          },
+          "output_language": {
+            "type": "string",
+            "enum": [
+              "en",
+              "fr",
+              "both"
+            ],
+            "default": "en"
+          },
+          "section": {
+            "type": "string",
+            "default": ""
+          },
+          "start_char": {
+            "type": "integer",
+            "default": 0
+          },
+          "end_char": {
+            "type": "integer",
+            "default": -1
+          }
         },
-        "required": ["citation"]
+        "required": [
+          "citation"
+        ]
       },
       "schemaDetails": {
-        "properties": ["citation", "doc_type", "output_language", "section", "start_char", "end_char"],
+        "properties": [
+          "citation",
+          "doc_type",
+          "output_language",
+          "section",
+          "start_char",
+          "end_char"
+        ],
         "types": {
           "citation": "string",
           "doc_type": "string",
@@ -341,10 +527,19 @@
           "end_char": "integer"
         },
         "enumValues": {
-          "doc_type": ["cases", "laws"],
-          "output_language": ["en", "fr", "both"]
+          "doc_type": [
+            "cases",
+            "laws"
+          ],
+          "output_language": [
+            "en",
+            "fr",
+            "both"
+          ]
         },
-        "required": ["citation"],
+        "required": [
+          "citation"
+        ],
         "additionalProperties": "not specified"
       },
       "minimalValidExample": {
@@ -379,20 +574,89 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "query": { "type": "string" },
-          "search_type": { "type": "string", "enum": ["full_text", "name"], "default": "full_text" },
-          "doc_type": { "type": "string", "enum": ["cases", "laws"], "default": "cases" },
-          "size": { "type": "integer", "default": 10 },
-          "search_language": { "type": "string", "enum": ["en", "fr"], "default": "en" },
-          "sort_results": { "type": "string", "enum": ["default", "newest_first", "oldest_first"], "default": "default" },
-          "dataset": { "type": "string", "default": "" },
-          "start_date": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null },
-          "end_date": { "anyOf": [{ "type": "string" }, { "type": "null" }], "default": null }
+          "query": {
+            "type": "string"
+          },
+          "search_type": {
+            "type": "string",
+            "enum": [
+              "full_text",
+              "name"
+            ],
+            "default": "full_text"
+          },
+          "doc_type": {
+            "type": "string",
+            "enum": [
+              "cases",
+              "laws"
+            ],
+            "default": "cases"
+          },
+          "size": {
+            "type": "integer",
+            "default": 10
+          },
+          "search_language": {
+            "type": "string",
+            "enum": [
+              "en",
+              "fr"
+            ],
+            "default": "en"
+          },
+          "sort_results": {
+            "type": "string",
+            "enum": [
+              "default",
+              "newest_first",
+              "oldest_first"
+            ],
+            "default": "default"
+          },
+          "dataset": {
+            "type": "string",
+            "default": ""
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ]
       },
       "schemaDetails": {
-        "properties": ["query", "search_type", "doc_type", "size", "search_language", "sort_results", "dataset", "start_date", "end_date"],
+        "properties": [
+          "query",
+          "search_type",
+          "doc_type",
+          "size",
+          "search_language",
+          "sort_results",
+          "dataset",
+          "start_date",
+          "end_date"
+        ],
         "types": {
           "query": "string",
           "search_type": "string",
@@ -401,16 +665,37 @@
           "search_language": "string",
           "sort_results": "string",
           "dataset": "string",
-          "start_date": ["string", "null"],
-          "end_date": ["string", "null"]
+          "start_date": [
+            "string",
+            "null"
+          ],
+          "end_date": [
+            "string",
+            "null"
+          ]
         },
         "enumValues": {
-          "search_type": ["full_text", "name"],
-          "doc_type": ["cases", "laws"],
-          "search_language": ["en", "fr"],
-          "sort_results": ["default", "newest_first", "oldest_first"]
+          "search_type": [
+            "full_text",
+            "name"
+          ],
+          "doc_type": [
+            "cases",
+            "laws"
+          ],
+          "search_language": [
+            "en",
+            "fr"
+          ],
+          "sort_results": [
+            "default",
+            "newest_first",
+            "oldest_first"
+          ]
         },
-        "required": ["query"],
+        "required": [
+          "query"
+        ],
         "additionalProperties": "not specified"
       },
       "minimalValidExample": {

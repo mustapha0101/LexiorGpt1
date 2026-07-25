@@ -81,7 +81,11 @@ def build_services(
             AgenticCritic(critic_client, offline),
             no_critics=config.no_critics,
         ),
-        validation=ValidationService(catalog),
+        validation=ValidationService(
+            catalog,
+            near_duplicate_jaccard=config.near_duplicate_jaccard,
+            max_thinking_words=config.max_thinking_words,
+        ),
         repair=RepairService(
             answers,
             legal_min_score=config.legal_min_score,

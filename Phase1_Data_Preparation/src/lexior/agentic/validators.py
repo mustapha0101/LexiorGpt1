@@ -10,6 +10,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
+from .citations import CASE_CITATION_RE, CASE_NAME_RE
+from .error_codes import BLOCKING_CODES, ErrorCode, extract_code, tag
+from .response_verifier import contains_generated_summary
 from .schemas import Decision, ExpectedRoute, PlannerDecision, Role, RoutePolicy, TrainingTrajectory
 from .taxonomy import REQUEST_TYPES, NO_JURISPRUDENCE, OFFICIAL_TEXT_REQUIRED
 from .tool_catalog import ToolCatalog
@@ -17,7 +20,7 @@ from .tool_catalog import ToolCatalog
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 TEMP_PATH_RE = re.compile(r"workspaceStorage|content\.txt|(?:[A-Za-z]:\\[^\s]+)", re.IGNORECASE)
 URL_RE = re.compile(r"https?://[^\s<>\]\[\"')]+")
-CITATION_MARK_RE = re.compile(r"\[\^?\d+\]|\b\d{4}\s+(?:SCC|CSC|FC|CF|FCA|CAF|QCCA|QCCS|QCCQ)\s+\d+\b")
+CITATION_MARK_RE = re.compile(r"\[\^?\d+\]|" + CASE_CITATION_RE.pattern)
 ARTICLE_CITATION_RE = re.compile(r"\barticle\s+(\d{1,4}(?:\.\d+)?)\b", re.IGNORECASE)
 CERTAINTY_RE = re.compile(r"\b(?:certainement|sans aucun doute|garanti|indiscutablement|assurément)\b", re.I)
 PRECISE_ARTICLE_TOOLS = {
@@ -51,7 +54,7 @@ def validate_jurisprudence_query(query: str) -> list[str]:
     """Check that a jurisprudence search query is structured enough."""
     warnings: list[str] = []
     if not query or len(query.strip()) < 10:
-        warnings.append("requête de jurisprudence trop courte")
+        warnings.append(tag(ErrorCode.QUERY_TOO_SHORT, "requête de jurisprudence trop courte"))
         return warnings
 
     words = query.split()
@@ -59,29 +62,29 @@ def validate_jurisprudence_query(query: str) -> list[str]:
     conversational_count = len(_CONVERSATIONAL_PATTERNS.findall(query))
     if conversational_count > 2:
         warnings.append(
-            "requête de jurisprudence contient trop de formulations conversationnelles")
+            tag(ErrorCode.QUERY_IMPROVABLE,
+                "requête de jurisprudence contient trop de formulations "
+                "conversationnelles"))
 
     legal_terms = _LEGAL_TERM_RE.findall(query)
     article_refs = ARTICLE_CITATION_RE.findall(query)
 
     if not legal_terms and not article_refs:
         warnings.append(
-            "requête de jurisprudence sans terme juridique ni référence d'article")
+            tag(ErrorCode.QUERY_IMPROVABLE,
+                "requête de jurisprudence sans terme juridique ni référence "
+                "d'article"))
 
     if len(words) < 4 and not article_refs:
-        warnings.append("requête de jurisprudence trop générique")
+        warnings.append(tag(ErrorCode.QUERY_TOO_GENERIC, "requête de jurisprudence trop générique"))
 
     return warnings
 
 
 # ── Search result classification ─────────────────────────────────────────
 
-_CASE_CITATION_RE = re.compile(
-    r"\b\d{4}\s+(?:QCCA|QCCS|QCCQ|QCTDP|QCRDL|SCC|CSC|FC|CF|FCA|CAF)\s+\d+\b"
-)
-_CASE_NAME_RE = re.compile(
-    r"[A-ZÀ-Ÿ][\w'-]+\s+c\.\s+[A-ZÀ-Ÿ][\w'-]+"
-)
+_CASE_CITATION_RE = CASE_CITATION_RE
+_CASE_NAME_RE = CASE_NAME_RE
 
 
 def classify_search_result(
@@ -152,7 +155,9 @@ def validate_tool_sequence_logic(
         first_article = min(article_indices)
         if first_jurisprudence < first_article:
             warnings.append(
-                "séquence: jurisprudence recherchée avant récupération du texte officiel")
+                tag(ErrorCode.QUERY_IMPROVABLE,
+                "séquence: jurisprudence recherchée avant récupération du "
+                "texte officiel"))
 
     return warnings
 
@@ -227,13 +232,13 @@ def validate_planner_decision(decision: PlannerDecision, catalog: ToolCatalog) -
     errors: list[str] = []
     if decision.decision == Decision.call_tool:
         if not decision.next_tool:
-            errors.append("decision call_tool sans next_tool")
+            errors.append(tag(ErrorCode.DECISION_MISSING_TOOL, "decision call_tool sans next_tool"))
         else:
             errors.extend(catalog.validate_call(decision.next_tool, decision.arguments))
     elif decision.next_tool:
-        errors.append(f"next_tool présent pour la décision {decision.decision.value}")
+        errors.append(tag(ErrorCode.DECISION_UNEXPECTED_TOOL, f"next_tool présent pour la décision {decision.decision.value}"))
     if decision.decision == Decision.ask_clarification and not decision.clarification_question:
-        errors.append("demande de clarification vide")
+        errors.append(tag(ErrorCode.CLARIFICATION_EMPTY, "demande de clarification vide"))
     return errors
 
 
@@ -255,18 +260,18 @@ def validate_tool_route(
     required = expected.required_tools()
     errors: list[str] = []
     if expected.no_tool and sequence:
-        errors.append("outil interdit pour une demande sans recherche")
+        errors.append(tag(ErrorCode.TOOL_FORBIDDEN, "outil interdit pour une demande sans recherche"))
         return errors
     unexpected = [tool for tool in sequence if tool not in allowed]
     if unexpected:
-        errors.append(f"outil hors route attendue : {unexpected}")
+        errors.append(tag(ErrorCode.TOOL_OFF_ROUTE, f"outil hors route attendue : {unexpected}"))
     missing = [tool for tool in required
                if tool not in sequence and tool not in exempt]
     if missing:
-        errors.append(f"outil requis absent de la route : {missing}")
+        errors.append(tag(ErrorCode.REQUIRED_TOOL_MISSING, f"outil requis absent de la route : {missing}"))
     positions = [sequence.index(tool) for tool in required if tool in sequence]
     if positions != sorted(positions):
-        errors.append("ordre des outils requis incorrect")
+        errors.append(tag(ErrorCode.TOOL_ORDER_WRONG, "ordre des outils requis incorrect"))
     return errors
 
 
@@ -278,20 +283,20 @@ def _validate_capability_route(
 ) -> list[str]:
     errors: list[str] = []
     if policy.no_tool and sequence:
-        errors.append("outil interdit pour une demande sans recherche")
+        errors.append(tag(ErrorCode.TOOL_FORBIDDEN, "outil interdit pour une demande sans recherche"))
         return errors
     forbidden_used = [t for t in sequence if t in policy.forbidden_tools]
     if forbidden_used:
-        errors.append(f"outil interdit par la politique : {forbidden_used}")
+        errors.append(tag(ErrorCode.TOOL_FORBIDDEN, f"outil interdit par la politique : {forbidden_used}"))
     required = expected.required_tools()
     exempt = exempt or set()
     missing = [t for t in required
                if t not in sequence and t not in exempt]
     if missing:
-        errors.append(f"outil requis absent de la route : {missing}")
+        errors.append(tag(ErrorCode.REQUIRED_TOOL_MISSING, f"outil requis absent de la route : {missing}"))
     positions = [sequence.index(t) for t in required if t in sequence]
     if positions != sorted(positions):
-        errors.append("ordre des outils requis incorrect")
+        errors.append(tag(ErrorCode.TOOL_ORDER_WRONG, "ordre des outils requis incorrect"))
     return errors
 
 
@@ -302,9 +307,9 @@ def validate_next_action(request_type: str, tool: str) -> list[str]:
     policy = rt.route_policy
     errors: list[str] = []
     if policy.no_tool:
-        errors.append("outil interdit pour cette demande")
+        errors.append(tag(ErrorCode.TOOL_FORBIDDEN, "outil interdit pour cette demande"))
     if not policy.allows_tool(tool):
-        errors.append(f"outil {tool} interdit par la politique de routage")
+        errors.append(tag(ErrorCode.TOOL_FORBIDDEN, f"outil {tool} interdit par la politique de routage"))
     return errors
 
 
@@ -313,10 +318,10 @@ def _parse_tool_call(content: str) -> tuple[Optional[dict], list[str]]:
     openings = content.count("<tool_call>")
     closings = content.count("</tool_call>")
     if openings != closings:
-        errors.append("balises tool_call mal fermées")
+        errors.append(tag(ErrorCode.TOOL_CALL_MALFORMED, "balises tool_call mal fermées"))
         return None, errors
     if "<tool_response>" in content or "</tool_response>" in content:
-        errors.append("tool_response produit par l'assistant")
+        errors.append(tag(ErrorCode.TOOL_RESPONSE_FROM_ASSISTANT, "tool_response produit par l'assistant"))
     match = TOOL_CALL_RE.search(content)
     if not match:
         return None, errors
@@ -325,14 +330,16 @@ def _parse_tool_call(content: str) -> tuple[Optional[dict], list[str]]:
     except ValueError as exc:
         return None, [f"JSON tool_call invalide : {exc}"]
     if not isinstance(payload, dict) or set(payload) != {"name", "arguments"}:
-        errors.append("tool_call doit contenir exactement name et arguments")
+        errors.append(tag(ErrorCode.TOOL_CALL_MALFORMED, "tool_call doit contenir exactement name et arguments"))
     return payload, errors
 
 
 def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
                         allow_mock: bool = False, max_tool_calls: int = 4,
                         seen_fingerprints: Optional[set[str]] = None,
-                        exempt_tools: Optional[list[str]] = None) -> ValidationResult:
+                        exempt_tools: Optional[list[str]] = None,
+                        near_duplicate_jaccard: float = 0.90,
+                        max_thinking_words: int = 0) -> ValidationResult:
     errors: list[str] = []
     warnings: list[str] = []
     pending: list[dict] = []
@@ -340,7 +347,7 @@ def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
 
     for index, message in enumerate(trajectory.messages):
         if TEMP_PATH_RE.search(message.content):
-            errors.append(f"chemin local temporaire au message {index}")
+            errors.append(tag(ErrorCode.TEMP_PATH_LEAK, f"chemin local temporaire au message {index}"))
         payload = None
         if message.role == Role.assistant:
             payload, tag_errors = _parse_tool_call(message.content)
@@ -353,35 +360,35 @@ def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
 
         if message.role == Role.tool:
             if not pending:
-                errors.append(f"tool message {index} sans tool_call")
+                errors.append(tag(ErrorCode.TOOL_MESSAGE_UNPAIRED, f"tool message {index} sans tool_call"))
                 continue
             call = pending.pop(0)
             if message.name != call.get("name"):
-                errors.append(f"outil du message {index} différent du tool_call")
+                errors.append(tag(ErrorCode.TOOL_MESSAGE_MISMATCH, f"outil du message {index} différent du tool_call"))
             observed_pairs.append((message.name or "", call.get("arguments", {})))
     if pending:
-        errors.append("tool_call sans tool message correspondant")
+        errors.append(tag(ErrorCode.TOOL_CALL_UNPAIRED, "tool_call sans tool message correspondant"))
 
     if len(observed_pairs) > max_tool_calls:
-        errors.append("nombre maximal d'appels dépassé")
+        errors.append(tag(ErrorCode.TOO_MANY_TOOL_CALLS, "nombre maximal d'appels dépassé"))
     if len(observed_pairs) != len(trajectory.tool_trace):
-        errors.append("tool_trace ne correspond pas aux messages tool")
+        errors.append(tag(ErrorCode.TRACE_MESSAGE_MISMATCH, "tool_trace ne correspond pas aux messages tool"))
 
     for idx, observation in enumerate(trajectory.tool_trace):
         if observation.mock and not allow_mock:
-            errors.append(f"réponse MCP fabriquée/mock interdite à l'observation {idx}")
+            errors.append(tag(ErrorCode.OBSERVATION_MOCK_FORBIDDEN, f"réponse MCP fabriquée/mock interdite à l'observation {idx}"))
         if observation.content_hash == "":
-            errors.append(f"observation {idx} sans content_hash")
+            errors.append(tag(ErrorCode.OBSERVATION_UNHASHED, f"observation {idx} sans content_hash"))
         if observation.ok and observation.raw_response is None:
-            errors.append(f"réponse MCP fabriquée à l'observation {idx}")
+            errors.append(tag(ErrorCode.OBSERVATION_FABRICATED, f"réponse MCP fabriquée à l'observation {idx}"))
         if idx < len(observed_pairs):
             pair = observed_pairs[idx]
             if pair != (observation.tool_name, observation.arguments):
-                errors.append(f"observation {idx} non liée à son tool_call")
+                errors.append(tag(ErrorCode.OBSERVATION_UNLINKED, f"observation {idx} non liée à son tool_call"))
         tool_messages = [m for m in trajectory.messages
                          if m.role == Role.tool and m.name == observation.tool_name]
         if not any(m.content == observation.normalized_response for m in tool_messages):
-            errors.append(f"réponse MCP de {observation.tool_name} absente des messages")
+            errors.append(tag(ErrorCode.TRACE_MESSAGE_MISMATCH, f"réponse MCP de {observation.tool_name} absente des messages"))
 
     sequence = [name for name, _ in observed_pairs]
     errors.extend(validate_tool_route(trajectory.request_type, sequence,
@@ -390,15 +397,15 @@ def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
                  for name, args in observed_pairs]
     repeats = [k for k, count in Counter(call_keys).items() if count > 1]
     if repeats:
-        errors.append("boucle d'appels identiques")
+        errors.append(tag(ErrorCode.TOOL_CALL_LOOP, "boucle d'appels identiques"))
     if trajectory.request_type in NO_JURISPRUDENCE and "search_quebec_jurisprudence" in sequence:
-        errors.append("recherche de jurisprudence inutile pour cette demande")
+        errors.append(tag(ErrorCode.USELESS_JURISPRUDENCE_SEARCH, "recherche de jurisprudence inutile pour cette demande"))
     if trajectory.request_type in OFFICIAL_TEXT_REQUIRED and not sequence:
-        errors.append("réponse de mémoire à une demande de texte officiel")
+        errors.append(tag(ErrorCode.ANSWER_FROM_MEMORY, "réponse de mémoire à une demande de texte officiel"))
 
     final = trajectory.final_answer().strip()
     if not final:
-        errors.append("réponse finale vide")
+        errors.append(tag(ErrorCode.FINAL_ANSWER_EMPTY, "réponse finale vide"))
 
     article_tools = PRECISE_ARTICLE_TOOLS.get(trajectory.request_type)
     if article_tools:
@@ -410,9 +417,9 @@ def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
             "",
         )
         if not official:
-            errors.append("texte officiel complet de l'article indisponible")
+            errors.append(tag(ErrorCode.OFFICIAL_TEXT_MISSING, "texte officiel complet de l'article indisponible"))
         elif final != official:
-            errors.append("texte d'article précis non reproduit intégralement mot pour mot")
+            errors.append(tag(ErrorCode.OFFICIAL_TEXT_NOT_REPRODUCED, "texte d'article précis non reproduit intégralement mot pour mot"))
     elif trajectory.request_type == "article_explanation":
         official = next(
             (o.normalized_response.strip()
@@ -422,9 +429,9 @@ def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
             "",
         )
         if not official:
-            errors.append("texte officiel complet de l'article indisponible")
+            errors.append(tag(ErrorCode.OFFICIAL_TEXT_MISSING, "texte officiel complet de l'article indisponible"))
         elif official not in final:
-            errors.append("explication sans reproduction intégrale du texte officiel")
+            errors.append(tag(ErrorCode.OFFICIAL_TEXT_NOT_REPRODUCED, "explication sans reproduction intégrale du texte officiel"))
 
     if final.startswith("{") and final.endswith("}"):
         try:
@@ -432,45 +439,55 @@ def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
         except ValueError:
             wrapped = None
         if isinstance(wrapped, dict) and "answer" in wrapped:
-            errors.append("réponse finale enveloppée dans un objet JSON")
+            errors.append(tag(ErrorCode.FINAL_ANSWER_WRAPPED, "réponse finale enveloppée dans un objet JSON"))
     if CERTAINTY_RE.search(final) and (
         not trajectory.tool_trace
         or any(o.error or o.truncated for o in trajectory.tool_trace)
     ):
-        errors.append("certitude non justifiée par les preuves disponibles")
+        errors.append(tag(ErrorCode.UNJUSTIFIED_CERTAINTY, "certitude non justifiée par les preuves disponibles"))
 
+    # Deux niveaux distincts, sans quoi l'un des deux est faux :
+    #  - la CITATION d'une décision et son URL sont des faits structurels,
+    #    citables même quand le serveur les enrobe d'un résumé généré;
+    #  - le TEXTE d'un résumé généré ne peut pas servir à ancrer une
+    #    affirmation : le contrôle validerait un article contre de la prose
+    #    produite par un modèle.
     citable_observations = [
         o for o in trajectory.tool_trace
         if o.tool_name not in {"semantic_search_ccq", "semantic_search_cpc"}
+    ]
+    source_observations = [
+        o for o in citable_observations
+        if not contains_generated_summary(o.normalized_response)
     ]
     available_urls = {u.rstrip(".,;)") for o in citable_observations
                       for u in o.source_urls}
     final_urls = {u.rstrip(".,;)") for u in URL_RE.findall(final)}
     invented_urls = final_urls - available_urls
     if invented_urls:
-        errors.append(f"URL absente des réponses d'outils : {sorted(invented_urls)}")
+        errors.append(tag(ErrorCode.UNGROUNDED_URL, f"URL absente des réponses d'outils : {sorted(invented_urls)}"))
     available_citations = {c.casefold() for o in citable_observations
                            for c in o.citations}
     for citation in CITATION_MARK_RE.findall(final):
         if citation.startswith("["):
             if not final_urls:
-                errors.append(f"citation {citation} sans source récupérée")
+                errors.append(tag(ErrorCode.UNGROUNDED_CITATION, f"citation {citation} sans source récupérée"))
         elif citation.casefold() not in available_citations:
-            errors.append(f"citation absente des réponses d'outils : {citation}")
+            errors.append(tag(ErrorCode.UNGROUNDED_CITATION, f"citation absente des réponses d'outils : {citation}"))
     evidence_text = "\n".join(
-        o.normalized_response for o in citable_observations
+        o.normalized_response for o in source_observations
     ).casefold()
     for article in ARTICLE_CITATION_RE.findall(final):
         if not re.search(rf"\barticle\s+{re.escape(article)}\b",
                          evidence_text, re.IGNORECASE):
-            errors.append(f"article {article} absent des réponses d'outils")
+            errors.append(tag(ErrorCode.UNGROUNDED_ARTICLE, f"article {article} absent des réponses d'outils"))
 
     assistant_text = "\n".join(
         m.content for m in trajectory.messages if m.role == Role.assistant
     )
     lang_err = _detect_language_mismatch(assistant_text, trajectory.language)
     if lang_err:
-        errors.append(lang_err)
+        errors.append(tag(ErrorCode.LANGUAGE_MISMATCH, lang_err))
 
     # --- v2.0 structural checks ---
     assistant_messages = [m for m in trajectory.messages
@@ -482,26 +499,72 @@ def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
             TOOL_CALL_RE.sub("", m.content) if not has_tool_call
             else "", "").strip()) > 100
         if has_tool_call and has_substantial and idx < len(assistant_messages) - 1:
-            warnings.append(f"appel d'outil et texte substantiel au message assistant {idx}")
+            warnings.append(tag(ErrorCode.TOOL_CALL_WITH_PROSE, f"appel d'outil et texte substantiel au message assistant {idx}"))
+
+    if max_thinking_words > 0:
+        for index, message in enumerate(trajectory.messages):
+            words = len((message.thinking or "").split())
+            if words > max_thinking_words:
+                warnings.append(tag(
+                    ErrorCode.THINKING_TOO_LONG,
+                    f"thinking trop long au message {index} : "
+                    f"{words} mots > {max_thinking_words}"))
 
     fingerprint = _fingerprint(trajectory)
     if seen_fingerprints is not None:
-        tokens = set(fingerprint.split())
-        near_duplicate = False
-        for previous in seen_fingerprints:
-            other = set(previous.split())
-            union = tokens | other
-            if union and len(tokens & other) / len(union) >= 0.90:
-                near_duplicate = True
-                break
-        if fingerprint in seen_fingerprints:
-            errors.append("doublon exact")
-        elif near_duplicate:
-            errors.append("quasi-duplicat")
+        index = (seen_fingerprints if isinstance(seen_fingerprints,
+                                                 FingerprintIndex)
+                 else FingerprintIndex(seen_fingerprints))
+        if fingerprint in index:
+            errors.append(tag(ErrorCode.EXACT_DUPLICATE, "doublon exact"))
+        elif index.near_duplicate(fingerprint, near_duplicate_jaccard):
+            errors.append(tag(ErrorCode.NEAR_DUPLICATE, "quasi-duplicat"))
         else:
-            seen_fingerprints.add(fingerprint)
+            index.add(fingerprint)
+        if index is not seen_fingerprints:
+            # Appelant historique passant un simple set : on lui rend son
+            # contenu à jour.
+            seen_fingerprints.update(index)
     return ValidationResult(
         valid=not errors, errors=list(dict.fromkeys(errors)), warnings=warnings)
+
+
+class FingerprintIndex(set):
+    """Empreintes vues, avec leurs ensembles de jetons pré-calculés.
+
+    La version précédente re-découpait la chaîne de CHAQUE empreinte déjà
+    vue à chaque nouvelle trajectoire : coût quadratique en nombre de
+    trajectoires, et re-tokenisation inutile. Hérite de ``set`` pour rester
+    compatible avec les appelants qui la traitent comme telle.
+
+    Le Jaccard reste purement lexical : il ne détecte pas les paraphrases.
+    Un dédoublonnage sémantique s'appuyant sur la chaîne d'embeddings du
+    projet reste à discuter.
+    """
+
+    def __init__(self, existing: Optional[set[str]] = None):
+        super().__init__(existing or ())
+        self._tokens: dict[str, frozenset[str]] = {
+            fingerprint: frozenset(fingerprint.split()) for fingerprint in self
+        }
+
+    def add(self, fingerprint: str) -> None:
+        super().add(fingerprint)
+        self._tokens[fingerprint] = frozenset(fingerprint.split())
+
+    def discard(self, fingerprint: str) -> None:
+        super().discard(fingerprint)
+        self._tokens.pop(fingerprint, None)
+
+    def near_duplicate(self, fingerprint: str, threshold: float) -> bool:
+        tokens = frozenset(fingerprint.split())
+        if not tokens:
+            return False
+        for other in self._tokens.values():
+            union = len(tokens | other)
+            if union and len(tokens & other) / union >= threshold:
+                return True
+        return False
 
 
 def _fingerprint(trajectory: TrainingTrajectory) -> str:

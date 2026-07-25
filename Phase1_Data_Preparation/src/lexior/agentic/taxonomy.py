@@ -82,6 +82,11 @@ class RequestTypeSpec:
     default_source_intents: list = field(default_factory=list)
     legal_domain: str = "droit civil québécois"
     default_weight: float = 1.0
+    # Faits sans lesquels une réponse ne peut pas être fondée. Consommés par
+    # le nœud analyze_facts, qui les inscrit dans
+    # ``missing_facts_before_search``; validate_plan force alors une
+    # clarification, indépendamment de ce que propose le planner.
+    required_facts: list = field(default_factory=list)
     clarification_weights: dict = field(default_factory=lambda: {
         "none": 0.55, "before_search": 0.20, "after_initial_research": 0.25,
     })
@@ -94,6 +99,7 @@ class RequestTypeSpec:
 REQUEST_TYPES: dict[str, RequestTypeSpec] = {rt.name: rt for rt in [
     RequestTypeSpec(
         name="case_analysis",
+        required_facts=["juridiction applicable"],
         description="Cas concret : appliquer la loi à des faits particuliers, "
                     "identifier la règle, chercher la jurisprudence pertinente.",
         expected_route=_route(
@@ -119,6 +125,7 @@ REQUEST_TYPES: dict[str, RequestTypeSpec] = {rt.name: rt for rt in [
     ),
     RequestTypeSpec(
         name="procedure_guidance",
+        required_facts=["juridiction applicable"],
         description="Question de procédure : appel, rétractation, injonction, "
                     "mise en demeure, signification, délais.",
         expected_route=_route(
@@ -266,6 +273,9 @@ REQUEST_TYPES: dict[str, RequestTypeSpec] = {rt.name: rt for rt in [
     ),
     RequestTypeSpec(
         name="document_analysis",
+        required_facts=[
+            "nature du document",
+        ],
         description="Analyser un document fourni (jugement, bail, contrat, "
                     "mise en demeure, constat d'infraction).",
         expected_route=_route(
@@ -286,6 +296,9 @@ REQUEST_TYPES: dict[str, RequestTypeSpec] = {rt.name: rt for rt in [
     ),
     RequestTypeSpec(
         name="comparative_law",
+        required_facts=[
+            "juridictions à comparer",
+        ],
         description="Comparaison entre le régime québécois et le régime fédéral "
                     "ou entre juridictions.",
         expected_route=_route(

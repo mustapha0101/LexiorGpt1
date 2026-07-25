@@ -30,7 +30,12 @@ CODE_NAMES = {
     "CCQ": "Code civil du Québec",
     "CPC": "Code de procédure civile du Québec",
 }
-RETRIEVAL_VERSION = "legal-rag-1.2-noncitable"
+RETRIEVAL_VERSION = "legal-rag-1.3-absolute-floor"
+
+# Saturation BM25 pour ramener un score lexical non borné dans [0, 1[. Seule
+# la forme de la courbe compte : les planchers sont calibrés après coup sur
+# tests/fixtures/retrieval_gold.jsonl.
+BM25_SATURATION = 5.0
 
 
 class RAGError(RuntimeError):
@@ -356,6 +361,8 @@ class LegalRAG:
             "llm_rerank_enabled": self.cfg.llm_rerank_enabled,
             "llm_rerank_k": self.cfg.llm_rerank_k,
             "reranker_model": getattr(reranker_endpoint, "model", ""),
+            "min_dense_score": self.cfg.min_dense_score,
+            "min_hybrid_score": self.cfg.min_hybrid_score,
         }
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -384,6 +391,12 @@ class LegalRAG:
 
     @staticmethod
     def _minmax(values: np.ndarray) -> np.ndarray:
+        """Normalisation de CLASSEMENT uniquement.
+
+        Elle ramène toujours le meilleur candidat à 1.0, y compris quand
+        aucun ne répond à la question : ne jamais s'en servir pour décider
+        de la pertinence. Voir ``_absolute_scores``.
+        """
         if not len(values):
             return values
         low, high = float(values.min()), float(values.max())
@@ -391,16 +404,41 @@ class LegalRAG:
             return np.ones_like(values) if high > 0 else np.zeros_like(values)
         return (values - low) / (high - low)
 
+    def _absolute_scores(self, dense: np.ndarray,
+                         lexical: np.ndarray) -> np.ndarray:
+        """Score hybride sur une échelle comparable d'une requête à l'autre.
+
+        Le cosinus est déjà absolu; BM25 ne l'est pas et sature ici dans
+        [0, 1[. Contrairement au score min-max, ce score reste bas quand
+        aucun article ne correspond.
+        """
+        weight = min(max(float(self.cfg.dense_weight), 0.0), 1.0)
+        saturated = lexical / (lexical + BM25_SATURATION)
+        return weight * dense + (1.0 - weight) * saturated
+
+    def _above_floor(self, dense: np.ndarray,
+                     absolute: np.ndarray) -> np.ndarray:
+        """Masque des candidats qui dépassent les deux planchers absolus."""
+        return ((dense >= float(self.cfg.min_dense_score))
+                & (absolute >= float(self.cfg.min_hybrid_score)))
+
     def _llm_rerank(self, query: str, code: str,
                     results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Réordonne uniquement les candidats existants, sans créer d'article."""
+        """Réordonne et peut écarter des candidats, sans jamais en créer.
+
+        Le reranker est le seul point de la chaîne où la question rencontre
+        le texte des articles : il peut donc déclarer un candidat hors sujet
+        et le retirer. Il ne peut en revanche pas introduire un numéro absent
+        des candidats récupérés — cette garantie est vérifiée par les tests.
+        """
         if not (self.cfg.llm_rerank_enabled and self.reranker and results):
             return results
+        judged = results[:max(int(self.cfg.llm_rerank_k), 1)]
         payload = [{
             "article_number": item["article_number"],
             "excerpt": item["excerpt"],
             "hybrid_score": item["score"],
-        } for item in results[:max(int(self.cfg.llm_rerank_k), 1)]]
+        } for item in judged]
         try:
             answer = self.reranker.complete_json(
                 "retrieval_reranker",
@@ -412,10 +450,15 @@ class LegalRAG:
                             "Classe seulement les articles candidats fournis selon leur "
                             "capacité à répondre directement à la question. Pénalise un "
                             "article limité à un contexte spécial absent de la question "
-                            "(autre province, appel, exécution, etc.). N'invente aucun "
-                            "numéro. Réponds uniquement par l'objet JSON "
-                            '{"ranking":["numéro", "numéro"]}, contenant chaque numéro '
-                            "candidat exactement une fois."
+                            "(autre province, appel, exécution, etc.). Place dans "
+                            '"rejected" tout candidat qui ne traite pas du sujet de la '
+                            "question : mieux vaut ne rien retourner que de retourner "
+                            "un article hors sujet, et rejeter tous les candidats est "
+                            "une réponse valide. N'invente aucun numéro. Réponds "
+                            "uniquement par l'objet JSON "
+                            '{"ranking":["numéro"],"rejected":["numéro"]}, où chaque '
+                            "numéro candidat apparaît exactement une fois, dans l'une "
+                            "ou l'autre des listes."
                         ),
                     },
                     {
@@ -435,15 +478,28 @@ class LegalRAG:
         ranking = answer.get("ranking")
         if not isinstance(ranking, list):
             return results
+        # Un candidat non soumis au reranker n'a pas été jugé : il ne peut
+        # pas être écarté.
+        judged_numbers = {str(item["article_number"]) for item in judged}
+        raw_rejected = answer.get("rejected")
+        rejected = {
+            str(value).strip() for value in raw_rejected
+            if str(value).strip() in judged_numbers
+        } if isinstance(raw_rejected, list) else set()
+
         ordered: list[dict[str, Any]] = []
         seen: set[str] = set()
         for value in ranking:
             key = str(value).strip()
-            if key in allowed and key not in seen:
+            if key in allowed and key not in seen and key not in rejected:
                 ordered.append(allowed[key])
                 seen.add(key)
-        # Une sortie incomplète ne supprime jamais un candidat récupéré.
-        ordered.extend(item for item in results if item["article_number"] not in seen)
+        # Une sortie incomplète ne supprime jamais un candidat récupéré :
+        # seul un rejet explicite le fait.
+        ordered.extend(
+            item for item in results
+            if item["article_number"] not in seen
+            and item["article_number"] not in rejected)
         for position, item in enumerate(ordered, start=1):
             item["rerank_position"] = position
             item["reranker"] = "llm"
@@ -474,6 +530,17 @@ class LegalRAG:
             list(dict.fromkeys([*dense_positions.tolist(), *lexical_positions.tolist()])),
             dtype=np.int64,
         )
+        absolute = self._absolute_scores(
+            dense[candidate_positions], lexical[candidate_positions])
+        # Aucun candidat au-dessus des planchers : le corpus ne répond pas.
+        # `call()` produira « Aucun article trouvé », que le classifieur voit
+        # comme `empty` et qui déclenche la reformulation.
+        keep = self._above_floor(dense[candidate_positions], absolute)
+        if not bool(keep.all()):
+            candidate_positions = candidate_positions[keep]
+            absolute = absolute[keep]
+            if not len(candidate_positions):
+                return []
         dense_normalized = self._minmax(dense[candidate_positions])
         lexical_normalized = self._minmax(lexical[candidate_positions])
         weight = min(max(float(self.cfg.dense_weight), 0.0), 1.0)
@@ -494,6 +561,8 @@ class LegalRAG:
                 "article": document.article_label,
                 "article_number": document.article_number,
                 "score": round(float(reranked[int(order_position)]), 6),
+                "absolute_score": round(
+                    float(absolute[int(order_position)]), 6),
                 "dense_score": round(float(dense[candidate_position]), 6),
                 "lexical_score": round(float(lexical[candidate_position]), 6),
                 "excerpt": document.text[:700],
@@ -515,8 +584,12 @@ class LegalRAG:
         if not results:
             text = f"Aucun article {code} trouvé."
         else:
+            # Le score affiché est le score ABSOLU : le score min-max vaut
+            # toujours 1.000 pour le premier résultat et apprendrait au
+            # modèle à faire confiance à n'importe quel résultat.
             lines = [
-                f"{item['article']} — score de pertinence {item['score']:.3f}"
+                f"{item['article']} — score de pertinence "
+                f"{item.get('absolute_score', item['score']):.3f}"
                 for item in results
             ]
             text = "\n\n".join(lines)

@@ -17,7 +17,12 @@ from typing import Any
 
 from lexior.agentic.schemas import Decision, DecisionTrace, PlannerDecision
 from lexior.services.evidence import AcceptanceBlocker, CoverageGap
-from lexior.services.jurisdiction import QC_ONLY_TOOLS, allows_quebec_tools
+from lexior.services.jurisdiction import (
+    QC_ONLY_TOOLS,
+    allows_quebec_tools,
+    coverage_action,
+    is_federal,
+)
 from lexior.services.modes import is_live
 from lexior.services.tool_coverage import get_coverage, has_equivalent_coverage
 from lexior.services.validation import ProposalVerdict
@@ -28,21 +33,36 @@ from ..state import LexiorState
 NAME = "validate_plan"
 
 
-def _forced_final(decision: PlannerDecision, jurisdiction: str,
-                  need: str, thinking: str) -> PlannerDecision:
+def _forced(decision: PlannerDecision, jurisdiction: str, need: str,
+            thinking: str, action: Decision,
+            question: str = "") -> PlannerDecision:
     return PlannerDecision(
         request_type=decision.request_type,
         jurisdiction=jurisdiction,
         missing_critical_facts=decision.missing_critical_facts,
         required_sources=decision.required_sources,
-        decision=Decision.final_answer,
+        decision=action,
+        clarification_question=question or decision.clarification_question,
         thinking_text=thinking,
         decision_trace=DecisionTrace(
             request_type=decision.request_type,
             jurisdiction=jurisdiction,
             need=need,
-            next_action="final_answer"),
+            next_action=action.value),
     )
+
+
+def _forced_final(decision: PlannerDecision, jurisdiction: str,
+                  need: str, thinking: str) -> PlannerDecision:
+    return _forced(decision, jurisdiction, need, thinking,
+                   Decision.final_answer)
+
+
+def _is_federal_matter(state: LexiorState,
+                       decision: PlannerDecision) -> bool:
+    """Le droit applicable est-il fédéral, quelle que soit la province ?"""
+    return (is_federal(state.get("expected_jurisdiction", ""))
+            or is_federal(decision.jurisdiction))
 
 
 def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
@@ -72,10 +92,62 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     updates: dict[str, Any] = {"step": step}
     if locked and resolved:
         decision.jurisdiction = resolved
-    elif decision.jurisdiction:
+    elif decision.jurisdiction and not live:
+        # Dataset seulement : les routes sont scriptées et le scénario fait
+        # foi. En live, laisser la proposition du planner s'installer comme
+        # juridiction résolue reviendrait à DEVINER la province — c'est
+        # précisément ce que la clarification obligatoire empêche, et
+        # resolve_jurisdiction reste l'unique écrivain de ce champ.
         updates["resolved_jurisdiction"] = decision.jurisdiction
         updates["jurisdiction_status"] = decision.jurisdiction
         resolved = decision.jurisdiction
+
+    # 5d. Couverture de juridiction — quatre cas, quatre comportements.
+    # Le comportement manquait : les catégories n'existaient que dans le
+    # YAML des distributions.
+    if live and decision.decision != Decision.ask_clarification:
+        action = coverage_action(
+            resolved, federal_matter=_is_federal_matter(state, decision))
+        clarifications = state.get("clarification_count", 0)
+        if action == "clarify" and clarifications < 2:
+            decision = _forced(
+                decision, resolved,
+                need="juridiction inconnue",
+                thinking=("La juridiction applicable n'est pas établie et le "
+                          "droit varie d'une province à l'autre : je la "
+                          "demande plutôt que de la supposer."),
+                action=Decision.ask_clarification,
+                question=("Dans quelle province êtes-vous? La réponse dépend "
+                          "du droit applicable."))
+        elif action == "decline":
+            decision = _forced(
+                decision, resolved,
+                need="juridiction hors couverture",
+                thinking=(f"La situation relève du droit de {resolved}, hors "
+                          "du droit québécois et du droit fédéral canadien. "
+                          "Je ne peux pas répondre sur ce fondement."),
+                action=Decision.cannot_conclude)
+            updates["stop_reason"] = "jurisdiction_not_covered"
+
+    # 2bis. Faits critiques manquants — clarification FORCÉE.
+    # Le vérificateur décide; le planner n'a pas à y penser de lui-même.
+    missing = [fact for fact in state.get("missing_facts_before_search", [])
+               if str(fact).strip()]
+    if (live and missing
+            and decision.decision not in (Decision.ask_clarification,
+                                          Decision.cannot_conclude)
+            and state.get("clarification_count", 0) < 2
+            and not state.get("tool_history")):
+        decision = _forced(
+            decision, resolved,
+            need="faits critiques manquants",
+            thinking=("Des faits indispensables manquent "
+                      f"({', '.join(missing[:3])}) : je les demande avant de "
+                      "chercher, sinon la réponse porterait sur une "
+                      "situation supposée."),
+            action=Decision.ask_clarification,
+            question=(f"Pour répondre précisément, il me manque : "
+                      f"{', '.join(missing[:3])}. Pouvez-vous préciser?"))
 
     # 2. Clarification bornée.
     if decision.decision == Decision.ask_clarification:

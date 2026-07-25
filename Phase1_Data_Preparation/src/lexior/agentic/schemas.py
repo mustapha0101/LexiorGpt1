@@ -643,7 +643,6 @@ class GenerationManifest(BaseModel):
     category_targets: dict[str, int] = Field(default_factory=dict)
     costs: dict[str, Any] = Field(default_factory=dict)
     taxonomy_proportions: dict[str, float] = Field(default_factory=dict)
-    mix: dict[str, Any] = Field(default_factory=dict)
     files: dict[str, str] = Field(default_factory=dict)
     config_snapshot: dict[str, Any] = Field(default_factory=dict)
     distribution_achieved: dict[str, Any] = Field(default_factory=dict)

@@ -129,7 +129,7 @@ def test_both_modes_share_the_same_compiled_graph(catalog):
     graph_before = shared.graph
 
     dataset_result = shared.run_dataset(_scenario())
-    live_result = shared.run_live("Question de test?")
+    live_result = shared.run_live("Question de test? Je suis au Québec.")
 
     assert shared.graph is graph_before  # jamais recompilé par mode
     assert dataset_result.final_state.get("mode") == "dataset"
@@ -200,7 +200,7 @@ def test_both_modes_use_the_same_planner_service(catalog):
     service.propose = spy
     try:
         runner.run_dataset(_scenario())
-        runner.run_live("Question?")
+        runner.run_live("Question? Je suis au Québec.")
     finally:
         service.propose = original
 
@@ -262,7 +262,7 @@ def test_both_modes_use_the_same_critics_and_blockers(catalog):
     critics.evaluate = spy
     try:
         runner.run_dataset(_scenario())
-        runner.run_live("Question?")
+        runner.run_live("Question? Je suis au Québec.")
     finally:
         critics.evaluate = original
 
@@ -427,11 +427,12 @@ def test_validate_plan_overrides_decision_with_locked_jurisdiction(runner):
     assert update["latest_decision"]["jurisdiction"] == "Ontario"
 
 
-def test_validate_plan_blocks_quebec_tools_outside_quebec(runner):
+def _outside_quebec_state(expected_jurisdiction: str = ""):
     state = initial_state(_scenario(), mode="live", system_prompt="t")
     state.update(
         resolved_jurisdiction="hors Québec (province non précisée)",
         jurisdiction_locked=True,
+        expected_jurisdiction=expected_jurisdiction,
         latest_decision=PlannerDecision(
             request_type="case_analysis", jurisdiction="",
             decision=Decision.call_tool,
@@ -440,7 +441,25 @@ def test_validate_plan_blocks_quebec_tools_outside_quebec(runner):
         ).model_dump(mode="json"),
         step=1,
     )
-    update = node_validate_plan.run(state, runner.context)
+    return state
+
+
+def test_a_provincial_matter_outside_quebec_is_declined(runner):
+    """Hors Québec et hors fédéral : le système dit que ce n'est pas
+    couvert, il n'improvise pas une réponse fédérale."""
+    update = node_validate_plan.run(_outside_quebec_state(), runner.context)
+
+    assert update["latest_decision"]["decision"] == "cannot_conclude"
+    assert update["latest_decision"]["next_tool"] is None
+    assert update["stop_reason"] == "jurisdiction_not_covered"
+
+
+def test_a_federal_matter_outside_quebec_stays_covered(runner):
+    """L'exception : hors Québec mais relevant du droit fédéral."""
+    update = node_validate_plan.run(
+        _outside_quebec_state(expected_jurisdiction="Federal"),
+        runner.context)
+
     assert update["latest_decision"]["decision"] == "final_answer"
     assert update["latest_decision"]["next_tool"] is None
 
@@ -528,7 +547,7 @@ def test_streaming_events_come_from_the_central_graph(catalog):
     planner = ScriptedPlanner([_final()])
     runner = offline_runner(catalog, planner=planner,
                             writer=TrajectoryAgent(offline=True))
-    events = list(runner.stream_live("Question de test?"))
+    events = list(runner.stream_live("Question de test? Je suis au Québec."))
 
     kinds = {e["type"] for e in events}
     assert {"status", "token", "done"} <= kinds
@@ -544,7 +563,7 @@ def test_dataset_and_live_traces_are_comparable(catalog):
     runner = offline_runner(catalog, planner=planner,
                             writer=TrajectoryAgent(offline=True))
     dataset_result = runner.run_dataset(_scenario())
-    live_result = runner.run_live("Question de test?")
+    live_result = runner.run_live("Question de test? Je suis au Québec.")
 
     dataset_traj = dataset_result.final_state.get("trajectory")
     live_traj = live_result.final_state.get("trajectory")

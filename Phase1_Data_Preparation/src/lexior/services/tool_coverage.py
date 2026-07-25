@@ -15,6 +15,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from lexior.agentic.citations import (
+    FEDERAL_COURT_SCOPES as _FEDERAL_COURT_SCOPES,
+    QUEBEC_COURT_SCOPES as _QUEBEC_COURT_SCOPES,
+)
+
 
 @dataclass(frozen=True)
 class ToolCoverageEntry:
@@ -66,15 +71,9 @@ class ToolCoverageEntry:
         }
 
 
-# Quebec court scopes that search_legal_documents does NOT cover.
-QUEBEC_COURT_SCOPES = (
-    "QCCA", "QCCS", "QCCQ", "QCTAL", "QCTAT",
-    "QCTDP", "QCRDE", "QCCAI",
-)
-
-FEDERAL_COURT_SCOPES = (
-    "SCC", "FCA", "FC", "TCC",
-)
+# Réexportés depuis la source unique : voir agentic/citations.py.
+QUEBEC_COURT_SCOPES = _QUEBEC_COURT_SCOPES
+FEDERAL_COURT_SCOPES = _FEDERAL_COURT_SCOPES
 
 
 # ── Registry ────────────────────────────────────────────────────────────
@@ -155,10 +154,21 @@ TOOL_COVERAGE: dict[str, ToolCoverageEntry] = {
         document_types=("court_decision",),
         legal_jurisdictions=("Québec",),
         court_scopes=QUEBEC_COURT_SCOPES,
-        enabled_modes=("dataset",),
-        availability_status="unavailable",
+        enabled_modes=("dataset", "live"),
+        availability_status="available",
         availability_reason=(
-            "unstable server and invalid document-type results"),
+            "Réactivé le 2026-07-24. Le taux d'échec observé auparavant "
+            "était côté client : QCTAL manquait des expressions de citation "
+            "de result_classifier, validators et case_law_gate, donc toute "
+            "décision du Tribunal administratif du logement — la juridiction "
+            "du contentieux locatif — était classée wrong_document_type. "
+            "Liste unifiée dans agentic/citations.py. La formulation de la "
+            "requête compte : nommer le tribunal et le mot « décision » "
+            "ramène 4 décisions sur 8 résultats là où une formulation "
+            "doctrinale en ramenait 0 sur 8 (voir prompts.py). Les résumés "
+            "restent rédigés par un modèle côté serveur : la décision et son "
+            "lien sont citables, le texte du résumé ne l'est pas "
+            "(contains_generated_summary)."),
     ),
 
     # ── a2aj: federal ───────────────────────────────────────────────────

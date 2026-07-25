@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Optional, Sequence
 
 # ── Outils dont les sources sont exclusivement québécoises ───────────────
@@ -94,6 +95,73 @@ def detect_jurisdiction_hint(messages: Sequence) -> Optional[str]:
 
 def is_quebec(value: str) -> bool:
     return bool(value) and value.strip().casefold() in ("québec", "quebec")
+
+
+# ── Couverture : quatre cas, quatre comportements ────────────────────────
+
+CANADIAN_PROVINCES = frozenset({
+    "ontario", "alberta", "manitoba", "saskatchewan",
+    "colombie-britannique", "colombie britannique", "british columbia",
+    "nouvelle-écosse", "nouvelle écosse", "nova scotia",
+    "nouveau-brunswick", "nouveau brunswick", "new brunswick",
+    "terre-neuve", "terre-neuve-et-labrador", "newfoundland",
+    "île-du-prince-édouard", "ile-du-prince-edouard", "prince edward island",
+    "yukon", "nunavut", "territoires du nord-ouest", "northwest territories",
+})
+
+_FEDERAL_VALUES = frozenset({"federal", "fédéral", "canada", "canadien"})
+
+
+class JurisdictionCoverage(str, Enum):
+    """Ce que le système peut traiter, et ce qu'il doit refuser."""
+
+    supported_quebec = "supported_quebec"
+    supported_federal = "supported_federal"
+    unsupported_other_canadian = "unsupported_other_canadian"
+    unsupported_foreign = "unsupported_foreign"
+    unknown = "unknown"
+
+
+# Comportement associé — c'est ce qui manquait : les catégories existaient
+# dans le YAML, pas la conduite à tenir.
+COVERAGE_ACTIONS: dict[JurisdictionCoverage, str] = {
+    JurisdictionCoverage.supported_quebec: "proceed",
+    JurisdictionCoverage.supported_federal: "proceed",
+    JurisdictionCoverage.unsupported_other_canadian: "decline",
+    JurisdictionCoverage.unsupported_foreign: "decline",
+    # Inconnu : on demande, on ne devine pas.
+    JurisdictionCoverage.unknown: "clarify",
+}
+
+
+def is_federal(value: str) -> bool:
+    return (value or "").strip().casefold() in _FEDERAL_VALUES
+
+
+def classify_coverage(value: str,
+                      federal_matter: bool = False) -> JurisdictionCoverage:
+    """Couverture d'une juridiction, en tenant compte du droit applicable.
+
+    Exception explicite : une personne hors Québec dont le cas relève du
+    droit fédéral EST couverte — la localisation ne décide pas seule.
+    """
+    folded = (value or "").strip().casefold()
+    if not folded:
+        return JurisdictionCoverage.unknown
+    if is_quebec(folded):
+        return JurisdictionCoverage.supported_quebec
+    if folded in _FEDERAL_VALUES:
+        return JurisdictionCoverage.supported_federal
+    if federal_matter:
+        return JurisdictionCoverage.supported_federal
+    if folded in CANADIAN_PROVINCES or folded == OUTSIDE_QUEBEC.casefold():
+        return JurisdictionCoverage.unsupported_other_canadian
+    return JurisdictionCoverage.unsupported_foreign
+
+
+def coverage_action(value: str, federal_matter: bool = False) -> str:
+    """``proceed``, ``decline`` ou ``clarify``."""
+    return COVERAGE_ACTIONS[classify_coverage(value, federal_matter)]
 
 
 def allows_quebec_tools(value: str) -> bool:

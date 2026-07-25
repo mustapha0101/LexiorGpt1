@@ -123,6 +123,11 @@ class RAGConfig:
     dense_weight: float = 0.60
     llm_rerank_enabled: bool = True
     llm_rerank_k: int = 10
+    # Planchers de pertinence sur l'échelle ABSOLUE (la normalisation min-max
+    # ramène toujours le meilleur candidat à 1.0, même quand il est hors
+    # sujet). Un corpus sans réponse doit produire une liste vide.
+    min_dense_score: float = 0.0
+    min_hybrid_score: float = 0.0
 
     def redacted(self) -> dict[str, Any]:
         return {
@@ -140,6 +145,8 @@ class RAGConfig:
             "dense_weight": self.dense_weight,
             "llm_rerank_enabled": self.llm_rerank_enabled,
             "llm_rerank_k": self.llm_rerank_k,
+            "min_dense_score": self.min_dense_score,
+            "min_hybrid_score": self.min_hybrid_score,
         }
 
 
@@ -160,7 +167,6 @@ class AgenticConfig:
 
     # --- limites de contenu ----------------------------------------------
     max_tool_response_chars: int = 6000
-    max_doc_fetch_chars: int = 12000
     near_duplicate_jaccard: float = 0.90
 
     # --- seuils critiques ------------------------------------------------
@@ -192,9 +198,32 @@ class AgenticConfig:
 
     # --- legacy / mélange / split (depuis le YAML) ----------------------
     taxonomy_proportions: dict[str, float] = field(default_factory=dict)
-    mix: dict[str, Any] = field(default_factory=dict)
     split: dict[str, Any] = field(default_factory=dict)
     hf_dataset_repo_id: str = ""
+
+    @property
+    def critic_is_teacher(self) -> bool:
+        """Le critic est-il le même modèle que le teacher ?
+
+        Repli légitime quand ``critic.model`` est vide dans le YAML, mais
+        le même modèle génère alors la trajectoire ET la juge : le taux
+        d'acceptation en est mécaniquement gonflé. Doit être visible sans
+        lire le code — voir ``warnings()`` et le manifeste du run.
+        """
+        return (self.critic.model == self.teacher.model
+                and self.critic.base_url == self.teacher.base_url)
+
+    def warnings(self) -> list[str]:
+        """Avertissements à afficher au démarrage d'un run."""
+        messages: list[str] = []
+        if self.critic_is_teacher and not self.no_critics:
+            model = self.critic.model or "modèle non défini"
+            messages.append(
+                f"critic == teacher ({model}) : le même modèle génère et "
+                f"juge la trajectoire, avec un seuil d'acceptation à "
+                f"{self.legal_min_score}. Le taux d'acceptation est à lire "
+                f"en conséquence.")
+        return messages
 
     def redacted(self) -> dict[str, Any]:
         return {
@@ -208,7 +237,6 @@ class AgenticConfig:
             "allow_remote_calls": self.allow_remote_calls,
             "no_critics": self.no_critics,
             "max_tool_response_chars": self.max_tool_response_chars,
-            "max_doc_fetch_chars": self.max_doc_fetch_chars,
             "near_duplicate_jaccard": self.near_duplicate_jaccard,
             "legal_min_score": self.legal_min_score,
             "agentic_min_score": self.agentic_min_score,
@@ -217,13 +245,13 @@ class AgenticConfig:
             "prompt_version": self.prompt_version,
             "teacher": self.teacher.redacted(),
             "critic": self.critic.redacted(),
+            "critic_is_teacher": self.critic_is_teacher,
             "rag": self.rag.redacted(),
             "request_type_weights": self.request_type_weights,
             "jurisdiction_weights": self.jurisdiction_weights,
             "failure_injection_rate": self.failure_injection_rate,
             "max_search_reformulations": self.max_search_reformulations,
             "max_thinking_words": self.max_thinking_words,
-            "mix": self.mix,
             "split": self.split,
             "hf_dataset_repo_id": self.hf_dataset_repo_id,
         }
@@ -249,8 +277,6 @@ def load_config(config_path: Optional[str] = None,
     cfg.max_tool_calls = int(gen.get("max_tool_calls", cfg.max_tool_calls))
     cfg.max_tool_response_chars = int(gen.get("max_tool_response_chars",
                                               cfg.max_tool_response_chars))
-    cfg.max_doc_fetch_chars = int(gen.get("max_doc_fetch_chars",
-                                          cfg.max_doc_fetch_chars))
     cfg.near_duplicate_jaccard = float(gen.get("near_duplicate_jaccard",
                                                cfg.near_duplicate_jaccard))
     cfg.prompt_version = gen.get("prompt_version", cfg.prompt_version)
@@ -347,6 +373,10 @@ def load_config(config_path: Optional[str] = None,
             bool(rag_yaml.get("llm_rerank_enabled", RAGConfig.llm_rerank_enabled)),
         ),
         llm_rerank_k=int(rag_yaml.get("llm_rerank_k", RAGConfig.llm_rerank_k)),
+        min_dense_score=float(
+            rag_yaml.get("min_dense_score", RAGConfig.min_dense_score)),
+        min_hybrid_score=float(
+            rag_yaml.get("min_hybrid_score", RAGConfig.min_hybrid_score)),
     )
 
     cfg.request_type_weights = dict(gen.get("request_type_weights", {}))
@@ -362,11 +392,6 @@ def load_config(config_path: Optional[str] = None,
         gen.get("max_thinking_words", cfg.max_thinking_words))
 
     cfg.taxonomy_proportions = dict(raw.get("taxonomy", {}).get("proportions", {}))
-    cfg.mix = dict(raw.get("mix", {}))
-    cfg.mix["include_legacy_legal"] = _env_bool(
-        "INCLUDE_LEGACY_LEGAL", bool(cfg.mix.get("include_legacy_legal", False)))
-    cfg.mix["include_identity_data"] = _env_bool(
-        "INCLUDE_IDENTITY_DATA", bool(cfg.mix.get("include_identity_data", True)))
     cfg.split = dict(raw.get("split", {}))
     cfg.hf_dataset_repo_id = _env(
         "HF_DATASET_REPO_ID",

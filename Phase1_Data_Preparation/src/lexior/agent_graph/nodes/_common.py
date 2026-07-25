@@ -7,6 +7,7 @@ import re
 from typing import Optional
 
 from lexior.agentic.schemas import Message
+from lexior.agentic.citations import find_case_citation
 
 _GREETING_RE = re.compile(
     r"^\s*(bonjour|salut|allo|hello|hi|merci)\b[\s!.,]*$", re.I)
@@ -92,7 +93,4 @@ def looks_like_follow_up(text: str, has_previous_answer: bool) -> bool:
 
 
 def detect_case_reference(text: str) -> Optional[str]:
-    match = re.search(
-        r"\b\d{4}\s+(?:QCCA|QCCS|QCCQ|QCTDP|SCC|CSC|FC|CF|FCA|CAF)\s+\d+\b",
-        text or "")
-    return match.group(0) if match else None
+    return find_case_citation(text) or None

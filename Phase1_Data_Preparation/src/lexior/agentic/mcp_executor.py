@@ -12,19 +12,33 @@ from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
+from .citations import COURT_SCOPE_PATTERN
+from .response_verifier import strip_reader_directed
 from .schemas import ToolCall, ToolObservation
 from .storage import JsonCache, stable_hash
 from .tool_catalog import CatalogError, ToolCatalog
 
 URL_RE = re.compile(r"https?://[^\s<>\]\[\"')]+")
 CITATION_RE = re.compile(
-    r"\b(?:\d{4}\s+(?:SCC|CSC|FC|CF|FCA|CAF|QCCA|QCCS|QCCQ)\s+\d+|"
+    rf"\b(?:\d{{4}}\s+(?:{COURT_SCOPE_PATTERN})\s+\d+|"
     r"RLRQ\s+c\s+[A-Za-z0-9.,\- ]+|[A-Z]-\d+(?:\.\d+)?(?:,\s*r\.\s*[^\n;]+)?)\b",
     re.IGNORECASE,
 )
 TEMP_PATH_RE = re.compile(r"(?:workspaceStorage|content\.txt|[A-Za-z]:\\[^\s]+)", re.IGNORECASE)
+
+# SOQUIJ renvoie parfois « citoyens.soquij.qc.ca/ID=<hex> », sans le segment
+# « /php/decision.php? ». L'identifiant est bon, le chemin manque : l'URL est
+# irrésolvable en l'état et ferait échouer la validation. La forme correcte
+# apparaît dans les mêmes runs, ce qui confirme la réécriture.
+SOQUIJ_MALFORMED_RE = re.compile(
+    r"(https?://citoyens\.soquij\.qc\.ca)/ID=([0-9A-Fa-f]{16,})")
+
+
+def normalize_soquij_urls(text: str) -> str:
+    """Rend résolvables les URLs SOQUIJ amputées de leur chemin."""
+    return SOQUIJ_MALFORMED_RE.sub(r"\1/php/decision.php?ID=\2", text or "")
 SECRET_RE = re.compile(r"(?i)(?:bearer\s+|api[_-]?key[=:]\s*)[^\s,;]+")
-NORMALIZATION_VERSION = "mcp-normalize-1.1-compact-legal-search"
+NORMALIZATION_VERSION = "mcp-normalize-1.2-strip-reader-directed"
 
 
 class MCPExecutionError(Exception):
@@ -69,6 +83,11 @@ def normalize_mcp_response(raw: Any, max_chars: int) -> tuple[str, list[str], li
     text = _text_content(jsonable).replace("\r\n", "\n").strip()
     # Les chemins temporaires ne sont jamais propagés au dataset.
     text = TEMP_PATH_RE.sub("[chemin local supprimé]", text)
+    # Certains serveurs terminent leur réponse par des offres adressées au
+    # lecteur (« Si vous souhaitez, je peux… ») : un modèle entraîné là-dessus
+    # apprendrait qu'un outil de recherche lui pose des questions.
+    text = strip_reader_directed(text)
+    text = normalize_soquij_urls(text)
     structured_urls: list[str] = []
     structured_citations: list[str] = []
     def collect(value: Any, key: str = "") -> None:
@@ -80,7 +99,7 @@ def normalize_mcp_response(raw: Any, max_chars: int) -> tuple[str, list[str], li
                 collect(child, key)
         elif isinstance(value, str):
             if "url" in key.casefold() and value.startswith(("http://", "https://")):
-                structured_urls.append(value)
+                structured_urls.append(normalize_soquij_urls(value))
             if "citation" in key.casefold() and value.strip():
                 structured_citations.append(value.strip())
     collect(jsonable)

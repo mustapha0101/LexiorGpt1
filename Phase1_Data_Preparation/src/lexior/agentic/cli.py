@@ -18,6 +18,8 @@ from .fixtures import MOCK_MCP_FIXTURES
 from .legal_rag import (LegalRAG, OpenAIEmbedder, RAGError, build_index,
                         index_exists)
 from .mcp_executor import MCPExecutor, MockMCPTransport, RealMCPTransport
+from .publisher import (DEFAULT_GROUP_BY, PublicationError, prepare_release,
+                        push_release)
 from .anchor_bank import AnchorBank, build_anchor_bank
 from .scenario_generator import ScenarioGenerator
 from .schemas import GenerationManifest
@@ -26,7 +28,10 @@ from .teacher_client import TeacherClient
 from .taxonomy import target_request_type_counts
 from .tool_catalog import load_catalog
 
+from pathlib import Path
+from dotenv import load_dotenv
 
+load_dotenv(Path(__file__).resolve().parents[4] / ".env")
 def _usage_snapshot(*clients) -> dict[str, float | int]:
     """Totalise les clients distincts (Teacher et Critic peuvent être le même)."""
     totals: dict[str, float | int] = {
@@ -120,6 +125,14 @@ def _parser() -> argparse.ArgumentParser:
     rag.add_argument("--split", default=None)
     rag.add_argument("--limit", type=int, default=-1)
     rag.add_argument("--force", action="store_true")
+    publish = sub.add_parser(
+        "publish", help="produire train/validation/test.jsonl audités")
+    publish.add_argument("--config", default=None)
+    publish.add_argument("--run-id", required=True,
+                         help="run dont les trajectoires acceptées sont publiées")
+    publish.add_argument("--output-dir", default=None)
+    publish.add_argument("--push-to-hf", action="store_true")
+    publish.add_argument("--allow-remote-calls", action="store_true")
     return parser
 
 
@@ -248,6 +261,8 @@ def generate(args) -> int:
         f"objectif={cfg.target_accepted} | limite={cfg.max_scenarios if cfg.max_scenarios > 0 else cfg.target_accepted * 5}",
         flush=True,
     )
+    for warning in cfg.warnings():
+        print(f"[avert] {warning}", flush=True)
     storage = RunStorage(cfg.data_root, run_id)
     cache_root = Path(cfg.data_root) / "cache"
     teacher_cache = JsonCache(cache_root / "teacher")
@@ -392,7 +407,7 @@ def generate(args) -> int:
                        if critic_client is not None and critic_client is not teacher else {}),
             "rag_queries": rag.cost_report() if rag else {},
         },
-        taxonomy_proportions=cfg.request_type_weights, mix=cfg.mix,
+        taxonomy_proportions=cfg.request_type_weights,
         files={
             "accepted": str(storage.accepted_path),
             "rejected": str(storage.rejected_path),
@@ -433,12 +448,75 @@ def generate(args) -> int:
     return 0 if counts["accepted"] >= cfg.target_accepted else 2
 
 
+def publish(args) -> int:
+    """Produit train/validation/test.jsonl à partir des acceptées d'un run."""
+    cfg, catalog = _build(args)
+    storage = RunStorage(cfg.data_root, args.run_id)
+    if not storage.accepted_path.exists():
+        raise SystemExit(
+            f"aucune trajectoire acceptée pour le run {args.run_id} "
+            f"({storage.accepted_path})")
+    if not storage.manifest_path.exists():
+        raise SystemExit(f"manifeste absent : {storage.manifest_path}")
+
+    for warning in cfg.warnings():
+        print(f"[avert] {warning}", flush=True)
+
+    split_cfg = cfg.split or {}
+    ratios = (
+        float(split_cfg.get("train", 0.90)),
+        float(split_cfg.get("validation", 0.05)),
+        float(split_cfg.get("test", 0.05)),
+    )
+    output_dir = Path(args.output_dir or
+                      (Path(cfg.data_root) / "releases" / args.run_id))
+    try:
+        audit = prepare_release(
+            storage.accepted_path, output_dir, catalog,
+            storage.manifest_path, seed=cfg.seed, ratios=ratios,
+            legal_min_score=cfg.legal_min_score,
+            agentic_min_score=cfg.agentic_min_score,
+            group_by=split_cfg.get("group_by") or DEFAULT_GROUP_BY,
+            agentic_eval_ratio=float(
+                split_cfg.get("agentic_eval", 0.05)),
+            separate_agentic_evaluation=bool(
+                split_cfg.get("separate_agentic_evaluation", True)),
+        )
+    except PublicationError as error:
+        raise SystemExit(str(error)) from error
+
+    print(f"[publish] {audit['rows']} trajectoires | "
+          f"{audit['groups']} groupes de fuite", flush=True)
+    for name, count in audit["splits"].items():
+        print(f"[publish]   {name:11} {count:5d} "
+              f"({audit['achieved_ratios'][name]:.1%} — visé "
+              f"{audit['target_ratios'][name]:.1%})", flush=True)
+    print(f"[publish]   agentic_eval {audit['agentic_eval']:4d} "
+          f"({len(audit['held_out_families'])} familles réservées)",
+          flush=True)
+    print(f"[publish] chevauchement mesuré entre splits : "
+          f"{audit['group_overlap']}", flush=True)
+    if not audit["passed"]:
+        print("[publish] ÉCHEC : des sources sont partagées entre splits, "
+              f"détail dans {output_dir / 'audit_report.json'}", flush=True)
+        return 1
+    print(f"[publish] écrit dans {output_dir}", flush=True)
+
+    if args.push_to_hf:
+        push_release(output_dir, cfg.hf_dataset_repo_id,
+                     args.allow_remote_calls)
+        print(f"[publish] publié sur {cfg.hf_dataset_repo_id}", flush=True)
+    return 0
+
+
 def main() -> int:
     args = _parser().parse_args()
     if args.command == "doctor":
         return doctor(args)
     if args.command == "build-rag-index":
         return build_rag_index(args)
+    if args.command == "publish":
+        return publish(args)
     return generate(args)
 
 

@@ -20,6 +20,14 @@ from agentic_generation.taxonomy import REQUEST_TYPES, target_request_type_count
 from agentic_generation.trajectory_agent import TrajectoryAgent
 from agentic_generation.validators import validate_trajectory
 
+from agentic_generation.error_codes import ErrorCode, extract_code
+
+
+def codes_of(errors):
+    """Codes portés par les erreurs — le texte français ne sert qu'à l'affichage."""
+    return {extract_code(error) for error in errors}
+
+
 
 ARTICLE_TEXT = "Article 1457\nToute personne a le devoir de respecter les règles de conduite."
 
@@ -98,7 +106,7 @@ def test_precise_article_paraphrase_is_deterministically_rejected(catalog):
         tool_trace=[observation],
     )
     result = validate_trajectory(row, catalog, allow_mock=True)
-    assert "texte d'article précis non reproduit intégralement mot pour mot" in result.errors
+    assert ErrorCode.OFFICIAL_TEXT_NOT_REPRODUCED in codes_of(result.errors)
 
 
 def test_semantic_candidate_is_not_a_citable_article(catalog):
@@ -136,7 +144,8 @@ def test_semantic_candidate_is_not_a_citable_article(catalog):
     row.messages[1].content = row.messages[1].content.replace(
         '"question"', json.dumps(scenario.user_query, ensure_ascii=False))
     result = validate_trajectory(row, catalog, allow_mock=True)
-    assert "article 1726 absent des réponses d'outils" in result.errors
+    assert ErrorCode.UNGROUNDED_ARTICLE in codes_of(result.errors)
+    assert any("article 1726" in error for error in result.errors)
 
 
 def test_legal_critic_scope_removes_false_verbatim_requirement():

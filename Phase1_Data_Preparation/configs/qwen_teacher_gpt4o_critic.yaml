@@ -4,7 +4,6 @@ generation:
   target_accepted: 100
   max_tool_calls: 4
   max_tool_response_chars: 6000
-  max_doc_fetch_chars: 12000
   near_duplicate_jaccard: 0.90
   prompt_version: agentic-4.0-intermediate
   max_search_reformulations: 1
@@ -74,6 +73,10 @@ rag:
   dense_weight: 0.60
   llm_rerank_enabled: true
   llm_rerank_k: 10
+  # Planchers de pertinence sur l'echelle absolue (0.0 = desactive).
+  # Calibres sur tests/fixtures/retrieval_gold.jsonl.
+  min_dense_score: 0.0
+  min_hybrid_score: 0.0
 
 critics:
   legal_min_score: 0.70
@@ -85,25 +88,21 @@ paths:
   catalog: ../docs/mcp_tools_catalog.json
   mcp_config: ../.mcp.json
 
-mix:
-  include_agentic_legal: true
-  include_identity_data: true
-  include_legacy_legal: false
-  agentic_ratio: 0.95
-  identity_ratio: 0.05
-
 split:
   train: 0.90
   validation: 0.05
   test: 0.05
+  # Dimensions reellement consommees par publisher.leakage_groups.
+  # fact_template et question_family ont ete retirees : aucun champ du
+  # schema ne les porte, une cle inconnue leve desormais une erreur.
   group_by:
     - scenario_family_id
     - source_id
     - citations
     - primary_article
-    - fact_template
-    - question_family
   separate_agentic_evaluation: true
+  # Part reservee a l'evaluation, par familles entieres de scenarios.
+  agentic_eval: 0.05
 
 hf:
   dataset_repo_id: intelliwork/agentic_cot_data

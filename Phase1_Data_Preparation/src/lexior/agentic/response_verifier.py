@@ -42,6 +42,63 @@ MIN_CONTENT_CHARS = 30
 
 
 # ---------------------------------------------------------------------------
+# Détection de texte généré par un LLM côté serveur
+# ---------------------------------------------------------------------------
+
+# Certains serveurs MCP ne renvoient pas le texte de la source : ils
+# renvoient une synthèse rédigée par un modèle, parfois suivie d'offres
+# adressées au lecteur. Ce contenu ne peut pas servir de preuve — le
+# contrôle de grounding validerait des citations contre du texte généré.
+
+# Formules qui s'adressent au lecteur : une source officielle n'en contient
+# jamais.
+READER_DIRECTED_MARKERS = (
+    "si vous souhaitez", "si vous le souhaitez", "souhaitez-vous",
+    "voulez-vous que je", "dites-moi", "n'hésitez pas",
+    "je peux extraire", "je peux rechercher", "je peux vous",
+    "je peux affiner", "je peux préparer", "je vous oriente",
+)
+
+# En-têtes de synthèse générée.
+GENERATED_HEADER_MARKERS = (
+    "**résumé :**", "résumé ciblé", "résumé concis", "résumé utile",
+    "summary:", "conseil pratique", "note rapide",
+)
+
+
+def contains_generated_summary(text: str) -> bool:
+    """Vrai quand la réponse est une synthèse rédigée, pas du texte source.
+
+    Calibré le 2026-07-24 sur les observations archivées des runs :
+    100 % des réponses de ``search_quebec_jurisprudence`` (86/86) et de
+    ``search_quebec_regulations`` (95/95) sont détectées, contre 0 sur les
+    1 129 observations des onze autres outils.
+    """
+    folded = (text or "").casefold()
+    if not folded:
+        return False
+    return (any(marker in folded for marker in READER_DIRECTED_MARKERS)
+            or any(marker in folded for marker in GENERATED_HEADER_MARKERS))
+
+
+def strip_reader_directed(text: str) -> str:
+    """Retire les lignes qui s'adressent au lecteur.
+
+    Le contenu reste marqué comme généré : ce nettoyage évite seulement
+    que des phrases du type « Si vous souhaitez, je peux… » se retrouvent
+    dans les données d'entraînement.
+    """
+    if not text:
+        return text
+    kept = [
+        line for line in text.split("\n")
+        if not any(marker in line.casefold()
+                   for marker in READER_DIRECTED_MARKERS)
+    ]
+    return "\n".join(kept).strip()
+
+
+# ---------------------------------------------------------------------------
 # Classification légère
 # ---------------------------------------------------------------------------
 

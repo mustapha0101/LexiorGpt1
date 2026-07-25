@@ -25,6 +25,7 @@ NO_RESULT_RE = re.compile(
 # ── Garde-fou juridictionnel du mode chat ────────────────────────────────
 # Implémentation canonique : lexior.services.jurisdiction (une seule
 # source de vérité; ré-exportée ici pour compatibilité).
+from .citations import CASE_CITATION_RE  # noqa: E402
 from lexior.services.jurisdiction import (  # noqa: E402
     QC_ONLY_TOOLS,
     QuebecToolsBlocked,
@@ -1169,8 +1170,8 @@ class PlannerAgent:
                 if c.strip():
                     return c.strip()
             citation_re = re.compile(
-                r"\b\d{4}\s+(?:SCC|CSC|FC|CF|FCA|CAF|QCCA|QCCS|QCCQ)\s+\d+\b"
-                r"|(?:RSC|LRC|SC|LC),?\s+\d{4},?\s*c\.?\s*[A-Z]?-?\d+"
+                CASE_CITATION_RE.pattern
+                + r"|(?:RSC|LRC|SC|LC),?\s+\d{4},?\s*c\.?\s*[A-Z]?-?\d+"
             )
             text = obs.normalized_response or ""
             match = citation_re.search(text)

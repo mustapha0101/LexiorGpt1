@@ -330,6 +330,8 @@ class StepVerifier:
         max_tool_calls: int = 4,
         seen_fingerprints: Optional[set[str]] = None,
         exempt_tools: Optional[list[str]] = None,
+        near_duplicate_jaccard: float = 0.90,
+        max_thinking_words: int = 0,
     ) -> ValidationResult:
         """Full deterministic trajectory validation."""
         return _validate_trajectory(
@@ -338,6 +340,8 @@ class StepVerifier:
             max_tool_calls=max_tool_calls,
             seen_fingerprints=seen_fingerprints,
             exempt_tools=exempt_tools,
+            near_duplicate_jaccard=near_duplicate_jaccard,
+            max_thinking_words=max_thinking_words,
         )
 
     # ── 11. Acceptance decision ──────────────────────────────────────────

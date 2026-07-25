@@ -13,15 +13,14 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
+from .citations import QUEBEC_CITATION_RE
 from .schemas import CaseRelevanceResult, CaseLawSearchStatus
 
 # ---------------------------------------------------------------------------
 # Regex patterns
 # ---------------------------------------------------------------------------
 
-_RE_QC_CITATION = re.compile(
-    r"\b(\d{4})\s+(QCCA|QCCS|QCCQ|QCTDP|QCRDL)\s+(\d+)\b"
-)
+_RE_QC_CITATION = QUEBEC_CITATION_RE
 _RE_CASE_NAME = re.compile(
     r"([A-ZÀ-Ÿ][\w'-]+)\s+c\.\s+([A-ZÀ-Ÿ][\w'-]+)"
 )

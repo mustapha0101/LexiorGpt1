@@ -10,6 +10,14 @@ from agentic_generation.schemas import Decision, Message, ResearchState, Role, S
 from agentic_generation.trajectory_agent import TrajectoryAgent, normalize_final_answer
 from agentic_generation.validators import validate_tool_route, validate_trajectory
 
+from agentic_generation.error_codes import ErrorCode, extract_code
+
+
+def codes_of(errors):
+    """Codes portés par les erreurs — le texte français ne sert qu'à l'affichage."""
+    return {extract_code(error) for error in errors}
+
+
 
 class JsonClient:
     def __init__(self, payload):
@@ -119,7 +127,7 @@ def test_json_answer_wrapper_is_unwrapped_and_guarded(catalog):
         ],
     )
     result = validate_trajectory(row, catalog, allow_mock=True)
-    assert "réponse finale enveloppée dans un objet JSON" in result.errors
+    assert ErrorCode.FINAL_ANSWER_WRAPPED in codes_of(result.errors)
 
 
 def test_non_route_tool_caught_by_validation(catalog):

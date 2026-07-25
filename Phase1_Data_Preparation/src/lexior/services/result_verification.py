@@ -20,8 +20,12 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Optional
 
+from lexior.agentic.citations import FEDERAL_CITATION_RE, QUEBEC_CITATION_RE
 from lexior.agentic.planner_agent import FEDERAL_STATUTES
-from lexior.agentic.response_verifier import verify_observation
+from lexior.agentic.response_verifier import (
+    contains_generated_summary,
+    verify_observation,
+)
 from lexior.agentic.schemas import (
     SearchEvaluation,
     SearchResultStatus,
@@ -78,12 +82,8 @@ _OFFICIAL_TOOLS = {
 _TITLE_RE = re.compile(
     r"\b((?:Loi|Code|Charte|Règlement)\s+[^\n\r.;|]{3,80})", re.UNICODE)
 
-_QC_COURT_RE = re.compile(
-    r"\b(\d{4})\s+(QCCA|QCCS|QCCQ|QCTAL|QCTAT|QCTDP|QCRDE|QCCAI)\s+(\d+)\b"
-)
-_FED_COURT_RE = re.compile(
-    r"\b(\d{4})\s+(SCC|CSC|FCA|CAF|FC|CF|TCC)\s+(\d+)\b"
-)
+_QC_COURT_RE = QUEBEC_CITATION_RE
+_FED_COURT_RE = FEDERAL_CITATION_RE
 
 
 def _fold(value: str) -> str:
@@ -165,9 +165,17 @@ class ResultVerificationService:
         requested_document_type: str = "",
         user_query: str = "",
     ) -> ToolResultAssessment:
-        status = self.classifier.classify_observation(observation)
+        # La question de l'usager fait partie du verdict : un résultat bien
+        # formé mais étranger au sujet est `irrelevant`, ce qui déclenche la
+        # reformulation via route_after_classification.
+        status = self.classifier.classify_observation(
+            observation, user_query=user_query)
         is_retrieval_only = observation.tool_name in _RETRIEVAL_ONLY_TOOLS
         is_official = observation.tool_name in _OFFICIAL_TOOLS
+        # Une synthèse rédigée par un modèle n'est pas une source, quelle
+        # que soit l'autorité du serveur qui la renvoie.
+        is_generated = contains_generated_summary(
+            observation.normalized_response)
 
         assessment = ToolResultAssessment(
             tool_name=observation.tool_name,
@@ -179,9 +187,23 @@ class ResultVerificationService:
             verifier_issues=list(verifier_issues or []),
             official=is_official and observation.ok,
             citable=(is_official and observation.ok
-                     and not is_retrieval_only),
+                     and not is_retrieval_only and not is_generated),
             relevant=True,
         )
+
+        if is_generated:
+            # Candidate au mieux : identifie une piste, ne prouve rien.
+            assessment.evidence_level = EvidenceLevel.candidate.value
+            assessment.usable_as_evidence = False
+            assessment.detailed_status = (
+                DetailedResultStatus.usable.value
+                if status not in _UNUSABLE
+                else _to_detailed(status).value)
+            assessment.relevant = status not in _UNUSABLE
+            assessment.reason = (
+                assessment.reason
+                or "contenu rédigé par un modèle : non citable comme preuve")
+            return assessment
 
         if is_retrieval_only:
             assessment.evidence_level = EvidenceLevel.candidate.value
@@ -191,6 +213,7 @@ class ResultVerificationService:
                 else _to_detailed(status).value)
             assessment.usable_as_evidence = False
             assessment.citable = False
+            assessment.relevant = status not in _UNUSABLE
             assessment.reason = (assessment.reason
                                  or "retrieval-only: candidate evidence")
             return assessment
@@ -200,6 +223,10 @@ class ResultVerificationService:
             assessment.detailed_status = _to_detailed(status).value
             assessment.usable_as_evidence = False
             assessment.relevant = False
+            if (status == SearchResultStatus.irrelevant
+                    and not assessment.reason and user_query):
+                assessment.reason = (
+                    "résultat sans rapport thématique avec la question posée")
             return assessment
 
         # Document match check for search tools.
