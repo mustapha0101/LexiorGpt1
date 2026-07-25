@@ -1,5 +1,5 @@
 {
-  "_note": "Référence mesurée le 2026-07-25 avec les planchers du YAML de production (min_dense_score=0.40) et le rerank LLM désactivé. Le taux de faux positifs reste à 1.00 : sur ce corpus et avec text-embedding-3-small, les questions sans réponse obtiennent des similarités indiscernables des questions répondables. Aucun plancher absolu ne les sépare — descendre à 0.08 de faux positifs exigerait de vider 32 des 40 questions répondables. Le levier restant est le rerank LLM, seul point de la chaîne où la question rencontre le texte des articles.",
+  "_note": "Référence mesurée le 2026-07-25 avec les planchers du YAML de production (min_dense_score=0.40) et le rerank LLM DÉSACTIVÉ — un test ne doit pas dépendre d'appels payants. La production, elle, a llm_rerank_enabled=true : voir llm_rerank_measured ci-dessous pour l'effet réel.",
   "measured_at": "2026-07-25",
   "embedding_model": "text-embedding-3-small",
   "min_dense_score": 0.4,
@@ -28,5 +28,42 @@
   "empty_on_answerable_ids": [
     "ccq-voisinage"
   ],
-  "_empty_note": "ccq-voisinage (« la boucane du restaurant », art. 976) : vocabulaire familier trop éloigné du texte. La recherche retourne « aucun article trouvé », ce qui déclenche la reformulation — sortie honnête, pas un faux résultat."
+  "_empty_note": "ccq-voisinage (« la boucane du restaurant », art. 976) : vocabulaire familier trop éloigné du texte. La recherche retourne « aucun article trouvé », ce qui déclenche la reformulation — sortie honnête, pas un faux résultat.",
+  "llm_rerank_measured": {
+    "_note": "Mesuré le 2026-07-25 sur les 52 questions, gpt-4o-mini, 51 appels, 0,0122 $ US. Le rerank est le seul point de la chaîne où la question rencontre le texte des articles; c'est le levier qui agit sur les faux positifs, là où aucun plancher absolu n'y parvenait. Le reranker n'a inventé aucun numéro d'article. CHIFFRES NON RE-MESURÉS après la reformulation de neg-cellulaire et neg-droit-auteur le 2026-07-25 : publier une amélioration obtenue en retouchant le jeu de test serait malhonnête. Le taux publié reste celui mesuré sur les questions d'origine.",
+    "model": "gpt-4o-mini",
+    "hit_at": {
+      "3": 0.55,
+      "5": 0.575,
+      "8": 0.575
+    },
+    "recall_at": {
+      "3": 0.463,
+      "5": 0.512,
+      "8": 0.512
+    },
+    "mrr": 0.509,
+    "false_positive_rate": 0.417,
+    "fully_rejected_negatives": 7,
+    "empty_on_answerable_ids": [
+      "ccq-voisinage",
+      "ccq-mise-en-demeure"
+    ],
+    "surviving_false_positives": {
+      "juridiction": {
+        "neg-ontario-loyer": "art. 1943/1950/1992 — thématiquement justes, mais l'usager est à Toronto. Depuis l'ajout de la détection par ville, le garde-fou de juridiction retourne « decline » sur cette question.",
+        "neg-cour-federale": "art. 101/107 CPC. Aucune province n'est nommée : le garde-fou retourne « clarify », pas « decline » — refuser serait faux, la Cour fédérale siège partout au Canada."
+      },
+      "questions_reformulées": {
+        "neg-cellulaire": "art. 2125 était défendable; question recentrée sur les frais permis",
+        "neg-droit-auteur": "art. 36 était défendable; question recentrée sur des photos prises par l'usager"
+      },
+      "échec_réel_du_retrieval": {
+        "neg-chat-bail": "art. 1986/1987/1989 — registre d'attribution des logements à loyer modique. Sans rapport avec la question."
+      }
+    }
+  },
+  "_diagnostics": {
+    "ccq-mise-en-demeure": "Vidée par le rerank, mais ce n'est PAS une régression : les articles attendus (1594, 1590) ne figuraient pas parmi les candidats, et restent inatteignables même avec candidate_k=400 et top-20. La question était déjà ratée sans rerank — il a converti huit articles hors sujet présentés comme réponses en « rien trouvé », ce qui déclenche la reformulation. L'écart de vocabulaire (« lettre d'avertissement » vs « demeure ») est un cas d'école pour la question du modèle d'embeddings."
+  }
 }

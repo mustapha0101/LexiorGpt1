@@ -309,6 +309,10 @@ class LegalRAG:
         self.embeddings = _normalize_rows(embeddings)
         self.manifest = manifest
         self.reranker = reranker
+        # Dernier rejet du reranker, avec son motif : un rejet total et un
+        # échec de la recherche en amont produisent tous deux une liste
+        # vide, et rien ne permettait de les distinguer après coup.
+        self.last_rerank_rejection: dict[str, Any] | None = None
         self._token_counts = [Counter(_tokens(doc.search_text)) for doc in documents]
         self._doc_lengths = np.asarray(
             [sum(counts.values()) for counts in self._token_counts], dtype=np.float32
@@ -456,9 +460,12 @@ class LegalRAG:
                             "un article hors sujet, et rejeter tous les candidats est "
                             "une réponse valide. N'invente aucun numéro. Réponds "
                             "uniquement par l'objet JSON "
-                            '{"ranking":["numéro"],"rejected":["numéro"]}, où chaque '
-                            "numéro candidat apparaît exactement une fois, dans l'une "
-                            "ou l'autre des listes."
+                            '{"ranking":["numéro"],"rejected":["numéro"],'
+                            '"reason":"une phrase"}, où chaque numéro candidat '
+                            "apparaît exactement une fois dans l'une ou l'autre des "
+                            "listes. « reason » explique brièvement le rejet quand "
+                            "il y en a un : sans cette phrase, un rejet total est "
+                            "indiscernable d'un échec de la recherche en amont."
                         ),
                     },
                     {
@@ -500,9 +507,17 @@ class LegalRAG:
             item for item in results
             if item["article_number"] not in seen
             and item["article_number"] not in rejected)
+        reason = str(answer.get("reason") or "").strip()
         for position, item in enumerate(ordered, start=1):
             item["rerank_position"] = position
             item["reranker"] = "llm"
+        if rejected:
+            self.last_rerank_rejection = {
+                "query": query, "code": code,
+                "rejected": sorted(rejected),
+                "kept": [item["article_number"] for item in ordered],
+                "reason": reason,
+            }
         return ordered
 
     def search(self, query: str, code: str, top_k: int | None = None) -> list[dict[str, Any]]:

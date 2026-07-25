@@ -237,8 +237,12 @@ def _witness_rag(tmp_path, reranker):
         _document("CPC", 279, "Les témoins sont interrogés à l'audience.", "preuve"),
         _document("CPC", 269, "Les témoins sont convoqués par citation à comparaître.", "preuve"),
     ]
+    # Planchers désactivés : ces tests portent sur le reranker. Avec le
+    # calibrage de production (0.40), une requête hors sujet est filtrée
+    # AVANT le rerank et le test passerait sans jamais l'appeler.
     cfg = RAGConfig(index_dir=str(tmp_path), llm_rerank_enabled=True,
-                    llm_rerank_k=2)
+                    llm_rerank_k=2, min_dense_score=0.0,
+                    min_hybrid_score=0.0)
     return LegalRAG(
         cfg, FakeEmbedder(), documents,
         np.asarray([[0.0, 0.0, 1.0], [0.0, 0.0, 0.9]], dtype=np.float32),
@@ -256,12 +260,18 @@ def test_llm_reranker_can_drop_an_irrelevant_candidate(tmp_path):
 
 
 def test_llm_reranker_may_reject_every_candidate(tmp_path):
-    """« Aucun article pertinent » est une sortie valide, pas une erreur."""
+    """« Aucun article pertinent » est une sortie valide, pas une erreur.
+
+    La requête doit passer les planchers, sinon le rerank n'est jamais
+    appelé et le test vérifierait le filtrage au lieu du rejet.
+    """
     rag = _witness_rag(tmp_path, RejectingReranker([], ["269", "279"]))
 
-    results = rag.search("Quel est le salaire minimum au Québec?", "CPC", 2)
+    results = rag.search("Comment assigner un témoin à comparaître?", "CPC", 2)
 
     assert results == []
+    assert rag.last_rerank_rejection is not None, (
+        "le rejet doit venir du reranker, pas du plancher")
 
 
 def test_llm_reranker_cannot_invent_or_reject_unknown_articles(tmp_path):
@@ -284,3 +294,47 @@ def test_llm_reranker_ignores_a_malformed_answer(tmp_path):
     results = rag.search("Comment assigner un témoin à comparaître?", "CPC", 2)
 
     assert [item["article_number"] for item in results] == ["269", "279"]
+
+
+# ── Le motif du rejet doit être consultable ──────────────────────────────
+
+
+def test_a_total_rejection_records_its_reason(tmp_path):
+    """Sans motif, un rejet total est indiscernable d'un échec de recherche.
+
+    C'est exactement la confusion qu'a produite « ccq-mise-en-demeure » :
+    liste vide, et rien pour dire si le reranker avait écarté de bons
+    candidats ou si la recherche n'avait jamais remonté le bon article.
+    """
+    class Explaining:
+        def complete_json(self, role, messages, temperature=0.0):
+            return {"ranking": [], "rejected": ["269", "279"],
+                    "reason": "aucun candidat ne traite du sujet demandé"}
+
+    rag = _witness_rag(tmp_path, Explaining())
+
+    results = rag.search("Comment assigner un témoin à comparaître?", "CPC", 2)
+
+    assert results == []
+    trace = rag.last_rerank_rejection
+    assert trace is not None
+    assert trace["reason"] == "aucun candidat ne traite du sujet demandé"
+    assert trace["rejected"] == ["269", "279"]
+    assert trace["kept"] == []
+
+
+def test_a_partial_rejection_records_what_survived(tmp_path):
+    rag = _witness_rag(tmp_path, RejectingReranker(["269"], ["279"]))
+
+    rag.search("Comment assigner un témoin à comparaître?", "CPC", 2)
+
+    trace = rag.last_rerank_rejection
+    assert trace["rejected"] == ["279"] and trace["kept"] == ["269"]
+
+
+def test_nothing_is_recorded_when_nothing_is_rejected(tmp_path):
+    rag = _witness_rag(tmp_path, FakeReranker())
+
+    rag.search("Comment assigner un témoin à comparaître?", "CPC", 2)
+
+    assert rag.last_rerank_rejection is None
