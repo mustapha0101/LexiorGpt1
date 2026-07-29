@@ -40,7 +40,10 @@ from lexior.agentic.legal_rag import (  # noqa: E402
 )
 
 SOURCE_INDEX = PHASE1 / "data" / "agentic" / "rag_index"
-TARGET_INDEX = PHASE1 / "data" / "agentic" / "rag_index_textonly"
+TARGETS = {
+    "text_only": PHASE1 / "data" / "agentic" / "rag_index_textonly",
+    "text_taxonomy": PHASE1 / "data" / "agentic" / "rag_index_taxonomy",
+}
 
 
 def main() -> int:
@@ -48,12 +51,14 @@ def main() -> int:
     parser.add_argument("--config", default=None)
     parser.add_argument("--allow-remote-calls", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--mode", default="text_only", choices=sorted(TARGETS))
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
 
     if not index_exists(SOURCE_INDEX):
         print(f"[texte] index source absent : {SOURCE_INDEX}", file=sys.stderr)
         return 1
+    TARGET_INDEX = TARGETS[args.mode]
     if index_exists(TARGET_INDEX) and not args.force:
         print(f"[texte] index déjà présent dans {TARGET_INDEX}; --force pour "
               "reconstruire")
@@ -65,7 +70,7 @@ def main() -> int:
             encoding="utf-8").splitlines()
         if line.strip()
     ]
-    texts = [search_text_for(document, "text_only") for document in documents]
+    texts = [search_text_for(document, args.mode) for document in documents]
     full = [search_text_for(document, "full") for document in documents]
     economy = 1 - sum(map(len, texts)) / sum(map(len, full))
     print(f"[texte] {len(documents)} articles repris de l'index existant")
@@ -108,7 +113,7 @@ def main() -> int:
         "dataset_split": source.get("dataset_split", ""),
         "embedding_provider": "openai",
         "embedding_model": embedder.model,
-        "search_text_fields": "text_only",
+        "search_text_fields": args.mode,
         "documents": len(documents),
         "dimensions": int(embeddings.shape[1]),
         "corpus_hash": corpus_hash,

@@ -69,21 +69,35 @@ class LegalDocument:
         return search_text_for(self, "full")
 
 
-SEARCH_TEXT_MODES = ("full", "text_only")
+SEARCH_TEXT_MODES = ("full", "text_only", "text_taxonomy")
 
 
 def search_text_for(document: "LegalDocument", mode: str = "full") -> str:
     """Texte soumis à l'embedder.
 
-    « full » préfixe le contenu de quatre étiquettes — titre, libellé,
-    domaine, taxonomie. Elles pèsent 22 % du texte embarqué en médiane et
-    jusqu'à 71 % sur un article court, alors qu'il n'existe que 16
-    taxonomies distinctes pour 4 278 articles : « livre5 obligations » est
-    collé à l'identique en tête de 1 280 d'entre eux. « text_only » ne
-    garde que le contenu normatif.
+    Trois variantes, du plus au moins étiqueté :
+
+    ``full``
+        historique — titre, libellé, domaine, taxonomie, puis contenu. Les
+        étiquettes pèsent 22 % du texte embarqué en médiane et jusqu'à
+        71 % sur un article court, pour 16 taxonomies distinctes seulement
+        sur 4 278 articles.
+    ``text_taxonomy``
+        retire les deux étiquettes de PURE RÉPÉTITION — « CCQ Article
+        1457 » et « Article 1457 » disent la même chose, et un numéro
+        d'article ne porte aucun sens exploitable par un embedding. Garde
+        le domaine et la taxonomie, qui situent l'article dans le Code.
+    ``text_only``
+        contenu normatif seul.
     """
     if mode == "text_only":
         return document.text
+    if mode == "text_taxonomy":
+        return "\n".join(part for part in (
+            document.domain,
+            document.taxonomy.replace("_", " ").replace("/", " "),
+            document.text,
+        ) if part)
     if mode != "full":
         raise RAGError(
             f"mode de texte indexé inconnu : {mode!r} "
