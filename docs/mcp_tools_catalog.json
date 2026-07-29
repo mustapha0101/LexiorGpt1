@@ -35,6 +35,10 @@
           "top_k": {
             "type": "integer",
             "default": 8
+          },
+          "legal_terms": {
+            "type": "string",
+            "description": "Optionnel. La même question rendue dans le vocabulaire du Code — « mise en demeure » pour « lettre d'avertissement ». Recherchée EN PLUS de query, jamais à sa place : les candidats des deux recherches sont réunis."
           }
         },
         "required": [
@@ -43,7 +47,8 @@
       },
       "minimalValidExample": {
         "query": "Mon voisin a déplacé la clôture sur mon terrain; quels articles encadrent mes recours?",
-        "top_k": 8
+        "top_k": 8,
+        "legal_terms": "bornage empiètement droit de propriété"
       },
       "responseStructure": {
         "type": "json",
@@ -63,6 +68,10 @@
           "top_k": {
             "type": "integer",
             "default": 8
+          },
+          "legal_terms": {
+            "type": "string",
+            "description": "Optionnel. La même question rendue dans le vocabulaire du Code — « mise en demeure » pour « lettre d'avertissement ». Recherchée EN PLUS de query, jamais à sa place : les candidats des deux recherches sont réunis."
           }
         },
         "required": [
@@ -71,7 +80,8 @@
       },
       "minimalValidExample": {
         "query": "Comment assigner un témoin à comparaître dans une instance civile?",
-        "top_k": 8
+        "top_k": 8,
+        "legal_terms": "citation à comparaître témoin"
       },
       "responseStructure": {
         "type": "json",

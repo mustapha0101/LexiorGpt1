@@ -706,7 +706,22 @@ class LegalRAG:
             }
         return ordered
 
-    def search(self, query: str, code: str, top_k: int | None = None) -> list[dict[str, Any]]:
+    def search(self, query: str, code: str, top_k: int | None = None,
+               legal_terms: str = "") -> list[dict[str, Any]]:
+        """Recherche hybride, éventuellement sur DEUX formulations.
+
+        ``legal_terms`` est la même question rendue dans le vocabulaire du
+        Code. Les deux recherches sont RÉUNIES, jamais substituées : le
+        score dense d'un article est le meilleur des deux.
+
+        Mesuré sur tests/fixtures/retrieval_gold.jsonl : traduire en
+        remplacement dégrade 10 des 32 questions où l'usager employait déjà
+        le mot juste — « la liste des clients de mon employeur » passe du
+        rang 1 au rang 74. L'union garde ces questions intactes et fait
+        entrer les autres : l'article 1594 (« mise en demeure » quand la
+        question dit « lettre d'avertissement ») passe du rang 413 au
+        rang 17.
+        """
         if not query.strip():
             raise RAGError("la requête sémantique est vide")
         code = code.upper()
@@ -718,18 +733,29 @@ class LegalRAG:
         )
         if not len(indices):
             return []
-        query_vector = _normalize_rows(self.embedder.embed([query]))[0]
-        if query_vector.shape[0] != self.embeddings.shape[1]:
+        formulations = [query]
+        terms = (legal_terms or "").strip()
+        if terms:
+            formulations.append(terms)
+        # Un seul appel d'embeddings pour les deux formulations.
+        vectors = _normalize_rows(self.embedder.embed(formulations))
+        if vectors.shape[1] != self.embeddings.shape[1]:
             raise RAGError("dimension d'embedding incompatible avec l'index")
 
-        # La question est recentrée avec LA MÊME moyenne que le corpus
-        # auquel on la compare : sinon les deux vivent dans des systèmes de
-        # coordonnées différents et le produit scalaire ne veut plus rien
-        # dire.
+        # Chaque formulation est recentrée avec LA MÊME moyenne que le
+        # corpus auquel on la compare : sinon les deux vivent dans des
+        # systèmes de coordonnées différents et le produit scalaire ne veut
+        # plus rien dire.
         mean = self._mean_for(code)
         if mean is not None:
-            query_vector = self._recenter(query_vector, mean)[0]
-        dense = self._centered_matrix(code, indices) @ query_vector
+            vectors = self._recenter(vectors, mean)
+        matrix = self._centered_matrix(code, indices)
+        dense_per_formulation = [matrix @ vector for vector in vectors]
+        # Réunion : le meilleur des deux. Un article trouvé par l'une des
+        # formulations est retenu, sans que l'autre puisse l'écarter.
+        dense = dense_per_formulation[0]
+        for other in dense_per_formulation[1:]:
+            dense = np.maximum(dense, other)
         lexical = self._bm25(_expanded_query_tokens(query), indices)
         candidate_k = min(max(self.cfg.candidate_k, 1), len(indices))
         dense_positions = np.argsort(-dense)[:candidate_k]
@@ -772,6 +798,11 @@ class LegalRAG:
                 "absolute_score": round(
                     float(absolute[int(order_position)]), 6),
                 "dense_score": round(float(dense[candidate_position]), 6),
+                "found_by": ("legal_terms"
+                             if len(dense_per_formulation) > 1
+                             and dense_per_formulation[1][candidate_position]
+                             > dense_per_formulation[0][candidate_position]
+                             else "query"),
                 "lexical_score": round(float(lexical[candidate_position]), 6),
                 "excerpt": document.text[:700],
                 "source_url": document.source_url,
@@ -788,6 +819,7 @@ class LegalRAG:
         results = self.search(
             str(arguments.get("query") or ""), code,
             top_k=int(arguments.get("top_k") or self.cfg.top_k),
+            legal_terms=str(arguments.get("legal_terms") or ""),
         )
         if not results:
             text = f"Aucun article {code} trouvé."

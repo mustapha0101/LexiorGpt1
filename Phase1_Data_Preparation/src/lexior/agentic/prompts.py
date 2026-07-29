@@ -342,6 +342,12 @@ def planner_system_prompt(catalog: ToolCatalog) -> str:
         "puis tu choisis UNE action. Tu réponds UNIQUEMENT par un objet JSON :\n"
         "{\n"
         '  "thinking_text": "Raisonnement en français (3-5 phrases).",\n'
+        '  "legal_terms": "La même question rendue en vocabulaire du Code, '
+        "5 à 15 mots-clés. « mise en demeure » pour « lettre "
+        "d'avertissement », « autorité parentale » pour « mon gars ». "
+        "S'AJOUTE à la requête de recherche, ne la remplace jamais : "
+        "les deux formulations sont cherchées puis réunies. Chaîne vide "
+        'si la question emploie déjà les termes du Code.",\n'
         '  "request_type": "...",\n'
         '  "jurisdiction": "...",\n'
         '  "missing_critical_facts": [...],\n'

@@ -643,6 +643,7 @@ class PlannerAgent:
         if not decision.next_tool:
             return decision
         reconstructed = self._arguments(decision.next_tool, state,
+                                        legal_terms=decision.legal_terms,
                                          thinking=decision.thinking_text)
         if reconstructed is not None:
             decision.arguments = reconstructed
@@ -914,7 +915,8 @@ class PlannerAgent:
         return route
 
     def _arguments(self, tool: str, state: ResearchState,
-                   thinking: str = "") -> Optional[dict]:
+                   thinking: str = "",
+                   legal_terms: str = "") -> Optional[dict]:
         query = "\n".join(
             message.content for message in state.messages
             if message.role.value == "user"
@@ -966,16 +968,44 @@ class PlannerAgent:
                 arguments["end_article"] = json_number(end)
             return arguments
         if tool in {"semantic_search_ccq", "semantic_search_cpc"}:
+            # La question part telle quelle, et sa traduction en vocabulaire
+            # du Code part À CÔTÉ — jamais à sa place. Les deux recherches
+            # sont réunies dans legal_rag.search().
+            #
+            # Ce qui occupait cette place avant : une phrase CONSTANTE
+            # (« identifier les règles, recours, conditions et exceptions
+            # juridiquement équivalents »), identique pour toutes les
+            # questions et ajoutée seulement à partir du deuxième appel.
+            # Mesurée sur les huit questions sans mot commun avec leur
+            # article : améliore cinq fois, dégrade trois fois, médiane
+            # +1 rang. Du bruit.
+            #
+            # Une vraie traduction, mesurée sur les mêmes huit : 8/8
+            # améliorées, médiane +75 rangs, deux entrées dans le top-10
+            # portées à six. En REMPLACEMENT elle dégraderait dix des
+            # trente-deux questions de contrôle — celles où l'usager
+            # employait déjà le mot juste.
+            arguments: dict[str, object] = {"query": query.strip()}
+            terms = (legal_terms or "").strip()
             previous = sum(
-                observation.tool_name == tool for observation in state.tool_history
-            )
-            semantic_query = query.strip()
-            if previous:
-                semantic_query += (
-                    "\nReformulation de recherche: identifier les règles, recours, "
-                    "conditions et exceptions juridiquement équivalents."
-                )
-            return {"query": semantic_query}
+                observation.tool_name == tool
+                for observation in state.tool_history)
+            if terms:
+                arguments["legal_terms"] = terms
+            elif previous:
+                # Reprise sans traduction fournie. La phrase constante est
+                # conservée FAUTE DE MIEUX MESURÉ : sans elle, le second
+                # appel serait identique au premier, donc servi par le
+                # cache — la reformulation deviendrait un non-événement.
+                # Son effet propre est nul (médiane +1 rang sur les huit
+                # cas sans mot commun); elle ne tient ici que le rôle de
+                # différenciateur. À remplacer par une vraie traduction du
+                # planner, une fois celle-ci mesurée en reprise.
+                arguments["query"] = query.strip() + (
+                    "\nReformulation de recherche: identifier les règles, "
+                    "recours, conditions et exceptions juridiquement "
+                    "équivalents.")
+            return arguments
         if tool in {"search_ccq_keywords", "search_cpc_keywords", "search_quebec_regulations"}:
             candidates = self._keyword_candidates(tool, query, thinking)
             previous = sum(

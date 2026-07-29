@@ -260,6 +260,10 @@ class PlannerDecision(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
     decision_trace: DecisionTrace = Field(default_factory=DecisionTrace)
     clarification_question: Optional[str] = None
+    # La question rendue dans le vocabulaire du Code, produite dans la MÊME
+    # réponse que la décision : aucun appel de modèle supplémentaire. Elle
+    # s'ajoute à la question, ne la remplace jamais.
+    legal_terms: str = ""
     thinking_text: str = ""
 
 
