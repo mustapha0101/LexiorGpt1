@@ -388,6 +388,12 @@ class LegalRAG:
         # échec de la recherche en amont produisent tous deux une liste
         # vide, et rien ne permettait de les distinguer après coup.
         self.last_rerank_rejection: dict[str, Any] | None = None
+        # Moyennes de recentrage, dérivées des vecteurs indexés : elles
+        # correspondent donc TOUJOURS au corpus effectivement chargé, sans
+        # risque de désynchronisation avec un fichier écrit séparément.
+        self.centering = (cfg.centering or "none").strip().lower()
+        self._means = self._compute_means()
+        self._centered: dict[str, np.ndarray] = {}
         self._token_counts = [Counter(_tokens(doc.search_text)) for doc in documents]
         self._doc_lengths = np.asarray(
             [sum(counts.values()) for counts in self._token_counts], dtype=np.float32
@@ -396,6 +402,60 @@ class LegalRAG:
         self._document_frequency = Counter()
         for counts in self._token_counts:
             self._document_frequency.update(counts.keys())
+
+    # ── Recentrage ───────────────────────────────────────────────────────
+
+    CENTERING_MODES = ("none", "global", "per_code")
+
+    def _compute_means(self) -> dict[str, np.ndarray]:
+        """Moyenne(s) à soustraire, selon le mode configuré.
+
+        « global » retire ce que TOUT le corpus a en commun; « per_code »
+        retire ce que chaque code a en propre. ``search()`` filtrant déjà
+        par code, per_code compare des vecteurs à la moyenne du sous-corpus
+        réellement en jeu.
+        """
+        if self.centering not in self.CENTERING_MODES:
+            raise RAGError(
+                f"mode de recentrage inconnu : {self.centering!r} "
+                f"(attendu parmi {self.CENTERING_MODES})")
+        if self.centering == "none" or not len(self.embeddings):
+            return {}
+        if self.centering == "global":
+            return {"": self.embeddings.mean(axis=0)}
+        means: dict[str, np.ndarray] = {}
+        for code in sorted({doc.code for doc in self.documents}):
+            rows = [index for index, doc in enumerate(self.documents)
+                    if doc.code == code]
+            if rows:
+                means[code] = self.embeddings[np.asarray(rows)].mean(axis=0)
+        return means
+
+    def _mean_for(self, code: str) -> np.ndarray | None:
+        if not self._means:
+            return None
+        return self._means.get("" if self.centering == "global" else code)
+
+    @staticmethod
+    def _recenter(matrix: np.ndarray, mean: np.ndarray) -> np.ndarray:
+        """Soustrait la moyenne PUIS renormalise.
+
+        Sans renormalisation, les vecteurs cessent d'être unitaires et le
+        produit scalaire n'est plus un cosinus : les scores deviennent
+        sensibles à la norme, pas seulement à la direction. C'est l'erreur
+        classique de cette transformation.
+        """
+        return _normalize_rows(np.asarray(matrix, dtype=np.float32) - mean)
+
+    def _centered_matrix(self, code: str, indices: np.ndarray) -> np.ndarray:
+        """Vecteurs du code, recentrés et renormalisés, mis en cache."""
+        mean = self._mean_for(code)
+        if mean is None:
+            return self.embeddings[indices]
+        if code not in self._centered:
+            self._centered[code] = self._recenter(
+                self.embeddings[indices], mean)
+        return self._centered[code]
 
     @classmethod
     def load(cls, cfg: RAGConfig, embedder: Embedder,
@@ -442,6 +502,7 @@ class LegalRAG:
             "reranker_model": getattr(reranker_endpoint, "model", ""),
             "min_dense_score": self.cfg.min_dense_score,
             "min_hybrid_score": self.cfg.min_hybrid_score,
+            "centering": self.centering,
         }
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -611,7 +672,14 @@ class LegalRAG:
         if query_vector.shape[0] != self.embeddings.shape[1]:
             raise RAGError("dimension d'embedding incompatible avec l'index")
 
-        dense = self.embeddings[indices] @ query_vector
+        # La question est recentrée avec LA MÊME moyenne que le corpus
+        # auquel on la compare : sinon les deux vivent dans des systèmes de
+        # coordonnées différents et le produit scalaire ne veut plus rien
+        # dire.
+        mean = self._mean_for(code)
+        if mean is not None:
+            query_vector = self._recenter(query_vector, mean)[0]
+        dense = self._centered_matrix(code, indices) @ query_vector
         lexical = self._bm25(_expanded_query_tokens(query), indices)
         candidate_k = min(max(self.cfg.candidate_k, 1), len(indices))
         dense_positions = np.argsort(-dense)[:candidate_k]

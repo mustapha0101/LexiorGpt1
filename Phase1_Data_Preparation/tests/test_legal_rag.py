@@ -5,6 +5,7 @@ import pytest
 
 from agentic_generation.config import RAGConfig
 from agentic_generation.legal_rag import LegalDocument, LegalRAG, RAGError
+from lexior.agentic.legal_rag import _normalize_rows
 
 
 class FakeEmbedder:
@@ -397,3 +398,100 @@ def test_an_index_built_with_another_model_is_refused(tmp_path):
 
     with pytest.raises(RAGError, match="reconstruire l'index"):
         LegalRAG.load(RAGConfig(index_dir=str(tmp_path)), FakeEmbedder())
+
+
+# ── Recentrage des vecteurs ──────────────────────────────────────────────
+
+
+def _centering_corpus(tmp_path, centering):
+    documents = [
+        _document("CCQ", 1457, "Toute personne a le devoir de réparer.", "obligations"),
+        _document("CCQ", 1726, "Le vendeur garantit contre les vices.", "vente"),
+        _document("CPC", 269, "Les témoins sont convoqués par citation.", "preuve"),
+    ]
+    # Vecteurs volontairement tassés : une composante commune forte, un
+    # signal distinctif faible — exactement la configuration que le
+    # recentrage doit corriger.
+    embeddings = np.asarray([
+        [0.99, 0.14, 0.02],
+        [0.99, 0.02, 0.14],
+        [0.99, 0.08, 0.08],
+    ], dtype=np.float32)
+    cfg = RAGConfig(index_dir=str(tmp_path), top_k=3, candidate_k=3,
+                    centering=centering)
+    return LegalRAG(cfg, FakeEmbedder(), documents, embeddings,
+                    {"embedding_model": FakeEmbedder.model,
+                     "corpus_hash": "test"})
+
+
+def test_recentred_vectors_stay_unit_norm(tmp_path):
+    """Le piège classique : sans renormalisation, le produit scalaire
+    cesse d'être un cosinus."""
+    rag = _centering_corpus(tmp_path, "global")
+    indices = np.asarray([0, 1, 2], dtype=np.int64)
+
+    centered = rag._centered_matrix("CCQ", indices)
+    norms = np.linalg.norm(centered, axis=1)
+
+    assert np.allclose(norms, 1.0, atol=1e-5), norms
+
+
+def test_a_recentred_query_stays_unit_norm(tmp_path):
+    rag = _centering_corpus(tmp_path, "global")
+    mean = rag._mean_for("CCQ")
+
+    recentred = rag._recenter(np.asarray([[0.99, 0.10, 0.05]], np.float32), mean)
+
+    assert np.isclose(np.linalg.norm(recentred[0]), 1.0, atol=1e-5)
+
+
+def test_no_centering_leaves_the_vectors_untouched(tmp_path):
+    rag = _centering_corpus(tmp_path, "none")
+    indices = np.asarray([0, 1], dtype=np.int64)
+
+    assert rag._means == {}
+    assert np.array_equal(rag._centered_matrix("CCQ", indices),
+                          rag.embeddings[indices])
+
+
+def test_global_centering_uses_one_mean_for_every_code(tmp_path):
+    rag = _centering_corpus(tmp_path, "global")
+
+    assert list(rag._means) == [""]
+    assert rag._mean_for("CCQ") is rag._mean_for("CPC")
+
+
+def test_per_code_centering_uses_one_mean_per_code(tmp_path):
+    rag = _centering_corpus(tmp_path, "per_code")
+
+    assert sorted(rag._means) == ["CCQ", "CPC"]
+    assert not np.array_equal(rag._mean_for("CCQ"), rag._mean_for("CPC"))
+
+
+def test_the_means_come_from_the_indexed_vectors(tmp_path):
+    """Dérivées de l'index chargé : elles ne peuvent pas s'en désynchroniser."""
+    rag = _centering_corpus(tmp_path, "per_code")
+
+    expected = rag.embeddings[np.asarray([0, 1])].mean(axis=0)
+
+    assert np.allclose(rag._mean_for("CCQ"), expected)
+
+
+def test_centering_spreads_compressed_scores(tmp_path):
+    """L'hypothèse même : retirer la composante commune étale les scores."""
+    query = np.asarray([[0.99, 0.13, 0.03]], dtype=np.float32)
+    plain = _centering_corpus(tmp_path, "none")
+    centred = _centering_corpus(tmp_path, "global")
+    indices = np.asarray([0, 1], dtype=np.int64)
+
+    before = plain.embeddings[indices] @ _normalize_rows(query)[0]
+    mean = centred._mean_for("CCQ")
+    after = (centred._centered_matrix("CCQ", indices)
+             @ centred._recenter(query, mean)[0])
+
+    assert (after.max() - after.min()) > (before.max() - before.min())
+
+
+def test_an_unknown_centering_mode_is_refused(tmp_path):
+    with pytest.raises(RAGError, match="recentrage inconnu"):
+        _centering_corpus(tmp_path, "zscore")

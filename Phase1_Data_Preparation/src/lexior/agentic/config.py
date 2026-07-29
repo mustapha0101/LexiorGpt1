@@ -134,6 +134,12 @@ class RAGConfig:
     # le commentaire des YAML pour le compromis mesuré.
     min_dense_score: float = 0.40
     min_hybrid_score: float = 0.0
+    # Recentrage des vecteurs : « none », « global » (une moyenne sur tout
+    # le corpus) ou « per_code » (une moyenne CCQ, une moyenne CPC). Retirer
+    # ce que tous les articles ont en commun devrait étaler des scores
+    # denses tassés dans un dixième. Défaut « none » : le recentrage change
+    # les scores, donc les seuils calibrés.
+    centering: str = "none"
 
     def redacted(self) -> dict[str, Any]:
         return {
@@ -154,6 +160,7 @@ class RAGConfig:
             "llm_rerank_k": self.llm_rerank_k,
             "min_dense_score": self.min_dense_score,
             "min_hybrid_score": self.min_hybrid_score,
+            "centering": self.centering,
         }
 
 
@@ -389,6 +396,7 @@ def load_config(config_path: Optional[str] = None,
             rag_yaml.get("min_dense_score", RAGConfig.min_dense_score)),
         min_hybrid_score=float(
             rag_yaml.get("min_hybrid_score", RAGConfig.min_hybrid_score)),
+        centering=str(rag_yaml.get("centering", RAGConfig.centering)),
     )
 
     cfg.request_type_weights = dict(gen.get("request_type_weights", {}))
