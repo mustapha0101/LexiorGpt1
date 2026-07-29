@@ -83,6 +83,23 @@ def _tokens(value: str) -> list[str]:
     return TOKEN_RE.findall(_fold(value))
 
 
+# Équivalents entre le vocabulaire courant et celui du Code. Au niveau du
+# module pour être mesurables : l'effet de chaque entrée se chiffre sur
+# tests/fixtures/retrieval_gold.jsonl.
+QUERY_EXPANSIONS: dict[str, tuple[str, ...]] = {
+    "assigner": ("citer", "citation", "convoquer", "convocation"),
+    "assigne": ("citer", "citation", "convoquer", "convocation"),
+    "assignation": ("citer", "citation", "convoquer", "convocation"),
+    "temoin": ("temoins", "temoignage"),
+    "temoins": ("temoin", "temoignage"),
+    "comparaitre": ("comparution", "citation"),
+    "empiete": ("empietement", "bornage", "limites"),
+    "empietement": ("empiete", "bornage", "limites"),
+    "voisin": ("voisinage", "fonds", "proprietaire"),
+    "cloture": ("clore",),
+}
+
+
 def _expanded_query_tokens(value: str) -> list[str]:
     """Ajoute des équivalents procéduraux sans remplacer la requête originale.
 
@@ -92,20 +109,8 @@ def _expanded_query_tokens(value: str) -> list[str]:
     """
     tokens = _tokens(value)
     token_set = set(tokens)
-    expansions: dict[str, tuple[str, ...]] = {
-        "assigner": ("citer", "citation", "convoquer", "convocation"),
-        "assigne": ("citer", "citation", "convoquer", "convocation"),
-        "assignation": ("citer", "citation", "convoquer", "convocation"),
-        "temoin": ("temoins", "temoignage"),
-        "temoins": ("temoin", "temoignage"),
-        "comparaitre": ("comparution", "citation"),
-        "empiete": ("empietement", "bornage", "limites"),
-        "empietement": ("empiete", "bornage", "limites"),
-        "voisin": ("voisinage", "fonds", "proprietaire"),
-        "cloture": ("clore",),
-    }
     for token in list(token_set):
-        tokens.extend(expansions.get(token, ()))
+        tokens.extend(QUERY_EXPANSIONS.get(token, ()))
     return list(dict.fromkeys(tokens))
 
 
