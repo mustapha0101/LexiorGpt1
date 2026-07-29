@@ -1,0 +1,302 @@
+{
+  "_avertissement": "NE PAS OUVRIR avant d'avoir écrit les 40 questions.",
+  "graine_tirage": 20260801,
+  "graine_affichage": 20260802,
+  "corpus": 4278,
+  "tires_au_hasard": 37,
+  "reponses": [
+    {
+      "numero": 1,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:109"
+      ]
+    },
+    {
+      "numero": 2,
+      "groupe": "multiple",
+      "articles_attendus": [
+        "CPC:79",
+        "CPC:76",
+        "CPC:77"
+      ]
+    },
+    {
+      "numero": 3,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:1090"
+      ]
+    },
+    {
+      "numero": 4,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:494"
+      ]
+    },
+    {
+      "numero": 5,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:2999.1"
+      ]
+    },
+    {
+      "numero": 6,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:199.5"
+      ]
+    },
+    {
+      "numero": 7,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:1595"
+      ]
+    },
+    {
+      "numero": 8,
+      "groupe": "multiple",
+      "articles_attendus": [
+        "CCQ:2302",
+        "CCQ:2298",
+        "CCQ:2301",
+        "CCQ:2303"
+      ]
+    },
+    {
+      "numero": 9,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:502"
+      ]
+    },
+    {
+      "numero": 10,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:2027"
+      ]
+    },
+    {
+      "numero": 11,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:1986"
+      ]
+    },
+    {
+      "numero": 12,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:612"
+      ]
+    },
+    {
+      "numero": 13,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:242"
+      ]
+    },
+    {
+      "numero": 14,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CPC:156"
+      ]
+    },
+    {
+      "numero": 15,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:3149"
+      ]
+    },
+    {
+      "numero": 16,
+      "groupe": "hors corpus",
+      "articles_attendus": []
+    },
+    {
+      "numero": 17,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:297.4"
+      ]
+    },
+    {
+      "numero": 18,
+      "groupe": "multiple",
+      "articles_attendus": [
+        "CCQ:2839",
+        "CCQ:2840",
+        "CCQ:2860"
+      ]
+    },
+    {
+      "numero": 19,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:1725"
+      ]
+    },
+    {
+      "numero": 20,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:1375"
+      ]
+    },
+    {
+      "numero": 21,
+      "groupe": "hors corpus",
+      "articles_attendus": []
+    },
+    {
+      "numero": 22,
+      "groupe": "hors corpus",
+      "articles_attendus": []
+    },
+    {
+      "numero": 23,
+      "groupe": "multiple",
+      "articles_attendus": [
+        "CCQ:2842",
+        "CCQ:2841",
+        "CCQ:2860"
+      ]
+    },
+    {
+      "numero": 24,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CPC:526"
+      ]
+    },
+    {
+      "numero": 25,
+      "groupe": "multiple",
+      "articles_attendus": [
+        "CCQ:2644",
+        "CCQ:2645",
+        "CCQ:2646",
+        "CCQ:2648"
+      ]
+    },
+    {
+      "numero": 26,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:1260"
+      ]
+    },
+    {
+      "numero": 27,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:2765"
+      ]
+    },
+    {
+      "numero": 28,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:1991"
+      ]
+    },
+    {
+      "numero": 29,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:521.6"
+      ]
+    },
+    {
+      "numero": 30,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:1106.1"
+      ]
+    },
+    {
+      "numero": 31,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:1610"
+      ]
+    },
+    {
+      "numero": 32,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:2360"
+      ]
+    },
+    {
+      "numero": 33,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:906"
+      ]
+    },
+    {
+      "numero": 34,
+      "groupe": "multiple",
+      "articles_attendus": [
+        "CPC:405",
+        "CCQ:226",
+        "CCQ:231",
+        "CPC:404"
+      ]
+    },
+    {
+      "numero": 35,
+      "groupe": "racontée",
+      "articles_attendus": [
+        "CCQ:1586"
+      ]
+    },
+    {
+      "numero": 36,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:2633"
+      ]
+    },
+    {
+      "numero": 37,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:2091"
+      ]
+    },
+    {
+      "numero": 38,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:1057"
+      ]
+    },
+    {
+      "numero": 39,
+      "groupe": "multiple",
+      "articles_attendus": [
+        "CCQ:589",
+        "CCQ:585",
+        "CCQ:587",
+        "CCQ:590",
+        "CCQ:596"
+      ]
+    },
+    {
+      "numero": 40,
+      "groupe": "simple",
+      "articles_attendus": [
+        "CCQ:1763"
+      ]
+    }
+  ]
+}
