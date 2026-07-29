@@ -65,13 +65,36 @@ class LegalDocument:
 
     @property
     def search_text(self) -> str:
-        return "\n".join(part for part in (
-            self.title,
-            self.article_label,
-            self.domain,
-            self.taxonomy.replace("_", " ").replace("/", " "),
-            self.text,
-        ) if part)
+        """Texte indexé historique : étiquettes puis contenu."""
+        return search_text_for(self, "full")
+
+
+SEARCH_TEXT_MODES = ("full", "text_only")
+
+
+def search_text_for(document: "LegalDocument", mode: str = "full") -> str:
+    """Texte soumis à l'embedder.
+
+    « full » préfixe le contenu de quatre étiquettes — titre, libellé,
+    domaine, taxonomie. Elles pèsent 22 % du texte embarqué en médiane et
+    jusqu'à 71 % sur un article court, alors qu'il n'existe que 16
+    taxonomies distinctes pour 4 278 articles : « livre5 obligations » est
+    collé à l'identique en tête de 1 280 d'entre eux. « text_only » ne
+    garde que le contenu normatif.
+    """
+    if mode == "text_only":
+        return document.text
+    if mode != "full":
+        raise RAGError(
+            f"mode de texte indexé inconnu : {mode!r} "
+            f"(attendu parmi {SEARCH_TEXT_MODES})")
+    return "\n".join(part for part in (
+        document.title,
+        document.article_label,
+        document.domain,
+        document.taxonomy.replace("_", " ").replace("/", " "),
+        document.text,
+    ) if part)
 
 
 def _fold(value: str) -> str:
@@ -399,7 +422,15 @@ class LegalRAG:
         self.centering = (cfg.centering or "none").strip().lower()
         self._means = self._compute_means()
         self._centered: dict[str, np.ndarray] = {}
-        self._token_counts = [Counter(_tokens(doc.search_text)) for doc in documents]
+        # BM25 est indexé sur le MÊME texte que les vecteurs : garder les
+        # étiquettes d'un côté et pas de l'autre introduirait une seconde
+        # variable. L'effet propre aux embeddings s'isole en mesurant à
+        # dense_weight = 1.0.
+        self.search_text_fields = (cfg.search_text_fields or "full").strip()
+        self._token_counts = [
+            Counter(_tokens(search_text_for(doc, self.search_text_fields)))
+            for doc in documents
+        ]
         self._doc_lengths = np.asarray(
             [sum(counts.values()) for counts in self._token_counts], dtype=np.float32
         )

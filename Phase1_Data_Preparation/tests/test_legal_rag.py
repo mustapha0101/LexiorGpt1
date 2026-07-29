@@ -495,3 +495,60 @@ def test_centering_spreads_compressed_scores(tmp_path):
 def test_an_unknown_centering_mode_is_refused(tmp_path):
     with pytest.raises(RAGError, match="recentrage inconnu"):
         _centering_corpus(tmp_path, "zscore")
+
+
+# ── Texte soumis à l'embedder ────────────────────────────────────────────
+
+
+def test_full_mode_prefixes_the_labels():
+    from lexior.agentic.legal_rag import search_text_for
+
+    document = _document("CCQ", 1457, "Toute personne a le devoir.", "obligations")
+
+    indexed = search_text_for(document, "full")
+
+    assert indexed.startswith("CCQ Article 1457")
+    assert "obligations" in indexed
+    assert indexed.endswith("Toute personne a le devoir.")
+
+
+def test_text_only_mode_keeps_the_normative_content_alone():
+    from lexior.agentic.legal_rag import search_text_for
+
+    document = _document("CCQ", 1457, "Toute personne a le devoir.", "obligations")
+
+    assert search_text_for(document, "text_only") == "Toute personne a le devoir."
+
+
+def test_the_historical_property_stays_on_full():
+    document = _document("CCQ", 1457, "Toute personne a le devoir.", "obligations")
+
+    assert document.search_text == "\n".join((
+        "CCQ Article 1457", "Article 1457", "obligations", "obligations",
+        "Toute personne a le devoir."))
+
+
+def test_an_unknown_text_mode_is_refused():
+    from lexior.agentic.legal_rag import search_text_for
+
+    with pytest.raises(RAGError, match="texte indexé inconnu"):
+        search_text_for(_document("CCQ", 1, "x", "y"), "titles_only")
+
+
+def test_bm25_follows_the_configured_text(tmp_path):
+    """Le mot d'une étiquette ne doit plus matcher en mode texte seul."""
+    documents = [_document("CCQ", 1457, "Toute personne a le devoir.",
+                           "obligations")]
+    embeddings = np.asarray([[1.0, 0.0, 0.0]], dtype=np.float32)
+    manifest = {"embedding_model": FakeEmbedder.model, "corpus_hash": "test"}
+
+    plein = LegalRAG(RAGConfig(index_dir=str(tmp_path),
+                               search_text_fields="full"),
+                     FakeEmbedder(), documents, embeddings, manifest)
+    seul = LegalRAG(RAGConfig(index_dir=str(tmp_path),
+                              search_text_fields="text_only"),
+                    FakeEmbedder(), documents, embeddings, manifest)
+
+    assert plein._token_counts[0]["obligations"] == 2
+    assert "obligations" not in seul._token_counts[0]
+    assert seul._token_counts[0]["personne"] == 1

@@ -140,6 +140,10 @@ class RAGConfig:
     # denses tassés dans un dixième. Défaut « none » : le recentrage change
     # les scores, donc les seuils calibrés.
     centering: str = "none"
+    # Texte soumis à l'embedder : « full » (étiquettes + contenu, historique)
+    # ou « text_only » (contenu normatif seul). Change ce qui est indexé,
+    # donc impose un index distinct.
+    search_text_fields: str = "full"
 
     def redacted(self) -> dict[str, Any]:
         return {
@@ -161,6 +165,7 @@ class RAGConfig:
             "min_dense_score": self.min_dense_score,
             "min_hybrid_score": self.min_hybrid_score,
             "centering": self.centering,
+            "search_text_fields": self.search_text_fields,
         }
 
 
@@ -397,6 +402,8 @@ def load_config(config_path: Optional[str] = None,
         min_hybrid_score=float(
             rag_yaml.get("min_hybrid_score", RAGConfig.min_hybrid_score)),
         centering=str(rag_yaml.get("centering", RAGConfig.centering)),
+        search_text_fields=str(rag_yaml.get(
+            "search_text_fields", RAGConfig.search_text_fields)),
     )
 
     cfg.request_type_weights = dict(gen.get("request_type_weights", {}))
