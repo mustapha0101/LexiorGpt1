@@ -1,0 +1,128 @@
+{
+  "summaries": {
+    "CPC:750": {
+      "courte": "L'huissier écoute les avis des personnes concernées avant de vendre des biens.",
+      "b1": "Le débiteur est la personne qui doit de l'argent, et le créancier est celui qui attend d'être payé. Si quelqu'un n'est pas d'accord avec la décision de l'huissier, il peut demander au tribunal de l'aider dans les 10 jours avant la vente. La vente ne s'arrête que si le tribunal le décide."
+    },
+    "CCQ:1948": {
+      "courte": "Un héritier ou un liquidateur peut contester la fin d'un bail après le décès d'un locataire.",
+      "b1": "Il a un mois pour le faire après avoir reçu un avis du propriétaire. S'il ne conteste pas, il accepte que le bail se termine. Si le tribunal accepte sa demande après le délai, le bail continue, mais le propriétaire peut demander un nouveau loyer."
+    },
+    "CCQ:3109": {
+      "courte": "La loi du lieu où un acte est fait détermine sa forme.",
+      "b1": "Cela signifie que pour qu'un acte soit valide, il doit respecter les règles de la région où il est signé. Mais il peut aussi être valide s'il suit les règles d'une autre loi liée à l'acte ou à l'endroit où se trouvent les biens concernés. Pour un testament, il peut être fait selon les règles du pays ou de la région où vit la personne qui l'écrit, même si elle est décédée."
+    },
+    "CCQ:2167.5": {
+      "courte": "Un mandataire peut gérer les biens d'un autre mandataire sans faire d'inventaire.",
+      "b1": "Cela veut dire que si un mandataire a déjà rendu des comptes, il n'a pas besoin de faire une liste des biens. Cela s'applique seulement si le mandat ne dit pas le contraire. C'est une façon de simplifier la gestion des biens."
+    },
+    "CCQ:1723": {
+      "courte": "Le vendeur doit s'assurer que le bien n'a pas de problèmes légaux.",
+      "b1": "Cela veut dire que le bien doit être à lui sans dettes cachées. Si le bien a des dettes, le vendeur doit les régler, sauf si l'acheteur accepte de les prendre en charge."
+    },
+    "CPC:57": {
+      "courte": "Les tribunaux punissent les personnes qui manquent de respect envers eux.",
+      "b1": "Cela peut arriver pendant une audience ou même en dehors. Si quelqu'un manque de respect à la Cour d'appel, l'affaire est envoyée à la Cour supérieure. De plus, un accord entre les parties ne change rien à la punition pour outrage."
+    },
+    "CPC:668": {
+      "courte": "Le greffier gère l'argent récupéré.",
+      "b1": "Il distribue cet argent selon des règles précises. Les frais pour le greffier et les droits sont compris dans les coûts de l'exécution. Cela signifie que tout l'argent est bien organisé et utilisé correctement."
+    },
+    "CCQ:858": {
+      "courte": "L'héritier actif a priorité pour l'entreprise.",
+      "b1": "Si une personne décède et laisse une entreprise, l'héritier qui a aidé à faire fonctionner cette entreprise a le droit de la recevoir en priorité. Même si d'autres héritiers veulent aussi une part, celui qui a travaillé dans l'entreprise est favorisé. Cela vise à récompenser l'implication dans le travail."
+    },
+    "CCQ:1247": {
+      "courte": "Une personne qui a payé des dettes pour quelqu'un d'autre peut demander à être remboursée.",
+      "b1": "Elle peut aussi demander de l'argent pour des dépenses qu'elle a faites. Ces dépenses doivent être liées à ce qu'elle a payé. Le remboursement dépend du temps pendant lequel elle a eu ce droit."
+    },
+    "CCQ:1045": {
+      "courte": "Les murs qui ne font pas partie de la structure principale d'un bâtiment sont considérés comme partagés.",
+      "b1": "Cela signifie que si un mur sépare un appartement d'un autre ou d'un espace commun, il est vu comme un mur partagé. Cela implique que les deux parties peuvent avoir des droits et des responsabilités sur ce mur."
+    },
+    "CCQ:725": {
+      "courte": "Un témoin doit être mentionné dans le testament notarié.",
+      "b1": "Cela signifie qu'une personne doit être nommée pour voir le testament. Cette personne doit être adulte. Les employés du notaire ne peuvent pas être témoins, sauf s'ils sont notaires eux-mêmes."
+    },
+    "CCQ:786": {
+      "courte": "Le testateur choisit une ou plusieurs personnes pour gérer ses affaires après sa mort.",
+      "b1": "Ces personnes s'appellent des liquidateurs. Elles s'occupent de suivre les instructions du testament et de régler les biens du défunt. Le testateur peut aussi dire comment remplacer un liquidateur si besoin."
+    },
+    "CCQ:985": {
+      "courte": "Le propriétaire peut demander à son voisin de couper des branches ou racines qui gênent son terrain.",
+      "b1": "Si le voisin refuse, le propriétaire peut forcer cette coupe. De plus, si un arbre du voisin risque de tomber sur son terrain, il peut demander à son voisin de l'abattre ou de le redresser."
+    },
+    "CCQ:1220": {
+      "courte": "Si une personne reçoit un bien sans conditions, ses héritiers peuvent en bénéficier après son décès.",
+      "b1": "Cela signifie que si quelqu'un reçoit un cadeau ou un héritage sans règles spéciales, ses enfants ou proches peuvent hériter de ce bien. Même si la personne qui a reçu le bien meurt, ses héritiers peuvent le garder. C'est une façon de protéger les biens pour la famille."
+    },
+    "CPC:462": {
+      "courte": "Un testament vérifié peut être contesté plus tard.",
+      "b1": "Cela veut dire que même si un testament a été approuvé, des personnes peuvent encore dire qu'il n'est pas valide. Ces personnes doivent avoir des raisons valables pour contester. Si elles n'ont pas dit non au moment de la vérification, elles peuvent le faire plus tard."
+    },
+    "CCQ:2377": {
+      "courte": "Une rente est un paiement régulier reçu par une personne.",
+      "b1": "Cette rente ne peut pas être saisie ou vendue si elle est donnée gratuitement. Cependant, cela ne s'applique que pour la partie de la rente qui est nécessaire pour vivre, comme de la nourriture."
+    },
+    "CCQ:544": {
+      "courte": "Un enfant ne peut être adopté que si ses parents ou son tuteur sont d'accord.",
+      "b1": "Cela signifie que les parents doivent donner leur permission pour que quelqu'un d'autre prenne soin de l'enfant. Si les parents ne peuvent pas donner leur accord, un juge peut décider que l'enfant peut être adopté. C'est une protection pour l'enfant."
+    },
+    "CPC:663": {
+      "courte": "Le paiement échelonné permet de payer une dette en plusieurs fois.",
+      "b1": "Le débiteur, c'est celui qui doit de l'argent, s'engage à payer régulièrement une somme au créancier, qui est celui qui reçoit l'argent. Cette entente doit être acceptée par le créancier et ne peut durer plus d'un an. Si le débiteur veut, il peut payer toute la somme d'un coup et arrêter le paiement échelonné."
+    },
+    "CCQ:2092": {
+      "courte": "Un salarié ne peut pas abandonner son droit à une compensation.",
+      "b1": "Cela signifie que si un employé est licencié sans un préavis suffisant ou de façon injuste, il a le droit de demander de l'argent pour le dommage subi. Il ne peut pas dire qu'il ne veut pas cette compensation. C'est une protection pour les travailleurs."
+    },
+    "CCQ:1405": {
+      "courte": "La lésion concerne les personnes qui ne peuvent pas bien comprendre un contrat.",
+      "b1": "Cela signifie que si quelqu'un est très désavantagé dans un accord, cela ne pose problème que pour les jeunes (mineurs) et les personnes sous protection légale. Ces personnes ont besoin de plus de protection pour s'assurer qu'elles prennent des décisions justes."
+    }
+  },
+  "articles": {
+    "CPC:750": "L’huissier peut prendre en considération les observations que le débiteur, un créancier ou un tiers qui fait valoir un intérêt sur le bien peut lui faire sur le mode de vente choisi et ses modalités ou sur la mise à prix.\nCelui qui n’est pas satisfait de la réponse de l’huissier peut, dans les 10 jours avant la vente des biens, s’adresser au tribunal. La réalisation de la vente n’est toutefois suspendue que si le tribunal ordonne d’y surseoir.",
+    "CCQ:1948": "L’héritier ou le liquidateur de la succession d’un locataire décédé, peut, dans le mois de la réception d’un avis donné par le locateur pour éviter la reconduction du bail, s’adresser au tribunal pour en contester le bien-fondé; s’il omet de le faire, il est réputé avoir accepté la fin du bail.\nSi le tribunal accueille la demande, mais que sa décision est rendue après l’expiration du délai pour donner un avis de modification du bail, celui-ci est reconduit, mais le locateur peut alors s’adresser au tribunal pour faire fixer un nouveau loyer, dans le mois de la décision finale.",
+    "CCQ:3109": "La forme d’un acte juridique est régie par la loi du lieu où il est passé.\nEst néanmoins valable l’acte qui est fait dans la forme prescrite par la loi applicable au fond de cet acte ou par celle du lieu où, lors de sa conclusion, sont situés les biens qui en font l’objet ou, encore, par celle du domicile de l’une des parties lors de la conclusion de l’acte.\nUne disposition testamentaire peut, en outre, être faite dans la forme prescrite par la loi du domicile ou de la nationalité du testateur soit au moment où il a disposé, soit au moment de son décès.",
+    "CCQ:2167.5": "Le mandataire qui continue l’administration d’un autre mandataire, après la reddition de compte, est dispensé de faire l’inventaire des biens, sous réserve des stipulations du mandat.",
+    "CCQ:1723": "Le vendeur est tenu de garantir à l’acheteur que le bien est libre de tous droits, à l’exception de ceux qu’il a déclarés lors de la vente.\nIl est tenu de purger le bien des hypothèques qui le grèvent, même déclarées ou inscrites, à moins que l’acheteur n’ait assumé la dette ainsi garantie.",
+    "CPC:57": "Les tribunaux peuvent sanctionner la conduite de toute personne qui se rend coupable d’outrage au tribunal en sa présence ou hors celle-ci. Cependant, si l’outrage est commis envers la Cour d’appel, hors sa présence, l’affaire est portée devant la Cour supérieure.\nLa transaction ou tout autre acte mettant fin au litige est inopposable au tribunal en ce qui a trait à l’outrage.",
+    "CPC:668": "Le greffier distribue les sommes recueillies selon les dispositions sur la distribution des revenus saisis. Les droits et les frais de greffe sont inclus dans les frais d’exécution.",
+    "CCQ:858": "Malgré l’opposition ou la demande d’attribution par voie de préférence formée par un autre copartageant, l’entreprise ou les parts sociales, actions ou autres valeurs mobilières liées à celle-ci sont attribuées, par préférence, à l’héritier qui participait activement à l’exploitation de l’entreprise au temps du décès.",
+    "CCQ:1247": "Le grevé a le droit d’être remboursé, avec les intérêts courus depuis l’ouverture, des dettes en capital qu’il a payées sans en avoir été chargé et des dépenses généralement débitées au capital qu’il a faites en raison de la substitution.\nIl a aussi le droit d’être remboursé, en proportion de la durée de son droit, des dépenses généralement débitées au revenu et dont l’objet excède cette durée.",
+    "CCQ:1045": "Les cloisons ou les murs non compris dans le gros oeuvre du bâtiment et qui séparent une partie privative d’une partie commune ou d’une autre partie privative sont présumés mitoyens.",
+    "CCQ:725": "Le témoin appelé à assister au testament notarié doit y être nommé et désigné.\nTout majeur peut assister comme témoin au testament notarié, à l’exception des employés du notaire instrumentant qui ne sont pas notaires.",
+    "CCQ:786": "Le testateur peut désigner un ou plusieurs liquidateurs; il peut aussi pourvoir au mode de leur remplacement.\nLa personne désignée par le testateur pour liquider la succession ou exécuter son testament a la qualité de liquidateur, qu’elle ait été désignée comme administrateur de succession, exécuteur testamentaire ou autrement.",
+    "CCQ:985": "Le propriétaire peut, si des branches ou des racines venant du fonds voisin s’avancent sur son fonds et nuisent sérieusement à son usage, demander à son voisin de les couper; en cas de refus, il peut le contraindre à les couper.\nIl peut aussi, si un arbre du fonds voisin menace de tomber sur son fonds, contraindre son voisin à abattre l’arbre ou à le redresser.",
+    "CCQ:1220": "La défense de tester des biens, faite au donataire ou légataire sans autre indication, emporte substitution en faveur de ses héritiers ab intestat quant aux biens donnés ou légués qui restent à son décès.",
+    "CPC:462": "Un testament vérifié peut, ultérieurement à sa vérification, être contesté par toute personne intéressée qui ne s’est pas opposée à la demande de vérification ou qui, s’y étant opposée, soulève des moyens qu’elle n’était pas alors en mesure de faire valoir.",
+    "CCQ:2377": "La rente ne peut être stipulée insaisissable et inaliénable que lorsqu’elle est reçue à titre gratuit par le crédirentier; même alors, la stipulation n’a d’effet qu’à concurrence du montant de la rente qui est nécessaire au crédirentier en tant qu’aliments.",
+    "CCQ:544": "L’enfant mineur ne peut être adopté que si ses père et mère ou ses parents ou son tuteur ont consenti à l’adoption ou s’il a été déclaré judiciairement admissible à l’adoption.",
+    "CPC:663": "Le paiement échelonné est un mode d’exécution par lequel le débiteur s’engage auprès de l’huissier chargé de l’exécution à lui verser régulièrement, au bénéfice du créancier, une somme d’argent en exécution du jugement. Le montant, les modalités et le terme des versements sont fixés dans une entente, laquelle doit être agréée par le créancier.\nL’échelonnement des paiements ne doit pas excéder une année. Le débiteur peut toujours renoncer au bénéfice du paiement échelonné par l’acquittement du solde de la somme due.\nL’entente de paiement échelonné, qu’elle intervienne ou non après le dépôt de l’avis d’exécution, est déposée au greffe, dans le dossier concerné, de même que la renonciation à ce mode de paiement ou l’avis indiquant la perte du bénéfice du terme. Elle prend fin, sans avis, dès qu’un autre créancier demande l’exécution d’un jugement rendu en sa faveur.",
+    "CCQ:2092": "Le salarié ne peut renoncer au droit qu’il a d’obtenir une indemnité en réparation du préjudice qu’il subit, lorsque le délai de congé est insuffisant ou que la résiliation est faite de manière abusive.",
+    "CCQ:1405": "Outre les cas expressément prévus par la loi, la lésion ne vicie le consentement qu’à l’égard des mineurs et des majeurs sous tutelle ou mandat de protection."
+  },
+  "questions": {
+    "CPC:750": "Un huissier vient saisir des biens chez moi mais une partie appartient à mon colocataire. Est-ce que je peux lui expliquer avant qu'il emporte tout?",
+    "CCQ:1948": "Mon père est décédé et il louait un appartement. Est-ce que je suis obligé de continuer à payer le loyer jusqu'à la fin du bail?",
+    "CCQ:3109": "J'ai signé un contrat pendant un voyage en Italie. Est-ce qu'il vaut quelque chose ici si la façon de le signer n'est pas la même qu'au Québec?",
+    "CCQ:2167.5": "Je reprends la gestion des biens d'une personne âgée après quelqu'un d'autre. Dois-je refaire toute la liste de ce qu'elle possède?",
+    "CCQ:1723": "J'ai acheté un terrain et je découvre qu'un voisin a un droit de passage dessus. Le vendeur ne m'en avait jamais parlé.",
+    "CPC:57": "Quelqu'un a insulté le juge en pleine audience et refuse de respecter sa décision. Qu'est-ce que le tribunal peut faire?",
+    "CPC:668": "L'huissier a vendu les biens de la personne qui me doit de l'argent. Comment l'argent est-il partagé entre tous ceux à qui elle doit?",
+    "CCQ:858": "Mon frère et moi héritons de l'entreprise familiale. Chacun veut la garder en entier. Comment ça se règle?",
+    "CCQ:1247": "J'ai payé de ma poche des dettes qui venaient avec les biens que j'administre. Est-ce que je peux récupérer cet argent?",
+    "CCQ:1045": "Dans mon condo, qui paie pour réparer le mur qui sépare mon appartement du corridor commun?",
+    "CCQ:725": "Je vais signer mon testament chez le notaire. Qui peut servir de témoin? Est-ce que mon fils peut le faire?",
+    "CCQ:786": "Est-ce que je peux choisir moi-même la personne qui s'occupera de régler ma succession après ma mort?",
+    "CCQ:985": "Les branches du gros arbre de mon voisin passent au-dessus de mon terrain et les racines soulèvent mon patio.",
+    "CCQ:1220": "Dans le testament de ma tante, il est écrit que je ne pourrai pas laisser le chalet à qui je veux. Qu'est-ce que ça veut dire pour moi?",
+    "CPC:462": "Le testament de ma mère a déjà été validé par le tribunal, mais je pense qu'il est faux. Est-ce encore possible de le contester?",
+    "CCQ:2377": "On me verse une rente tous les mois, elle m'a été donnée en cadeau. Est-ce que mes créanciers peuvent la saisir?",
+    "CCQ:544": "Je veux adopter l'enfant de ma conjointe. Est-ce que le père biologique doit donner son accord?",
+    "CPC:663": "Je n'arrive pas à payer d'un coup ce que le tribunal m'a condamné à payer. Est-ce que je peux étaler en versements?",
+    "CCQ:2092": "Mon employeur m'a fait signer un papier où je renonce à toute indemnité s'il me met dehors. Est-ce que ça tient?",
+    "CCQ:1405": "J'ai signé un contrat qui me désavantage énormément. Est-ce que je peux l'annuler parce que le prix était vraiment injuste?"
+  }
+}
