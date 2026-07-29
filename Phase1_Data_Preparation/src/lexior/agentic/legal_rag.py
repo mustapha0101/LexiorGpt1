@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import time
 import unicodedata
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -231,6 +232,80 @@ class OpenAIEmbedder:
             "cost_usd": round(cost, 6),
         }
         return {"model": self.model, "total": total}
+
+
+class BGEEmbedder:
+    """Embedder local multilingue — BAAI/bge-m3, licence MIT.
+
+    Alternative à ``OpenAIEmbedder``, qu'il ne remplace pas : les deux
+    respectent le Protocol ``Embedder`` et le choix se fait par
+    configuration (``RAGConfig.embedding_provider``). Les dimensions
+    diffèrent (1024 contre 1536), donc les index ne sont PAS
+    interchangeables — chacun vit dans son répertoire.
+
+    Aucun appel réseau après le téléchargement initial des poids
+    (~2,3 Go, mis en cache par huggingface_hub).
+    """
+
+    def __init__(self, cfg: RAGConfig, allow_remote_calls: bool = True,
+                 device: str = "cpu"):
+        from sentence_transformers import SentenceTransformer
+
+        self.model = cfg.embedding_model or "BAAI/bge-m3"
+        self.device = device
+        self.calls = 0
+        self.failed_calls = 0
+        self.texts_in = 0
+        self.seconds = 0.0
+        self._encoder = SentenceTransformer(self.model, device=device)
+
+    def embed(self, texts: Sequence[str]) -> np.ndarray:
+        if not texts:
+            return np.empty((0, 0), dtype=np.float32)
+        self.calls += 1
+        started = time.monotonic()
+        try:
+            vectors = self._encoder.encode(
+                list(texts), batch_size=8, show_progress_bar=False,
+                normalize_embeddings=True, convert_to_numpy=True)
+        except Exception:
+            self.failed_calls += 1
+            raise
+        self.seconds += time.monotonic() - started
+        self.texts_in += len(texts)
+        return np.asarray(vectors, dtype=np.float32)
+
+    def cost_report(self) -> dict[str, Any]:
+        """Même forme que l'embedder distant : coût nul, temps mesuré.
+
+        Le coût se déplace de la facture vers la latence — c'est
+        précisément ce que la comparaison doit rendre visible.
+        """
+        total = {
+            "calls": self.calls,
+            "failed_calls": self.failed_calls,
+            "tokens_in": 0,
+            "tokens_cached_in": 0,
+            "tokens_out": 0,
+            "cost_usd": 0.0,
+            "texts_in": self.texts_in,
+            "seconds": round(self.seconds, 3),
+            "ms_per_text": round(
+                self.seconds * 1000 / self.texts_in, 1) if self.texts_in else 0.0,
+        }
+        return {"model": self.model, "device": self.device, "total": total}
+
+
+def build_embedder(cfg: RAGConfig, allow_remote_calls: bool) -> Embedder:
+    """Embedder désigné par ``cfg.embedding_provider``."""
+    provider = (cfg.embedding_provider or "openai").strip().lower()
+    if provider == "openai":
+        return OpenAIEmbedder(cfg, allow_remote_calls)
+    if provider in ("bge", "bge-m3", "local"):
+        return BGEEmbedder(cfg, allow_remote_calls)
+    raise RAGError(
+        f"fournisseur d'embeddings inconnu : {provider!r} "
+        "(attendu 'openai' ou 'bge')")
 
 
 def index_exists(index_dir: str | Path) -> bool:

@@ -1,7 +1,10 @@
+import json
+
 import numpy as np
+import pytest
 
 from agentic_generation.config import RAGConfig
-from agentic_generation.legal_rag import LegalDocument, LegalRAG
+from agentic_generation.legal_rag import LegalDocument, LegalRAG, RAGError
 
 
 class FakeEmbedder:
@@ -338,3 +341,59 @@ def test_nothing_is_recorded_when_nothing_is_rejected(tmp_path):
     rag.search("Comment assigner un témoin à comparaître?", "CPC", 2)
 
     assert rag.last_rerank_rejection is None
+
+
+# ── Choix du modèle d'embeddings par configuration ───────────────────────
+
+
+def test_the_provider_selects_the_embedder(monkeypatch):
+    """Le choix se fait par configuration, pas par édition de code."""
+    from lexior.agentic import legal_rag
+
+    construits = []
+
+    class FauxBGE:
+        def __init__(self, cfg, allow_remote_calls=True, device="cpu"):
+            construits.append(("bge", cfg.embedding_model))
+            self.model = cfg.embedding_model
+
+    class FauxOpenAI:
+        def __init__(self, cfg, allow_remote_calls):
+            construits.append(("openai", cfg.embedding_model))
+            self.model = cfg.embedding_model
+
+    monkeypatch.setattr(legal_rag, "BGEEmbedder", FauxBGE)
+    monkeypatch.setattr(legal_rag, "OpenAIEmbedder", FauxOpenAI)
+
+    legal_rag.build_embedder(
+        RAGConfig(embedding_provider="openai"), allow_remote_calls=True)
+    legal_rag.build_embedder(
+        RAGConfig(embedding_provider="bge", embedding_model="BAAI/bge-m3"),
+        allow_remote_calls=True)
+
+    assert [nom for nom, _ in construits] == ["openai", "bge"]
+
+
+def test_an_unknown_provider_is_refused():
+    from lexior.agentic.legal_rag import RAGError, build_embedder
+
+    with pytest.raises(RAGError, match="inconnu"):
+        build_embedder(RAGConfig(embedding_provider="mistral"),
+                       allow_remote_calls=True)
+
+
+def test_an_index_built_with_another_model_is_refused(tmp_path):
+    """1536 et 1024 dimensions ne se mélangent pas : l'index doit être
+    rejeté avant de produire des scores absurdes."""
+    documents = [_document("CCQ", 1457, "Toute personne a le devoir…", "obligations")]
+    (tmp_path / "documents.jsonl").write_text(
+        json.dumps(documents[0].__dict__, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    np.save(tmp_path / "embeddings.npy",
+            np.asarray([[1.0, 0.0, 0.0]], dtype=np.float32))
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"embedding_model": "BAAI/bge-m3", "corpus_hash": "t"}),
+        encoding="utf-8")
+
+    with pytest.raises(RAGError, match="reconstruire l'index"):
+        LegalRAG.load(RAGConfig(index_dir=str(tmp_path)), FakeEmbedder())

@@ -113,6 +113,10 @@ class RAGConfig:
     index_dir: str = "data/agentic/rag_index"
     dataset_name: str = "intelliwork/canadian-quebec-law-corpus"
     dataset_split: str = "train"
+    # « openai » (distant, 1536 dimensions) ou « bge » (local, BAAI/bge-m3,
+    # 1024 dimensions, licence MIT). Les index ne sont pas interchangeables :
+    # chaque fournisseur a le sien, désigné par index_dir.
+    embedding_provider: str = "openai"
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_api_key: str = ""
     embedding_model: str = "text-embedding-3-small"
@@ -139,6 +143,7 @@ class RAGConfig:
             "dataset_split": self.dataset_split,
             "embedding_base_url_hash": hash_of(self.embedding_base_url),
             "embedding_api_key_set": bool(self.embedding_api_key),
+            "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
             "embedding_batch_size": self.embedding_batch_size,
             "embedding_price_per_1m_usd": self.embedding_price_per_1m_usd,
@@ -347,6 +352,11 @@ def load_config(config_path: Optional[str] = None,
             "RAG_DATASET_SPLIT",
             default=str(rag_yaml.get("dataset_split", RAGConfig.dataset_split)),
         ) or RAGConfig.dataset_split,
+        embedding_provider=_env(
+            "RAG_EMBEDDING_PROVIDER",
+            default=str(rag_yaml.get("embedding_provider",
+                                     RAGConfig.embedding_provider)),
+        ) or RAGConfig.embedding_provider,
         embedding_base_url=_env(
             "RAG_EMBEDDING_BASE_URL",
             default=str(rag_yaml.get("embedding_base_url", RAGConfig.embedding_base_url)),
