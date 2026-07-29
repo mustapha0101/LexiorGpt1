@@ -1,0 +1,46 @@
+{
+  "_note": "Mesure par paliers EMBOÎTÉS (graine 31415) : chaque palier est un sur-ensemble du précédent, et les 40 articles cibles sont résumés à TOUS les paliers. Le bénéfice est donc constant et tout ce qui bouge vient de la pollution. Score dense d'un article résumé = max(texte, courte, b1).",
+  "reference": {
+    "top": {
+      "1": 6,
+      "3": 11,
+      "10": 21
+    },
+    "intrusions": 0
+  },
+  "paliers": {
+    "200": {
+      "top": {
+        "1": 15,
+        "3": 24,
+        "10": 32
+      },
+      "intrusions": 20
+    },
+    "800": {
+      "top": {
+        "1": 11,
+        "3": 19,
+        "10": 30
+      },
+      "intrusions": 44
+    },
+    "2000": {
+      "top": {
+        "1": 10,
+        "3": 13,
+        "10": 25
+      },
+      "intrusions": 58
+    },
+    "4273": {
+      "top": {
+        "1": 7,
+        "3": 11,
+        "10": 18
+      },
+      "intrusions": 64
+    }
+  },
+  "conclusion": "Le gain se dissout entièrement avec la couverture. À 4,7 % le top-3 passe de 11 à 24; à couverture complète il revient à 11, et le top-10 tombe SOUS la référence (21 -> 18). Les intrusions croissent sans répit : 20, 44, 58, 64. Ne pas déployer."
+}
