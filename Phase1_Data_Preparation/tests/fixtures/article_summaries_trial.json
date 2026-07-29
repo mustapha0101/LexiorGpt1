@@ -1,0 +1,38 @@
+{
+  "_note": "Essai sur huit articles seulement. Explications en français facile (niveau B1) destinées UNIQUEMENT à retrouver l'article : phrases courtes, vocabulaire courant, aucun terme juridique laissé sans explication. Ce sont des explications, pas des questions — une explication couvre plusieurs façons de poser la même question. Ces textes ne doivent JAMAIS apparaître dans une réponse ni servir de preuve : l'extrait montré au reranker et à l'usager vient toujours de document.text.",
+  "_modele": "rédigées à la main, non générées",
+  "articles": {
+    "1457": {
+      "courte": "Quand quelqu'un cause un dommage par sa faute, il doit le réparer.",
+      "b1": "Chacun doit faire attention à ne pas nuire aux autres. Si une personne ne fait pas attention et qu'elle cause un dommage, elle doit payer pour le réparer. Cela vaut pour un objet abîmé, une blessure ou une perte d'argent. C'est la règle de base quand on veut se faire rembourser par la personne responsable."
+    },
+    "1459": {
+      "courte": "Les parents paient les dommages causés par leur enfant mineur.",
+      "b1": "Un enfant de moins de 18 ans peut casser ou abîmer quelque chose. Ce sont alors ses parents qui doivent payer, parce qu'ils ont la responsabilité de le garder, de le surveiller et de l'éduquer. Les parents peuvent éviter de payer s'ils prouvent qu'ils n'ont commis aucune faute. Cette règle s'applique à la personne qui a l'autorité sur l'enfant."
+    },
+    "1594": {
+      "courte": "Avertir par écrit quelqu'un qui ne respecte pas son engagement.",
+      "b1": "Avant d'aller devant un tribunal, on avertit d'abord la personne qui ne fait pas ce qu'elle a promis. On lui envoie une lettre qui lui demande d'agir. Cette lettre s'appelle une mise en demeure. Parfois le contrat prévoit qu'il n'y a rien à envoyer : le simple retard suffit."
+    },
+    "1611": {
+      "courte": "Ce qu'on peut réclamer : la perte subie et le profit manqué.",
+      "b1": "Quand on réclame de l'argent pour un dommage, on compte deux choses. D'abord ce qu'on a perdu. Ensuite l'argent qu'on aurait gagné si le problème n'était pas arrivé. On peut aussi compter un dommage futur, à condition d'être certain qu'il arrivera et de pouvoir en calculer le montant."
+    },
+    "1854": {
+      "courte": "Le propriétaire doit livrer un logement en bon état et laisser le locataire en profiter en paix.",
+      "b1": "Le propriétaire doit remettre le logement en bon état au début du bail. Il doit aussi laisser le locataire en profiter tranquillement pendant toute la durée du bail. Si des travaux, du bruit ou un autre problème empêchent le locataire d'en profiter, le propriétaire ne respecte pas son obligation. Le logement doit servir à ce pour quoi il est loué."
+    },
+    "2091": {
+      "courte": "Mettre fin à un emploi sans date de fin : il faut prévenir à l'avance.",
+      "b1": "Quand un emploi n'a pas de date de fin, l'employeur comme l'employé peut y mettre fin. Mais il faut prévenir l'autre à l'avance. Ce délai doit être raisonnable. On regarde le type d'emploi, la situation de la personne et depuis combien de temps elle travaille là."
+    },
+    "976": {
+      "courte": "Entre voisins, il faut accepter les petits désagréments, mais pas les excès.",
+      "b1": "Vivre à côté d'autres personnes amène des désagréments : du bruit, des odeurs, de la poussière. Chacun doit accepter ce qui est normal. Mais quand cela dépasse ce qu'un voisin peut raisonnablement supporter, ce n'est plus acceptable. On regarde l'endroit où l'on habite et les habitudes du quartier pour juger."
+    },
+    "2925": {
+      "courte": "On a trois ans pour réclamer, ensuite c'est trop tard.",
+      "b1": "Quand on veut réclamer quelque chose à quelqu'un, on ne peut pas attendre indéfiniment. Le délai habituel est de trois ans. Passé ce délai, on perd le droit de s'adresser au tribunal. Ce délai s'applique quand aucune autre règle n'en prévoit un différent."
+    }
+  }
+}

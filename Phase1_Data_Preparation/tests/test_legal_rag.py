@@ -552,3 +552,40 @@ def test_bm25_follows_the_configured_text(tmp_path):
     assert plein._token_counts[0]["obligations"] == 2
     assert "obligations" not in seul._token_counts[0]
     assert seul._token_counts[0]["personne"] == 1
+
+
+# ── Le résumé sert à trouver, jamais à prouver ───────────────────────────
+
+
+def test_the_excerpt_always_comes_from_the_statute(tmp_path):
+    """Règle absolue : ce que voient le reranker et l'usager est le TEXTE
+    DE LOI, jamais une reformulation. C'est ce qui garde le reranker
+    indépendant de la façon dont l'article a été retrouvé."""
+    import inspect
+    from lexior.agentic import legal_rag
+
+    source = inspect.getsource(legal_rag.LegalRAG.search)
+
+    assert '"excerpt": document.text[:700]' in source, (
+        "l'extrait doit être découpé dans document.text")
+    assert "summary" not in source.lower() and "resume" not in source.lower()
+
+
+def test_the_tool_response_never_carries_article_text(tmp_path):
+    """`call()` n'expose que des libellés et des scores.
+
+    Un résumé embarqué pour la recherche ne peut donc pas atteindre la
+    trajectoire, ni servir de preuve — la règle du lot 5 tient par
+    construction, pas par vigilance.
+    """
+    documents = [_document("CCQ", 1457, "Toute personne a le devoir de "
+                           "respecter les règles de conduite.", "obligations")]
+    rag = LegalRAG(
+        RAGConfig(index_dir=str(tmp_path)), FakeEmbedder(), documents,
+        np.asarray([[0.0, 1.0, 0.0]], dtype=np.float32),
+        {"embedding_model": FakeEmbedder.model, "corpus_hash": "test"})
+
+    payload = rag.call("semantic_search_ccq", {"query": "un dommage"})
+
+    assert "devoir de respecter" not in payload["text"]
+    assert "Article 1457" in payload["text"]
