@@ -74,9 +74,14 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # Le NUMÉRO cité est vérifié ailleurs ; ici c'est l'AFFIRMATION qui est
     # confrontée au texte réellement récupéré. Un échec technique devient une
     # erreur : ne pas avoir pu vérifier n'est pas avoir vérifié.
+    # Les FAITS sont nécessaires : un article qui vise un arbre « qui menace
+    # de tomber » ne s'applique pas à un arbre déjà tombé, et sans les faits
+    # le juge ne peut pas le voir.
     verdicts = ctx.services.assertion_grounding.verifier(
         state.get("final_answer") or "",
-        textes_recuperes(state.get("tool_history", [])))
+        textes_recuperes(state.get("tool_history", [])),
+        faits=(state.get("active_issue")
+               or state.get("latest_user_message", "")))
     for verdict in verdicts:
         if verdict.echec_technique:
             validation.errors.append(

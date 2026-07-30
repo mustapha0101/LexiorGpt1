@@ -42,28 +42,35 @@ _RE_AUTRES_NUMEROS = re.compile(r"\d{1,4}(?:\.\d+)?")
 _RE_PHRASE = re.compile(r"[^.;\n]+[.;\n]?")
 
 _SYSTEME = (
-    "Tu cherches UNE seule chose : l'affirmation ajoute-t-elle un contenu "
-    "que le texte de loi fourni ne permet pas ?\n"
+    "On te donne le TEXTE OFFICIEL d'un ou plusieurs articles, les FAITS "
+    "décrits par la personne, et une RÉPONSE qui lui a été donnée.\n"
     "\n"
-    "Réponds soutenue=false UNIQUEMENT si l'affirmation contredit le texte, "
-    "ou lui prête une portée, une conséquence ou une condition qui n'y "
-    "figure pas.\n"
+    "Relève toute AFFIRMATION DE DROIT de la réponse — ce à quoi la personne "
+    "a droit, ce qu'elle peut exiger, une condition, un délai, une "
+    "conséquence — que les textes fournis ne permettent PAS. Trois cas :\n"
     "\n"
-    "Réponds soutenue=true dans tous les autres cas, en particulier :\n"
-    "- l'affirmation est INCOMPLÈTE, elle omet une partie du texte — une "
-    "omission n'est pas une invention ;\n"
-    "- elle reformule, résume ou vulgarise fidèlement ;\n"
-    "- elle applique le texte à la situation de l'usager sans lui ajouter de "
-    "règle ;\n"
-    "- elle renvoie à un article dont le texte ne t'est pas fourni : ignore "
-    "cette partie, juge seulement ce que les textes fournis permettent de "
-    "trancher.\n"
+    "1. elle contredit le texte ;\n"
+    "2. elle énonce une conséquence, une condition ou une portée absente du "
+    "texte ;\n"
+    "3. elle applique un article dont les CONDITIONS ne correspondent pas aux "
+    "faits — un article qui vise un arbre « qui MENACE de tomber » ne "
+    "s'applique pas à un arbre DÉJÀ tombé.\n"
+    "\n"
+    "Ne relève PAS :\n"
+    "- une omission : on ne juge pas si la réponse est complète ;\n"
+    "- une reformulation, un résumé ou une vulgarisation fidèle ;\n"
+    "- l'application du texte aux faits quand les conditions SONT réunies ;\n"
+    "- un conseil pratique non juridique — documenter, consulter un avocat, "
+    "contacter la partie adverse ;\n"
+    "- ce qui est attribué à un article dont le texte ne t'est pas fourni.\n"
     "\n"
     "On ne te demande NI si le numéro d'article est le bon, NI si "
     "l'affirmation est juridiquement correcte en général, NI si elle est "
     "complète.\n"
-    "Réponds uniquement par "
-    '{"soutenue": true|false, "motif": "une phrase"}.')
+    "\n"
+    'Réponds uniquement par {"non_soutenues": [{"affirmation": "citation '
+    'exacte de la réponse", "motif": "une phrase"}]}. Liste vide si tout est '
+    "soutenu.")
 
 
 @dataclass
@@ -122,66 +129,70 @@ class AssertionGroundingService:
     def disponible(self) -> bool:
         return bool(self.client) and not self.offline
 
-    def verifier(self, reponse: str,
-                 textes: dict[str, str]) -> list[VerdictAffirmation]:
-        """Un verdict par couple (article cité, affirmation qui l'entoure).
+    def verifier(self, reponse: str, textes: dict[str, str],
+                 faits: str = "") -> list[VerdictAffirmation]:
+        """Les affirmations de droit de la réponse tiennent-elles ?
+
+        UN seul appel, sur la réponse ENTIÈRE. Une fenêtre autour de chaque
+        citation manquait la phrase fautive dès qu'elle en débordait : sur
+        l'arbre tombé, « vous pourriez avoir droit à une compensation » était
+        la troisième phrase et n'entrait dans aucune fenêtre.
 
         Les articles cités sans texte récupéré ne sont pas jugés ici : c'est
         le contrôle d'ancrage par numéro qui les couvre déjà.
         """
-        if not self.disponible() or not (reponse or "").strip():
+        if not self.disponible() or not (reponse or "").strip() or not textes:
             return []
-        verdicts: list[VerdictAffirmation] = []
-        deja: set[tuple[str, str]] = set()
-        for numero, debut, fin in _numeros_cites(reponse):
-            if numero not in textes:
-                continue
-            affirmation = affirmation_autour(reponse, debut, fin)
-            cle = (numero, affirmation)
-            if cle in deja:
-                continue
-            deja.add(cle)
-            # Une affirmation cite souvent PLUSIEURS articles — « selon les
-            # articles 1889 et 1963 ». Ne montrer au juge que le texte de
-            # l'un d'eux le fait conclure « non soutenue » parce que l'autre
-            # manque : c'était un artefact du contrôle, pas une invention du
-            # modèle. On fournit donc tous les textes disponibles cités dans
-            # la fenêtre.
-            portee = {n for n, _, _ in _numeros_cites(affirmation)
-                      if n in textes} or {numero}
-            verdicts.append(self._juger(
-                numero, affirmation, {n: textes[n] for n in sorted(portee)}))
-        return verdicts
+        cites = {n for n, _, _ in _numeros_cites(reponse)} & set(textes)
+        if not cites:
+            return []
+        return self._juger(reponse, {n: textes[n] for n in sorted(cites)},
+                           faits)
 
-    def _juger(self, numero: str, affirmation: str,
-               textes: dict[str, str]) -> VerdictAffirmation:
+    def _juger(self, reponse_finale: str, textes: dict[str, str],
+               faits: str) -> list[VerdictAffirmation]:
+        articles = ", ".join(sorted(textes))
         corpus = "\n\n".join(
             f"TEXTE OFFICIEL DE L'ARTICLE {n} :\n{t}"
             for n, t in textes.items())
+        contenu = corpus
+        if (faits or "").strip():
+            contenu += f"\n\nFAITS DÉCRITS PAR LA PERSONNE :\n{faits.strip()}"
+        contenu += f"\n\nRÉPONSE À VÉRIFIER :\n{reponse_finale}"
         try:
-            reponse = self.client.complete_json(
+            brut = self.client.complete_json(
                 self.role,
                 [{"role": "system", "content": _SYSTEME},
-                 {"role": "user",
-                  "content": (f"{corpus}\n\nAFFIRMATION À VÉRIFIER "
-                              f"(porte notamment sur l'article {numero}) :\n"
-                              f"{affirmation}")}],
+                 {"role": "user", "content": contenu}],
                 temperature=0.0)
         except Exception as exc:                       # noqa: BLE001
             # Ne pas pouvoir vérifier n'est pas une vérification réussie.
-            return VerdictAffirmation(
-                article=numero, affirmation=affirmation, soutenue=False,
-                motif=f"{type(exc).__name__}: {exc}"[:160],
-                echec_technique=True)
-        if not isinstance(reponse, dict) or "soutenue" not in reponse:
-            return VerdictAffirmation(
-                article=numero, affirmation=affirmation, soutenue=False,
-                motif="réponse du vérificateur illisible",
-                echec_technique=True)
-        return VerdictAffirmation(
-            article=numero, affirmation=affirmation,
-            soutenue=bool(reponse.get("soutenue")),
-            motif=str(reponse.get("motif") or "")[:200])
+            return [VerdictAffirmation(
+                article=articles, affirmation="(réponse entière)",
+                soutenue=False, motif=f"{type(exc).__name__}: {exc}"[:160],
+                echec_technique=True)]
+        if not isinstance(brut, dict) or "non_soutenues" not in brut:
+            return [VerdictAffirmation(
+                article=articles, affirmation="(réponse entière)",
+                soutenue=False, motif="réponse du vérificateur illisible",
+                echec_technique=True)]
+        entrees = brut.get("non_soutenues")
+        if not isinstance(entrees, list):
+            return [VerdictAffirmation(
+                article=articles, affirmation="(réponse entière)",
+                soutenue=False, motif="liste de verdicts illisible",
+                echec_technique=True)]
+        verdicts = [VerdictAffirmation(
+            article=articles, affirmation="(réponse entière)", soutenue=True)]
+        for entree in entrees:
+            if not isinstance(entree, dict):
+                continue
+            verdicts.append(VerdictAffirmation(
+                article=articles,
+                affirmation=str(entree.get("affirmation") or "")[:300],
+                soutenue=False,
+                motif=str(entree.get("motif") or "")[:200]))
+        return verdicts[1:] or verdicts
 
 
 def textes_recuperes(tool_history: Any) -> dict[str, str]:

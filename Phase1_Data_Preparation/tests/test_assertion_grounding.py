@@ -68,19 +68,21 @@ class _Obs:
 # ── La question posée porte sur l'affirmation ET le texte ────────────────
 
 
-def test_la_question_contient_le_texte_officiel_et_laffirmation():
-    client = _Client({"soutenue": False, "motif": "ajout non soutenu"})
+def test_la_question_contient_le_texte_les_faits_et_la_reponse():
+    client = _Client({"non_soutenues": []})
     AssertionGroundingService(client=client).verifier(
-        INVENTION, {"984": ART_984})
-    assert len(client.appels) == 1
+        INVENTION, {"984": ART_984}, faits="les fruits tombent chez moi")
+    assert len(client.appels) == 1, "UN appel sur la réponse entière"
     envoye = client.appels[0]["messages"][-1]["content"]
     assert ART_984 in envoye, "le texte réel doit être soumis au juge"
-    assert "responsabilité du propriétaire en cas de dommages" in envoye, (
-        "l'affirmation litigieuse doit être soumise au juge")
+    assert "responsabilité du propriétaire en cas de dommages" in envoye
+    assert "les fruits tombent chez moi" in envoye, (
+        "les faits sont nécessaires : un article visant un arbre qui MENACE "
+        "de tomber ne s'applique pas à un arbre déjà tombé")
 
 
 def test_la_consigne_exclut_le_numero_et_la_justesse_generale():
-    client = _Client()
+    client = _Client({"non_soutenues": []})
     AssertionGroundingService(client=client).verifier(
         INVENTION, {"984": ART_984})
     systeme = client.appels[0]["messages"][0]["content"]
@@ -89,21 +91,22 @@ def test_la_consigne_exclut_le_numero_et_la_justesse_generale():
 
 
 def test_une_affirmation_non_soutenue_est_signalee():
-    client = _Client({"soutenue": False, "motif": "ajoute une portée absente"})
+    client = _Client({"non_soutenues": [
+        {"affirmation": "ce qui souligne la responsabilité",
+         "motif": "ajoute une portée absente"}]})
     verdicts = AssertionGroundingService(client=client).verifier(
         INVENTION, {"984": ART_984})
     assert len(verdicts) == 1
     assert not verdicts[0].soutenue
-    assert verdicts[0].article == "984"
     assert "n'est pas soutenu par le texte" in verdicts[0].probleme()
 
 
 def test_une_affirmation_soutenue_ne_produit_rien_de_negatif():
-    client = _Client({"soutenue": True, "motif": "reformulation fidèle"})
+    client = _Client({"non_soutenues": []})
     verdicts = AssertionGroundingService(client=client).verifier(
         "L'article 985 permet de demander au voisin de couper les branches.",
         {"985": ART_985})
-    assert verdicts and verdicts[0].soutenue
+    assert all(v.soutenue for v in verdicts)
 
 
 # ── L'échec technique REJETTE ────────────────────────────────────────────
@@ -120,7 +123,8 @@ def test_une_exception_du_client_ne_laisse_pas_passer():
 
 
 @pytest.mark.parametrize("reponse", [
-    {}, {"motif": "sans verdict"}, "pas un objet", None])
+    {}, {"motif": "sans verdict"}, "pas un objet", None,
+    {"non_soutenues": "pas une liste"}])
 def test_une_reponse_illisible_est_un_echec_technique(reponse):
     client = _Client(reponse)
     verdicts = AssertionGroundingService(client=client).verifier(
@@ -137,7 +141,7 @@ def test_une_affirmation_multi_articles_recoit_tous_les_textes():
     C'était un artefact du contrôle, pas une invention du modèle : il
     gonflait la mesure de 36 % à 47 %.
     """
-    client = _Client({"soutenue": True})
+    client = _Client({"non_soutenues": []})
     AssertionGroundingService(client=client).verifier(
         "Selon les articles 984 et 985, le voisin peut couper les branches.",
         {"984": ART_984, "985": ART_985})
@@ -147,16 +151,17 @@ def test_une_affirmation_multi_articles_recoit_tous_les_textes():
 
 def test_une_omission_nest_pas_une_invention():
     """La consigne doit le dire : on ne juge pas la complétude."""
-    client = _Client()
+    client = _Client({"non_soutenues": []})
     AssertionGroundingService(client=client).verifier(
         INVENTION, {"984": ART_984})
     systeme = client.appels[0]["messages"][0]["content"]
-    assert "une omission n'est pas une invention" in systeme.lower()
+    assert "une omission" in systeme.lower()
+    assert "on ne juge pas si la réponse est complète" in systeme.lower()
 
 
 def test_un_article_sans_texte_recupere_nest_pas_juge():
     """Le contrôle d'ancrage par numéro couvre déjà ce cas."""
-    client = _Client()
+    client = _Client({"non_soutenues": []})
     verdicts = AssertionGroundingService(client=client).verifier(
         "Selon l'article 1457, toute personne a le devoir…", {"984": ART_984})
     assert verdicts == [] and client.appels == []
@@ -200,6 +205,19 @@ def test_plusieurs_articles_dans_une_meme_reponse():
 
 
 # ── Service indisponible ─────────────────────────────────────────────────
+
+
+def test_une_condition_qui_ne_correspond_pas_aux_faits_est_relevee():
+    """« menace de tomber » ne couvre pas un arbre déjà tombé."""
+    client = _Client({"non_soutenues": [
+        {"affirmation": "vous pouvez contraindre votre voisin à abattre",
+         "motif": "l'article ne s'applique pas à un arbre déjà tombé"}]})
+    verdicts = AssertionGroundingService(client=client).verifier(
+        "Conformément à l'article 985, vous pouvez contraindre votre voisin "
+        "à abattre l'arbre.", {"985": ART_985},
+        faits="un arbre pourri de mon voisin est tombé sur mon garage")
+    assert verdicts and not verdicts[0].soutenue
+    assert "déjà tombé" in verdicts[0].motif
 
 
 def test_sans_client_le_controle_ne_bloque_rien():
