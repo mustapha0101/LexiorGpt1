@@ -110,15 +110,35 @@ def _nombre(valeur: Any) -> Optional[float]:
 
 
 def _erreurs_de_plage(name: str, arguments: dict[str, Any]) -> list[str]:
-    """Bornes d'une plage d'articles : ordre et taille."""
+    """Bornes d'une récupération d'articles : liste OU plage."""
     champs = _OUTILS_DE_PLAGE.get(name)
     if not champs or not isinstance(arguments, dict):
         return []
     champ_debut, champ_fin = champs
+
+    # La liste prime : c'est la forme à préférer quand les articles ne se
+    # suivent pas. Elle rend la plage inutile dans ce cas.
+    liste = arguments.get("articles")
+    if isinstance(liste, list) and liste:
+        if len(liste) > MAX_ARTICLES_PAR_APPEL:
+            return [f"{name} : {len(liste)} articles demandés, maximum "
+                    f"{MAX_ARTICLES_PAR_APPEL}."]
+        invalides = [v for v in liste if _nombre(v) is None]
+        if invalides:
+            return [f"{name} : « articles » contient des valeurs qui ne sont "
+                    f"pas des numéros : {invalides[:3]}"]
+        return []
+
     debut = _nombre(arguments.get(champ_debut))
     fin = _nombre(arguments.get(champ_fin))
-    if debut is None or fin is None:
-        return []                      # rien à comparer : plage implicite
+    if debut is None:
+        if arguments.get("articles") is not None or arguments.get(champ_debut) is not None:
+            return [f"{name} : « articles » doit être une liste non vide, ou "
+                    f"« {champ_debut} » un nombre"]
+        return [f"{name} : fournir « articles » (liste) ou "
+                f"« {champ_debut} » (début de plage)"]
+    if fin is None:
+        return []                      # un seul article
     if fin < debut:
         return [f"{name} : plage inversée, « {champ_debut} » ({debut:g}) est "
                 f"après « {champ_fin} » ({fin:g})"]

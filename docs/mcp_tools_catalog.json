@@ -98,16 +98,23 @@
       "inputSchema": {
         "type": "object",
         "properties": {
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Liste de numéros d'articles ÉPARS, ex: [984, 985, 1467]. À PRÉFÉRER dès que les articles ne se suivent pas : avec start_article/end_article il faudrait soit deux appels, soit une plage de plusieurs centaines d'articles — et on finit par en abandonner un. Remplace la plage."
+          },
           "start_article": {
-            "type": "number"
+            "type": "number",
+            "description": "Début d'une plage CONTIGUË. Utiliser articles[] si les articles ne se suivent pas."
           },
           "end_article": {
-            "type": "number"
+            "type": "number",
+            "description": "Fin de la plage, incluse. Doit être >= start_article."
           }
         },
-        "required": [
-          "start_article"
-        ]
+        "required": []
       },
       "schemaDetails": {
         "properties": [
@@ -125,7 +132,11 @@
         "additionalProperties": "not specified"
       },
       "minimalValidExample": {
-        "start_article": 1457
+        "articles": [
+          984,
+          985,
+          1467
+        ]
       },
       "responseStructure": {
         "type": "text",
@@ -217,16 +228,23 @@
       "inputSchema": {
         "type": "object",
         "properties": {
+          "articles": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Liste de numéros d'articles ÉPARS, ex: [984, 985, 1467]. À PRÉFÉRER dès que les articles ne se suivent pas : avec start_article/end_article il faudrait soit deux appels, soit une plage de plusieurs centaines d'articles — et on finit par en abandonner un. Remplace la plage."
+          },
           "start_article": {
-            "type": "number"
+            "type": "number",
+            "description": "Début d'une plage CONTIGUË. Utiliser articles[] si les articles ne se suivent pas."
           },
           "end_article": {
-            "type": "number"
+            "type": "number",
+            "description": "Fin de la plage, incluse. Doit être >= start_article."
           }
         },
-        "required": [
-          "start_article"
-        ]
+        "required": []
       },
       "schemaDetails": {
         "properties": [
@@ -244,7 +262,11 @@
         "additionalProperties": "not specified"
       },
       "minimalValidExample": {
-        "start_article": 1
+        "articles": [
+          984,
+          985,
+          1467
+        ]
       },
       "responseStructure": {
         "type": "text",
