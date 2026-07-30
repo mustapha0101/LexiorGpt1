@@ -16,6 +16,10 @@ export interface ToolResultEvent {
   tool: string;
   result: string;
   ok: boolean;
+  /** usable | citable | candidate | irrelevant | empty | wrong_document_type… */
+  classification?: string;
+  /** Motif du classement, quand il y en a un. */
+  reason?: string;
 }
 
 export interface TokenEvent {
@@ -78,6 +82,8 @@ export interface ToolCall {
   args: Record<string, unknown>;
   result?: string;
   ok?: boolean;
+  classification?: string;
+  reason?: string;
 }
 
 export interface ChatMessage {

@@ -220,7 +220,9 @@ class GraphRunner:
                 query, thread_id=thread_id, history=history,
                 system_prompt=system_prompt)
 
-        translator = StreamTranslator()
+        translator = StreamTranslator(
+            thinking_preview_chars=getattr(
+                self.context.config, "thinking_preview_chars", None))
         final: dict[str, Any] = {}
         interrupted_question: Optional[str] = None
 
@@ -234,6 +236,10 @@ class GraphRunner:
                     yield event
             elif stream_type == "values" and isinstance(data, dict):
                 final = data
+        # Rien ne doit rester en attente si le graphe s'est arrêté avant un
+        # nœud terminal connu.
+        for event in translator.flush():
+            yield event
 
         if interrupted_question is not None:
             # clarification déjà émise par le traducteur

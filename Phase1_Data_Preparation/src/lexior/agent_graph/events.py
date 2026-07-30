@@ -45,14 +45,34 @@ NODE_LABELS = {
 }
 
 _TOOL_RESULT_PREVIEW_CHARS = 500
+# Défaut historique. Configurable par ``chat.thinking_preview_chars`` ou
+# LEXIOR_THINKING_PREVIEW_CHARS : 280 caractères coupent un raisonnement au
+# milieu. C'est un réglage d'AFFICHAGE — le thinking_text produit par le
+# modèle et enregistré dans les trajectoires n'est jamais modifié.
 _THINKING_PREVIEW_CHARS = 280
+
+# Nœuds après lesquels un résultat d'outil encore non classé doit être émis
+# quand même : mieux vaut l'afficher sans classification que le perdre.
+_NOEUDS_TERMINAUX = frozenset({
+    "generate_answer", "return_live_answer", "reject",
+    "handle_clarification", "export_dataset",
+})
 
 
 class StreamTranslator:
-    """Traducteur avec état minimal (déduplication des observations)."""
+    """Traducteur avec état minimal (déduplication des observations).
 
-    def __init__(self) -> None:
+    ``tool_result`` est retenu le temps d'un nœud — ``execute_tool`` puis
+    ``classify_tool_result`` s'enchaînent — pour porter la classification
+    dans le MÊME événement plutôt que dans un second.
+    """
+
+    def __init__(self, thinking_preview_chars: Optional[int] = None) -> None:
         self._tool_count = 0
+        self._thinking_chars = int(
+            _THINKING_PREVIEW_CHARS if thinking_preview_chars is None
+            else max(0, thinking_preview_chars))
+        self._en_attente: list[dict[str, Any]] = []
 
     def translate_chunk(
         self, chunk: dict[str, Any],
@@ -86,25 +106,56 @@ class StreamTranslator:
                             "resolved_jurisdiction",
                             decision.get("jurisdiction", "")),
                         "thinking": (decision.get("thinking_text")
-                                     or "")[:_THINKING_PREVIEW_CHARS],
+                                     or "")[:self._thinking_chars],
                     }
 
             tool_history = update.get("tool_history")
             if isinstance(tool_history, list):
-                for obs in tool_history[self._tool_count:]:
+                for rang, obs in enumerate(tool_history[self._tool_count:],
+                                           start=self._tool_count):
                     yield {
                         "type": "tool_call",
                         "tool": obs.tool_name,
                         "args": obs.arguments,
                     }
-                    yield {
+                    self._en_attente.append({
                         "type": "tool_result",
+                        "index": rang,
                         "tool": obs.tool_name,
                         "result": (obs.normalized_response
                                    or "")[:_TOOL_RESULT_PREVIEW_CHARS],
                         "ok": obs.ok,
-                    }
+                        "classification": "",
+                        "reason": "",
+                    })
                 self._tool_count = max(self._tool_count, len(tool_history))
+
+            if node_name == "classify_tool_result":
+                yield from self._vider(update.get("search_evaluations"))
+            elif node_name in _NOEUDS_TERMINAUX:
+                yield from self._vider(None)
+
+    def flush(self) -> Iterator[dict[str, Any]]:
+        """À appeler en fin de flux : rien ne doit rester en attente."""
+        yield from self._vider(None)
+
+    def _vider(self, evaluations: Any) -> Iterator[dict[str, Any]]:
+        """Émet les résultats en attente, classés si l'évaluation est là."""
+        par_index: dict[int, tuple[str, str]] = {}
+        for ev in (evaluations or []):
+            lire = (ev.get if isinstance(ev, dict)
+                    else lambda k, d="": getattr(ev, k, d))
+            index = lire("tool_call_index", None)
+            if index is None:
+                continue
+            par_index[int(index)] = (str(lire("result_status", "") or ""),
+                                     str(lire("result_reason", "") or ""))
+        for evenement in self._en_attente:
+            statut, motif = par_index.get(evenement["index"], ("", ""))
+            evenement["classification"] = statut
+            evenement["reason"] = motif
+            yield evenement
+        self._en_attente = []
 
     @staticmethod
     def _interrupt_events(payload: Any) -> Iterator[dict[str, Any]]:

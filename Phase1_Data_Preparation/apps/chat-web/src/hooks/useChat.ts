@@ -222,6 +222,8 @@ export function useChat(): UseChatReturn {
                         ...calls[i]!,
                         result: event.result,
                         ok: event.ok,
+                        classification: event.classification,
+                        reason: event.reason,
                       };
                       break;
                     }

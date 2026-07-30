@@ -48,6 +48,22 @@ export function ToolCallCard({ call }: Props) {
           {formatToolName(call.tool)}
         </span>
 
+        {/* Classification du résultat : usable / candidate / irrelevant / empty… */}
+        {call.classification && (
+          <span
+            title={call.reason || undefined}
+            className={`text-[11px] px-1.5 py-0.5 rounded shrink-0 ${
+              call.classification === "usable"
+                ? "bg-success/10 text-success"
+                : call.classification === "empty"
+                  ? "bg-surface-raised text-text-muted"
+                  : "bg-warning/10 text-warning"
+            }`}
+          >
+            {call.classification}
+          </span>
+        )}
+
         {/* Chevron */}
         <svg
           className={`w-4 h-4 ml-auto text-text-muted transition-transform ${expanded ? "rotate-180" : ""}`}
