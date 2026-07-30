@@ -138,7 +138,15 @@ TOOL_COVERAGE: dict[str, ToolCoverageEntry] = {
     ),
     "get_quebec_regulation": ToolCoverageEntry(
         tool_name="get_quebec_regulation",
-        document_types=("regulation",),
+        # Le nom vient du serveur MCP et il est trompeur : derrière, c'est
+        # fetchDocumentContent(url), qui récupère aussi bien un règlement
+        # qu'une décision de justice — vérifié sur 2021 QCTAL 7020, texte
+        # intégral, 29 155 caractères. C'est la seule seconde étape possible
+        # pour la jurisprudence québécoise : fetch_document (a2aj) ne couvre
+        # aucun tribunal du Québec (29 jeux de données, zéro québécois).
+        # Dette de nommage côté serveur, à renommer là-bas, pas à contourner
+        # ici.
+        document_types=("regulation", "court_decision"),
         legal_jurisdictions=("Québec",),
     ),
     "get_quebec_legal_info": ToolCoverageEntry(

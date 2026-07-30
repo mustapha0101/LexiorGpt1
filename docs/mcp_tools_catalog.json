@@ -349,7 +349,7 @@
       "canonicalName": "get_quebec_regulation",
       "server": "lexior-legisquebec-mcp",
       "vscodeObservedName": "mcp_lexior-legisq_get_quebec_regulation",
-      "description": "Récupère le contenu complet d'un règlement spécifique ou d'un acte législatif sur LégisQuébec à partir de son URL.",
+      "description": "Récupère le contenu complet d'un document juridique québécois à partir de son URL : règlement ou acte législatif sur LégisQuébec, MAIS AUSSI le texte intégral d'une décision de tribunal sur CanLII ou SOQUIJ. C'est l'outil à utiliser après search_quebec_jurisprudence pour lire une décision : lui passer l'URL renvoyée par la recherche. Le nom ne mentionne que les règlements, c'est une dette de nommage côté serveur — la même fonction sert aux deux.",
       "inputSchema": {
         "type": "object",
         "properties": {
