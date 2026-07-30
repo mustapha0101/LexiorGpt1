@@ -13,6 +13,7 @@ Le planner n'a AUCUNE autorité pour contourner ces contrôles :
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from lexior.agentic.schemas import Decision, DecisionTrace, PlannerDecision
@@ -31,6 +32,10 @@ from ..context import GraphContext
 from ..state import LexiorState
 
 NAME = "validate_plan"
+
+# Faits manquants qui portent sur la juridiction : une fois celle-ci résolue,
+# les redemander revient à ignorer la réponse de l'usager.
+_RE_FAIT_JURIDICTION = re.compile(r"juridiction|province", re.IGNORECASE)
 
 
 def _forced(decision: PlannerDecision, jurisdiction: str, need: str,
@@ -133,6 +138,16 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # Le vérificateur décide; le planner n'a pas à y penser de lui-même.
     missing = [fact for fact in state.get("missing_facts_before_search", [])
                if str(fact).strip()]
+    # Ne pas redemander ce qui vient d'être répondu. Après une clarification
+    # de juridiction, analyze_facts laisse « juridiction applicable » dans la
+    # liste alors que resolve_jurisdiction l'a établie : le tour 2 redemandait
+    # la province qu'on venait de recevoir, en affichant « Québec » dans la
+    # même trace.
+    if resolved and coverage_action(
+            resolved,
+            federal_matter=_is_federal_matter(state, decision)) != "clarify":
+        missing = [fact for fact in missing
+                   if not _RE_FAIT_JURIDICTION.search(str(fact))]
     if (live and missing
             and decision.decision not in (Decision.ask_clarification,
                                           Decision.cannot_conclude)
