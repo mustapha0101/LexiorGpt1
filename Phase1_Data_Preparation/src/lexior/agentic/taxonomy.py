@@ -218,6 +218,13 @@ REQUEST_TYPES: dict[str, RequestTypeSpec] = {rt.name: rt for rt in [
     RequestTypeSpec(
         name="case_law_research",
         description="L'utilisateur demande explicitement des décisions judiciaires.",
+        # N'ajoutez PAS get_quebec_regulation en étape facultative ici : ce
+        # serait de la configuration morte. _effective_route (planner_agent.py)
+        # n'accepte les étapes facultatives que pour trois paires codées en
+        # dur, et celle-ci n'en fait pas partie — mesuré, résultats identiques
+        # au bit. L'enchaînement vers la récupération du texte d'une décision
+        # passe par la description de l'outil dans docs/mcp_tools_catalog.json
+        # et par prompts.py, pas par la route.
         expected_route=_route(
             ("get_ccq_articles", True, "article number known or discoverable"),
             "search_quebec_jurisprudence",

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .prompts import CHAT_PLANNER_SUPPLEMENT, planner_system_prompt
+from .taxonomy_conditions import GardeContexte, etape_facultative_retenue
 from .schemas import Decision, DecisionTrace, PlannerDecision, ResearchState
 from .tool_catalog import ToolCatalog
 from .validators import validate_next_action, validate_planner_decision
@@ -875,21 +876,21 @@ class PlannerAgent:
         request_type = state.scenario.request_type
         steps = state.scenario.expected_route.steps
         jurisdiction = getattr(state.scenario, "jurisdiction_status", "")
-        failure_mode = getattr(state.scenario, "planned_failure_mode", None) or getattr(state.scenario, "failure_mode", None)
-        clarification_stage = getattr(state.scenario, "clarification_stage", "none")
+        # Les conditions déclarées sur les étapes facultatives sont désormais
+        # LUES (taxonomy_conditions), au lieu d'être réencodées ici en trois
+        # paires codées en dur qui en couvraient trois sur onze.
+        contexte = GardeContexte(
+            request_type=request_type,
+            jurisdiction_status=jurisdiction,
+            user_query=getattr(state.scenario, "user_query", "") or "",
+            tool_history=tuple(state.tool_history),
+        )
         route: list[str] = []
         for step in steps:
             if not step.optional:
                 route.append(step.tool)
                 continue
-            if (request_type == "case_analysis"
-                    and step.tool == "semantic_search_ccq"):
-                route.append(step.tool)
-            elif (request_type == "procedure_guidance"
-                  and step.tool == "semantic_search_cpc"):
-                route.append(step.tool)
-            elif (jurisdiction == "supported_federal"
-                  and step.tool == "fetch_document"):
+            if etape_facultative_retenue(step.tool, step.condition, contexte):
                 route.append(step.tool)
         for search_tool in ("semantic_search_ccq", "semantic_search_cpc"):
             if search_tool not in route or route.count(search_tool) > 1:
