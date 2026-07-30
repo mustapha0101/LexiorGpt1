@@ -190,7 +190,10 @@ def test_minmax_score_is_never_shown_as_relevance(tmp_path):
 
 
 def test_absolute_floor_returns_nothing_when_no_article_matches(tmp_path):
-    rag = _off_topic_rag(tmp_path, min_dense_score=0.30, min_hybrid_score=0.30)
+    """Exemption désactivée : ce test isole le plancher, comme il isole déjà
+    son calibrage en fixant les deux seuils."""
+    rag = _off_topic_rag(tmp_path, min_dense_score=0.30, min_hybrid_score=0.30,
+                         dense_floor_exempt_top_k=0)
 
     results = rag.search("Mon locateur refuse que j'apporte mon chat.", "CCQ")
 
@@ -199,7 +202,8 @@ def test_absolute_floor_returns_nothing_when_no_article_matches(tmp_path):
 
 def test_empty_search_result_reads_as_no_article_found(tmp_path):
     """Le texte vu par le planner doit permettre au classifieur de voir `empty`."""
-    rag = _off_topic_rag(tmp_path, min_dense_score=0.30, min_hybrid_score=0.30)
+    rag = _off_topic_rag(tmp_path, min_dense_score=0.30, min_hybrid_score=0.30,
+                         dense_floor_exempt_top_k=0)
 
     payload = rag.call("semantic_search_ccq", {
         "query": "Mon locateur refuse que j'apporte mon chat.", "top_k": 5})
@@ -215,7 +219,8 @@ def test_absolute_floor_keeps_a_genuinely_relevant_article(tmp_path):
     ]
     embeddings = np.asarray([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
     cfg = RAGConfig(index_dir=str(tmp_path), top_k=5, candidate_k=5,
-                    min_dense_score=0.30, min_hybrid_score=0.30)
+                    min_dense_score=0.30, min_hybrid_score=0.30,
+                    dense_floor_exempt_top_k=0)
     rag = LegalRAG(cfg, FakeEmbedder(), documents, embeddings,
                    {"embedding_model": FakeEmbedder.model, "corpus_hash": "test"})
 

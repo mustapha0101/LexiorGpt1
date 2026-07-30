@@ -612,6 +612,28 @@ class LegalRAG:
         return ((dense >= float(self.cfg.min_dense_score))
                 & (absolute >= float(self.cfg.min_hybrid_score)))
 
+    def _exemptes_du_plancher(self, candidats: np.ndarray,
+                              positions_dense: np.ndarray) -> np.ndarray:
+        """Masque des candidats que le plancher ne doit PAS écarter.
+
+        Le plancher filtre sur le score dense, pas sur l'origine du candidat.
+        Or son travail utile est d'écarter ce qui entre par BM25 seul : il a
+        été calibré sur des requêtes en style juridique, qui scorent 0,58 à
+        0,70, et rejetait donc le langage naturel par construction — 0,305
+        pour « mon fils a cassé la vitrine du dépanneur », où le bon article
+        est pourtant au rang 8 du canal dense.
+
+        Les N premiers du canal dense en sont exemptés. La largeur compte :
+        exempter TOUT le top-k (40) dégrade le jeu annoté — hit@3 0,500 ->
+        0,475, MRR 0,405 -> 0,389 — parce que des candidats médiocres entrent
+        et faussent la normalisation min-max. À 10, rien ne bouge sur le jeu
+        annoté et les formulations en langage naturel sont rattrapées.
+        """
+        largeur = int(getattr(self.cfg, "dense_floor_exempt_top_k", 0) or 0)
+        if largeur <= 0:
+            return np.zeros(len(candidats), dtype=bool)
+        return np.isin(candidats, positions_dense[:largeur])
+
     def _llm_rerank(self, query: str, code: str,
                     results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Réordonne et peut écarter des candidats, sans jamais en créer.
@@ -789,7 +811,9 @@ class LegalRAG:
         # Aucun candidat au-dessus des planchers : le corpus ne répond pas.
         # `call()` produira « Aucun article trouvé », que le classifieur voit
         # comme `empty` et qui déclenche la reformulation.
-        keep = self._above_floor(dense[candidate_positions], absolute)
+        keep = (self._above_floor(dense[candidate_positions], absolute)
+                | self._exemptes_du_plancher(candidate_positions,
+                                             dense_positions))
         if not bool(keep.all()):
             candidate_positions = candidate_positions[keep]
             absolute = absolute[keep]

@@ -84,6 +84,18 @@ rag:
   # faux positifs en dessous de 0.50. Voir retrieval_gold_baseline.json.
   min_dense_score: 0.40
   min_hybrid_score: 0.0
+  # Le plancher a ete calibre sur des requetes en style juridique (0,58-0,70)
+  # et rejetait le langage naturel : 0,305 pour « mon fils a casse la vitrine
+  # du depanneur », alors que le bon article y est au rang 8 du canal dense.
+  # Les N premiers candidats du canal dense echappent au plancher.
+  # Mesure sur retrieval_gold.jsonl, 40 questions repondables :
+  #   exemption   hit@3   hit@10    MRR   candidats retenus
+  #   aucune      0.500   0.600   0.405        2254
+  #   top-10      0.500   0.625   0.408        2297   <- retenu
+  #   top-40      0.475   0.600   0.389        2640
+  # top-40 degrade : exempter largement laisse entrer des candidats mediocres
+  # qui faussent la normalisation min-max. 0 desactive l'exemption.
+  dense_floor_exempt_top_k: 10
 
 critics:
   legal_min_score: 0.70

@@ -134,6 +134,14 @@ class RAGConfig:
     # le commentaire des YAML pour le compromis mesuré.
     min_dense_score: float = 0.40
     min_hybrid_score: float = 0.0
+    # Le plancher a été calibré sur des requêtes en style juridique, qui
+    # scorent 0,58 à 0,70 ; il rejetait donc le langage naturel par
+    # construction — 0,305 pour « mon fils a cassé la vitrine du dépanneur »,
+    # alors que le bon article y est au rang 8 du canal dense. Les N premiers
+    # candidats du canal dense en sont exemptés : le plancher garde son rôle,
+    # écarter le bruit entré par BM25 seul, sans écarter ce que le sens a
+    # bien classé. 0 désactive l'exemption.
+    dense_floor_exempt_top_k: int = 10
     # Recentrage des vecteurs : « none », « global » (une moyenne sur tout
     # le corpus) ou « per_code » (une moyenne CCQ, une moyenne CPC). Retirer
     # ce que tous les articles ont en commun devrait étaler des scores
@@ -164,6 +172,7 @@ class RAGConfig:
             "llm_rerank_k": self.llm_rerank_k,
             "min_dense_score": self.min_dense_score,
             "min_hybrid_score": self.min_hybrid_score,
+            "dense_floor_exempt_top_k": self.dense_floor_exempt_top_k,
             "centering": self.centering,
             "search_text_fields": self.search_text_fields,
         }
@@ -418,6 +427,8 @@ def load_config(config_path: Optional[str] = None,
             rag_yaml.get("min_dense_score", RAGConfig.min_dense_score)),
         min_hybrid_score=float(
             rag_yaml.get("min_hybrid_score", RAGConfig.min_hybrid_score)),
+        dense_floor_exempt_top_k=int(rag_yaml.get(
+            "dense_floor_exempt_top_k", RAGConfig.dense_floor_exempt_top_k)),
         centering=str(rag_yaml.get("centering", RAGConfig.centering)),
         search_text_fields=str(rag_yaml.get(
             "search_text_fields", RAGConfig.search_text_fields)),
