@@ -346,8 +346,8 @@ def planner_system_prompt(catalog: ToolCatalog) -> str:
         "5 à 15 mots-clés. « mise en demeure » pour « lettre "
         "d'avertissement », « autorité parentale » pour « mon gars ». "
         "S'AJOUTE à la requête de recherche, ne la remplace jamais : "
-        "les deux formulations sont cherchées puis réunies. Chaîne vide "
-        'si la question emploie déjà les termes du Code.",\n'
+        "les deux formulations sont cherchées puis réunies. Remplis-le à "
+        'chaque recherche : c\'est lui qui porte la traduction.",\n'
         '  "request_type": "...",\n'
         '  "jurisdiction": "...",\n'
         '  "missing_critical_facts": [...],\n'

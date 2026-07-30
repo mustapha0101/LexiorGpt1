@@ -30,7 +30,8 @@
         "type": "object",
         "properties": {
           "query": {
-            "type": "string"
+            "type": "string",
+            "description": "La question de l'utilisateur DANS SES MOTS, telle qu'il l'a posée. Ne la traduis pas en vocabulaire juridique : « mon chien a mordu quelqu'un », pas « responsabilité du propriétaire d'un animal ». La traduction va dans legal_terms, qui est cherché EN PLUS — si tu traduis ici, les mots de l'utilisateur n'atteignent jamais la recherche et l'union des deux formulations ne se produit pas."
           },
           "top_k": {
             "type": "integer",
@@ -63,7 +64,8 @@
         "type": "object",
         "properties": {
           "query": {
-            "type": "string"
+            "type": "string",
+            "description": "La question de l'utilisateur DANS SES MOTS, telle qu'il l'a posée. Ne la traduis pas en vocabulaire juridique : « mon chien a mordu quelqu'un », pas « responsabilité du propriétaire d'un animal ». La traduction va dans legal_terms, qui est cherché EN PLUS — si tu traduis ici, les mots de l'utilisateur n'atteignent jamais la recherche et l'union des deux formulations ne se produit pas."
           },
           "top_k": {
             "type": "integer",
