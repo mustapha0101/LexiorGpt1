@@ -110,7 +110,13 @@ def construire_entree(state: Any, statut: str) -> dict[str, Any]:
         "enregistre_le": _horodatage(),
         "session_id": state.get("thread_id", ""),
         "statut": statut,
-        "question": state.get("latest_user_message", ""),
+        # active_issue et non latest_user_message : après une clarification,
+        # ce dernier vaut la réponse (« Au Québec. ») et la question écrite
+        # serait perdue. Les deux sont conservés.
+        "question": (state.get("active_issue")
+                     or state.get("latest_user_message", "")),
+        "dernier_message": state.get("latest_user_message", ""),
+        "reponse_de_clarification": state.get("clarification_answer", ""),
         "request_type": state.get("request_type", ""),
         "juridiction": {
             "retenue": state.get("resolved_jurisdiction", ""),

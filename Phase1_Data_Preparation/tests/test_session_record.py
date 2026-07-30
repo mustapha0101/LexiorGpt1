@@ -65,6 +65,7 @@ def _etat(**kw):
     base = {
         "thread_id": "session-test",
         "latest_user_message": "Mon voisin passe sur mon terrain, que faire?",
+        "active_issue": "Mon voisin passe sur mon terrain, que faire?",
         "request_type": "case_analysis",
         "resolved_jurisdiction": "Québec",
         "jurisdiction_status": "supported_quebec",
@@ -171,3 +172,17 @@ def test_le_fichier_est_hors_du_corpus(tmp_path):
     chemin = Path(fichier).resolve()
     assert "accepted.jsonl" not in chemin.name
     assert "agentic" not in chemin.parent.name
+
+
+def test_la_question_survit_a_une_clarification():
+    """Apres une clarification, latest_user_message vaut la REPONSE.
+
+    Enregistrer ce champ comme « question » ferait perdre la question ecrite
+    par l'usager — c'est precisement ce qu'on veut relire.
+    """
+    e = construire_entree(
+        _etat(latest_user_message="Au Quebec.",
+              clarification_answer="Au Quebec."), "accepted")
+    assert e["question"] == "Mon voisin passe sur mon terrain, que faire?"
+    assert e["dernier_message"] == "Au Quebec."
+    assert e["reponse_de_clarification"] == "Au Quebec."

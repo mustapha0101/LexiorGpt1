@@ -32,7 +32,15 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         resolved_jurisdiction=state.get("resolved_jurisdiction", ""),
         requested_court_scope=state.get("requested_court_scope", ""),
         requested_document_type="",
-        user_query=state.get("latest_user_message", ""),
+        # active_issue et NON latest_user_message : après une clarification,
+        # handle_clarification écrase latest_user_message par la réponse de
+        # l'usager (« au Québec », « préciser quoi? »). L'article récupéré
+        # était alors comparé à cette réponse et classé « sans rapport
+        # thématique » — l'article 1466, qui traite précisément des dommages
+        # causés par un animal, est ressorti irrelevant sur une question de
+        # morsure de chien. update_active_task conserve la question d'origine.
+        user_query=(state.get("active_issue")
+                    or state.get("latest_user_message", "")),
     )
 
     index = len(tool_history) - 1
