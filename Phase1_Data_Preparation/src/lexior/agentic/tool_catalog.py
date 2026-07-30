@@ -86,6 +86,50 @@ def _schema_types(schema: dict[str, Any]) -> Any:
     return None
 
 
+# Récupération d'articles par plage. Le schéma déclare deux nombres et rien
+# d'autre : le serveur a accepté {1318 -> 1621}, soit 303 articles d'un coup,
+# puis {1604 -> 273}, où le début est APRÈS la fin. Ni l'un ni l'autre n'est
+# une demande sensée, et la première noie la trajectoire sous un texte que
+# personne ne lira.
+_OUTILS_DE_PLAGE = {"get_ccq_articles": ("start_article", "end_article"),
+                    "get_cpc_articles": ("start_article", "end_article")}
+
+# Un raisonnement juridique cite quelques articles voisins, pas un chapitre.
+MAX_ARTICLES_PAR_APPEL = 20
+
+
+def _nombre(valeur: Any) -> Optional[float]:
+    if isinstance(valeur, bool) or valeur is None:
+        return None
+    if isinstance(valeur, (int, float)):
+        return float(valeur)
+    try:
+        return float(str(valeur).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _erreurs_de_plage(name: str, arguments: dict[str, Any]) -> list[str]:
+    """Bornes d'une plage d'articles : ordre et taille."""
+    champs = _OUTILS_DE_PLAGE.get(name)
+    if not champs or not isinstance(arguments, dict):
+        return []
+    champ_debut, champ_fin = champs
+    debut = _nombre(arguments.get(champ_debut))
+    fin = _nombre(arguments.get(champ_fin))
+    if debut is None or fin is None:
+        return []                      # rien à comparer : plage implicite
+    if fin < debut:
+        return [f"{name} : plage inversée, « {champ_debut} » ({debut:g}) est "
+                f"après « {champ_fin} » ({fin:g})"]
+    etendue = fin - debut + 1
+    if etendue > MAX_ARTICLES_PAR_APPEL:
+        return [f"{name} : plage de {etendue:g} articles demandée, maximum "
+                f"{MAX_ARTICLES_PAR_APPEL}. Récupérez les articles utiles, "
+                f"pas un chapitre entier."]
+    return []
+
+
 class ToolCatalog:
     def __init__(self, data: dict[str, Any], path: str = ""):
         self.path = path
@@ -163,6 +207,7 @@ class ToolCatalog:
                 errors.append(
                     f"{name} : valeur hors enum pour « {key} » : {value!r} "
                     f"(valides : {enum})")
+        errors.extend(_erreurs_de_plage(name, arguments))
         return errors
 
     def server_of(self, name: str) -> str:

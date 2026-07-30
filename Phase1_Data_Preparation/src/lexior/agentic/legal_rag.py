@@ -851,7 +851,13 @@ class LegalRAG:
                 "excerpt": document.text[:700],
                 "source_url": document.source_url,
             })
-        return self._llm_rerank(query, code, results)[:wanted]
+        final = self._llm_rerank(query, code, results)[:wanted]
+        # ``rank`` était figé AVANT le reranker, qui peut réordonner : le
+        # champ annonçait une position que la liste ne respectait plus. On le
+        # renumérote sur l'ordre réellement renvoyé.
+        for position, item in enumerate(final, start=1):
+            item["rank"] = position
+        return final
 
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         code = {
@@ -868,15 +874,29 @@ class LegalRAG:
         if not results:
             text = f"Aucun article {code} trouvé."
         else:
-            # Le score affiché est le score ABSOLU : le score min-max vaut
-            # toujours 1.000 pour le premier résultat et apprendrait au
-            # modèle à faire confiance à n'importe quel résultat.
+            # Les articles étaient AFFICHÉS dans l'ordre du classement fusionné
+            # mais ÉTIQUETÉS avec le score absolu, qui ne l'explique pas : sur
+            # une question de dommage causé par un mineur, le bon article
+            # sortait premier à 0,546 pendant que des articles hors sujet
+            # affichaient 0,61-0,62. Un modèle qui se fie au nombre récupère
+            # les mauvais articles — c'est arrivé avec Qwen là où gpt-4o-mini,
+            # qui suivait l'ordre, réussissait. Les deux lectures étaient
+            # défendables, une seule marchait.
+            #
+            # Le rang numéroté porte donc le classement, et le score est
+            # nommé pour ce qu'il est : une confiance absolue, pas le critère
+            # de tri. Le score de tri lui-même reste caché — en min-max il
+            # vaut 1.000 pour le premier quoi qu'il arrive.
             lines = [
-                f"{item['article']} — score de pertinence "
+                f"{position}. {item['article']} — confiance "
                 f"{item.get('absolute_score', item['score']):.3f}"
-                for item in results
+                for position, item in enumerate(results, start=1)
             ]
-            text = "\n\n".join(lines)
+            text = (
+                "Articles du plus au moins pertinent. Le rang fait foi ; la "
+                "confiance est une mesure absolue, PAS le critère de "
+                "classement — un article mieux classé peut afficher une "
+                "confiance plus basse.\n\n" + "\n\n".join(lines))
         return {
             "text": text,
             "query": arguments.get("query", ""),
