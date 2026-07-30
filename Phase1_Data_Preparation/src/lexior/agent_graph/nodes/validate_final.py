@@ -14,6 +14,7 @@ import re
 from typing import Any
 
 from lexior.agentic.error_codes import ErrorCode, tag
+from lexior.services.assertion_grounding import textes_recuperes
 from lexior.services.modes import is_live
 
 from ..context import GraphContext
@@ -69,6 +70,20 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         [o.tool_name for o in state.get("tool_history", [])],
     ))
     validation.warnings.extend(_regle_sans_source(state))
+
+    # Le NUMÉRO cité est vérifié ailleurs ; ici c'est l'AFFIRMATION qui est
+    # confrontée au texte réellement récupéré. Un échec technique devient une
+    # erreur : ne pas avoir pu vérifier n'est pas avoir vérifié.
+    verdicts = ctx.services.assertion_grounding.verifier(
+        state.get("final_answer") or "",
+        textes_recuperes(state.get("tool_history", [])))
+    for verdict in verdicts:
+        if verdict.echec_technique:
+            validation.errors.append(
+                tag(ErrorCode.UNGROUNDED_ARTICLE, verdict.probleme()))
+        elif not verdict.soutenue:
+            validation.warnings.append(
+                tag(ErrorCode.UNGROUNDED_ARTICLE, verdict.probleme()))
 
     return {
         "validation_result": validation,

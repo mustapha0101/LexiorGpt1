@@ -1,0 +1,212 @@
+# -*- coding: utf-8 -*-
+
+"""L'affirmation doit être soutenue par le TEXTE, pas seulement par le numéro.
+
+``validate_final`` vérifiait que le NUMÉRO d'article cité figure dans les
+preuves — jamais que ce qui est affirmé à son sujet corresponde à ce que
+l'article dit. Sur une question de branches d'arbre, le modèle a cité
+correctement l'article 984 (« les fruits qui tombent d'un arbre appartiennent
+au propriétaire de l'arbre ») puis ajouté « ce qui souligne la responsabilité
+du propriétaire en cas de dommages ». Le lien n'existe pas, le numéro était
+dans les preuves, la trajectoire a été acceptée.
+
+Trois exigences, vérifiées ici :
+  * la question posée au modèle porte sur l'AFFIRMATION et le TEXTE ;
+  * un échec technique REJETTE — ne pas avoir pu vérifier n'est pas avoir
+    vérifié ;
+  * le verdict ressort dans ``problemes_validation``.
+"""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from lexior.services.assertion_grounding import (  # noqa: E402
+    AssertionGroundingService, affirmation_autour, textes_recuperes,
+)
+
+ART_984 = ("Les fruits qui tombent d’un arbre sur un fonds voisin "
+           "appartiennent au propriétaire de l’arbre.")
+ART_985 = ("Si des branches ou racines venant du fonds voisin s’avancent sur "
+           "son fonds et nuisent sérieusement à son usage, le propriétaire "
+           "peut demander à son voisin de les couper.")
+
+INVENTION = ("Selon l'article 984 du Code civil du Québec, les fruits qui "
+             "tombent d'un arbre appartiennent au propriétaire de l'arbre, ce "
+             "qui souligne la responsabilité du propriétaire en cas de "
+             "dommages.")
+
+
+class _Client:
+    """Client scriptable : mémorise ce qu'on lui a réellement demandé."""
+
+    _DEFAUT = object()
+
+    def __init__(self, reponse=_DEFAUT, exception=None):
+        self.reponse = ({"soutenue": True}
+                        if reponse is _Client._DEFAUT else reponse)
+        self.exception = exception
+        self.appels: list[dict] = []
+
+    def complete_json(self, role, messages, **kw):
+        self.appels.append({"role": role, "messages": messages})
+        if self.exception:
+            raise self.exception
+        return self.reponse
+
+
+class _Obs:
+    def __init__(self, tool_name, reponse, ok=True):
+        self.tool_name = tool_name
+        self.ok = ok
+        self.normalized_response = reponse
+
+
+# ── La question posée porte sur l'affirmation ET le texte ────────────────
+
+
+def test_la_question_contient_le_texte_officiel_et_laffirmation():
+    client = _Client({"soutenue": False, "motif": "ajout non soutenu"})
+    AssertionGroundingService(client=client).verifier(
+        INVENTION, {"984": ART_984})
+    assert len(client.appels) == 1
+    envoye = client.appels[0]["messages"][-1]["content"]
+    assert ART_984 in envoye, "le texte réel doit être soumis au juge"
+    assert "responsabilité du propriétaire en cas de dommages" in envoye, (
+        "l'affirmation litigieuse doit être soumise au juge")
+
+
+def test_la_consigne_exclut_le_numero_et_la_justesse_generale():
+    client = _Client()
+    AssertionGroundingService(client=client).verifier(
+        INVENTION, {"984": ART_984})
+    systeme = client.appels[0]["messages"][0]["content"]
+    assert "NI si le numéro d'article est le bon" in systeme
+    assert "NI si l'affirmation est juridiquement correcte en général" in systeme
+
+
+def test_une_affirmation_non_soutenue_est_signalee():
+    client = _Client({"soutenue": False, "motif": "ajoute une portée absente"})
+    verdicts = AssertionGroundingService(client=client).verifier(
+        INVENTION, {"984": ART_984})
+    assert len(verdicts) == 1
+    assert not verdicts[0].soutenue
+    assert verdicts[0].article == "984"
+    assert "n'est pas soutenu par le texte" in verdicts[0].probleme()
+
+
+def test_une_affirmation_soutenue_ne_produit_rien_de_negatif():
+    client = _Client({"soutenue": True, "motif": "reformulation fidèle"})
+    verdicts = AssertionGroundingService(client=client).verifier(
+        "L'article 985 permet de demander au voisin de couper les branches.",
+        {"985": ART_985})
+    assert verdicts and verdicts[0].soutenue
+
+
+# ── L'échec technique REJETTE ────────────────────────────────────────────
+
+
+def test_une_exception_du_client_ne_laisse_pas_passer():
+    client = _Client(exception=RuntimeError("timeout"))
+    verdicts = AssertionGroundingService(client=client).verifier(
+        INVENTION, {"984": ART_984})
+    assert verdicts[0].echec_technique
+    assert not verdicts[0].soutenue, (
+        "ne pas avoir pu vérifier n'est pas avoir vérifié")
+    assert "vérification impossible" in verdicts[0].probleme()
+
+
+@pytest.mark.parametrize("reponse", [
+    {}, {"motif": "sans verdict"}, "pas un objet", None])
+def test_une_reponse_illisible_est_un_echec_technique(reponse):
+    client = _Client(reponse)
+    verdicts = AssertionGroundingService(client=client).verifier(
+        INVENTION, {"984": ART_984})
+    assert verdicts[0].echec_technique and not verdicts[0].soutenue
+
+
+# ── Les artefacts corrigés ───────────────────────────────────────────────
+
+
+def test_une_affirmation_multi_articles_recoit_tous_les_textes():
+    """Sinon le juge conclut « non soutenue » parce qu'un texte manque.
+
+    C'était un artefact du contrôle, pas une invention du modèle : il
+    gonflait la mesure de 36 % à 47 %.
+    """
+    client = _Client({"soutenue": True})
+    AssertionGroundingService(client=client).verifier(
+        "Selon les articles 984 et 985, le voisin peut couper les branches.",
+        {"984": ART_984, "985": ART_985})
+    envoye = client.appels[0]["messages"][-1]["content"]
+    assert ART_984 in envoye and ART_985 in envoye
+
+
+def test_une_omission_nest_pas_une_invention():
+    """La consigne doit le dire : on ne juge pas la complétude."""
+    client = _Client()
+    AssertionGroundingService(client=client).verifier(
+        INVENTION, {"984": ART_984})
+    systeme = client.appels[0]["messages"][0]["content"]
+    assert "une omission n'est pas une invention" in systeme.lower()
+
+
+def test_un_article_sans_texte_recupere_nest_pas_juge():
+    """Le contrôle d'ancrage par numéro couvre déjà ce cas."""
+    client = _Client()
+    verdicts = AssertionGroundingService(client=client).verifier(
+        "Selon l'article 1457, toute personne a le devoir…", {"984": ART_984})
+    assert verdicts == [] and client.appels == []
+
+
+# ── La fenêtre d'affirmation ─────────────────────────────────────────────
+
+
+def test_la_fenetre_couvre_la_phrase_et_la_suivante():
+    """L'invention observée débordait sur la proposition suivante."""
+    texte = ("Selon l'article 984, les fruits appartiennent au propriétaire. "
+             "Cela engage donc sa responsabilité en cas de dommages. "
+             "Par ailleurs, un délai de prescription s'applique.")
+    fenetre = affirmation_autour(texte, texte.index("984"), texte.index("984") + 3)
+    assert "responsabilité" in fenetre
+    assert "prescription" not in fenetre, "la fenêtre ne doit pas tout avaler"
+
+
+# ── La récupération des textes ───────────────────────────────────────────
+
+
+def test_les_textes_viennent_des_reponses_doutils():
+    observations = [
+        _Obs("get_ccq_articles", f"Article 984\n{ART_984}"),
+        _Obs("semantic_search_ccq", "1. Article 984 — confiance 0.7"),
+    ]
+    textes = textes_recuperes(observations)
+    assert set(textes) == {"984"}, "seule la récupération officielle compte"
+    assert textes["984"].startswith("Les fruits")
+
+
+def test_une_reponse_en_echec_ne_fournit_aucun_texte():
+    assert textes_recuperes(
+        [_Obs("get_ccq_articles", f"Article 984\n{ART_984}", ok=False)]) == {}
+
+
+def test_plusieurs_articles_dans_une_meme_reponse():
+    contenu = f"Article 984\n{ART_984}\n\nArticle 985\n{ART_985}"
+    textes = textes_recuperes([_Obs("get_ccq_articles", contenu)])
+    assert set(textes) == {"984", "985"}
+
+
+# ── Service indisponible ─────────────────────────────────────────────────
+
+
+def test_sans_client_le_controle_ne_bloque_rien():
+    assert AssertionGroundingService(client=None).verifier(
+        INVENTION, {"984": ART_984}) == []
+
+
+def test_en_mode_offline_le_controle_est_inerte():
+    assert AssertionGroundingService(client=_Client(), offline=True).verifier(
+        INVENTION, {"984": ART_984}) == []

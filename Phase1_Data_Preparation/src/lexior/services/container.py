@@ -16,6 +16,7 @@ from lexior.agentic.tool_catalog import ToolCatalog
 from .answer_generation import AnswerGenerationService
 from .clarification import ClarificationService
 from .critics import CriticsService
+from .assertion_grounding import AssertionGroundingService
 from .dataset_export import DatasetExportService
 from .jurisdiction import JurisdictionService
 from .legal_research import LegalResearchService
@@ -44,6 +45,8 @@ class LexiorServices:
     repair: RepairService
     export: DatasetExportService = field(
         default_factory=DatasetExportService)
+    assertion_grounding: AssertionGroundingService = field(
+        default_factory=AssertionGroundingService)
 
 
 def build_services(
@@ -76,6 +79,8 @@ def build_services(
         jurisdiction=JurisdictionService(),
         clarification=ClarificationService(),
         answers=answers,
+        assertion_grounding=AssertionGroundingService(
+            client=critic_client, offline=offline),
         critics=CriticsService(
             LegalCritic(critic_client, offline),
             AgenticCritic(critic_client, offline),
