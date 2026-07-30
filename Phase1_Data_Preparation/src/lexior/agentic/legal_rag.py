@@ -712,7 +712,10 @@ class LegalRAG:
 
         ``legal_terms`` est la même question rendue dans le vocabulaire du
         Code. Les deux recherches sont RÉUNIES, jamais substituées : le
-        score dense d'un article est le meilleur des deux.
+        score d'un article est le meilleur des deux, DANS LES DEUX CANAUX.
+        Le canal lexical ne recevait longtemps que ``query`` ; c'était à
+        l'envers, puisque ``legal_terms`` porte les termes rares que BM25
+        exploite le mieux.
 
         Mesuré sur tests/fixtures/retrieval_gold.jsonl : traduire en
         remplacement dégrade 10 des 32 questions où l'usager employait déjà
@@ -756,7 +759,24 @@ class LegalRAG:
         dense = dense_per_formulation[0]
         for other in dense_per_formulation[1:]:
             dense = np.maximum(dense, other)
-        lexical = self._bm25(_expanded_query_tokens(query), indices)
+        # Symétrie avec le canal dense. legal_terms portait jusqu'ici le
+        # vocabulaire du Code — donc les termes RARES, « autorité parentale »,
+        # « mise en demeure » — et n'atteignait que le dense : on refusait à
+        # BM25 exactement ce qu'il exploite le mieux. Mesuré sur « mon fils a
+        # cassé la vitrine » + « autorité parentale fait du mineur préjudice » :
+        # l'article 1459 est au rang 1 du canal des mots pour la seconde
+        # formulation, et au rang 1542 pour la première — c'est celui-là que
+        # le mélange recevait.
+        #
+        # Meilleur score des deux, PAS une fusion des jetons : réunir les
+        # jetons allongerait le document virtuel et diluerait l'IDF, qui est
+        # précisément ce qui fait ressortir un terme rare.
+        lexical_par_formulation = [
+            self._bm25(_expanded_query_tokens(formulation), indices)
+            for formulation in formulations]
+        lexical = lexical_par_formulation[0]
+        for autre in lexical_par_formulation[1:]:
+            lexical = np.maximum(lexical, autre)
         candidate_k = min(max(self.cfg.candidate_k, 1), len(indices))
         dense_positions = np.argsort(-dense)[:candidate_k]
         lexical_positions = np.argsort(-lexical)[:candidate_k]
