@@ -197,6 +197,15 @@ class AgenticConfig:
     data_root: str = "data/agentic"
     catalog_path: str = ""
     mcp_config_path: str = ""
+    # Enregistrement des sessions de chat. VIDE = DÉSACTIVÉ, et c'est le
+    # défaut : rien ne doit s'activer tout seul en production. Répertoire
+    # distinct du corpus — ces sessions sont un jeu de test, jamais des
+    # données d'entraînement.
+    chat_sessions_dir: str = ""
+    # Longueur du raisonnement diffusé à l'interface. N'affecte QUE
+    # l'affichage : le thinking_text produit par le modèle et enregistré
+    # dans les trajectoires n'est pas touché.
+    thinking_preview_chars: int = 280
 
     # --- endpoints -------------------------------------------------------
     teacher: EndpointConfig = field(default_factory=EndpointConfig)
@@ -311,8 +320,16 @@ def load_config(config_path: Optional[str] = None,
         "catalog", os.path.join(repo_root, "docs", "mcp_tools_catalog.json"))
     cfg.mcp_config_path = paths.get(
         "mcp_config", os.path.join(repo_root, ".mcp.json"))
+    cfg.chat_sessions_dir = os.environ.get(
+        "LEXIOR_CHAT_SESSIONS_DIR",
+        paths.get("chat_sessions", cfg.chat_sessions_dir))
+    cfg.thinking_preview_chars = int(os.environ.get(
+        "LEXIOR_THINKING_PREVIEW_CHARS",
+        raw.get("chat", {}).get("thinking_preview_chars",
+                                cfg.thinking_preview_chars)))
     # Chemins relatifs : ancrés sur Phase1_Data_Preparation.
-    for attr in ("data_root", "catalog_path", "mcp_config_path"):
+    for attr in ("data_root", "catalog_path", "mcp_config_path",
+                 "chat_sessions_dir"):
         val = getattr(cfg, attr)
         if val and not os.path.isabs(val):
             setattr(cfg, attr, os.path.normpath(os.path.join(base_dir, val)))

@@ -94,6 +94,21 @@ paths:
   data_root: data/agentic
   catalog: ../docs/mcp_tools_catalog.json
   mcp_config: ../.mcp.json
+  # Enregistrement des sessions de chat. VIDE = DÉSACTIVÉ.
+  # Renseigner un chemin active l'écriture d'un JSONL par session, hors du
+  # corpus de trajectoires. Variable d'environnement équivalente et
+  # prioritaire : LEXIOR_CHAT_SESSIONS_DIR.
+  # Activé ici plutôt que dans l'environnement : un redémarrage de l'API
+  # désactiverait l'enregistrement en silence, et on poserait des questions
+  # sans rien garder sans s'en apercevoir.
+  chat_sessions: "data/chat_sessions"
+
+chat:
+  # Longueur du raisonnement diffusé à l'interface. Réglage d'AFFICHAGE :
+  # le thinking_text produit par le modèle n'est pas modifié.
+  # Équivalent env : LEXIOR_THINKING_PREVIEW_CHARS. 280 coupait un
+  # raisonnement au milieu.
+  thinking_preview_chars: 4000
 
 split:
   train: 0.90

@@ -11,6 +11,8 @@ from lexior.agentic.schemas import (
     RepairReport,
 )
 
+from lexior.services.session_record import enregistrer_tour
+
 from ..context import GraphContext
 from ..state import LexiorState, to_trajectory
 
@@ -66,6 +68,11 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         repair_successful=repair.status == "successful",
         first_invalid_step=state.get("first_invalid_step"),
     )
+
+    # Un rejet en live passe par ici, pas par return_live_answer : sans cette
+    # ligne, l'enregistrement perdrait précisément les échecs.
+    if state.get("mode") == "live":
+        enregistrer_tour(state, ctx.config, "rejected")
 
     return {
         "status": "rejected",
