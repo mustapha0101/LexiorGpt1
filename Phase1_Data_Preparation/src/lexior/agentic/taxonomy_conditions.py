@@ -32,6 +32,7 @@ défaut corrigé ici : un mécanisme déclaratif que personne ne lit.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -39,13 +40,25 @@ from typing import Any, Callable, Optional
 # Le planner tranche ; la route déterministe ne présume rien.
 JUGEMENT = None
 
-# Familles de juridiction. Les trois statuts absents de cette table
-# (municipal_coverage_uncertain, supported_other_canadian,
-# unsupported_foreign) ne bloquent RIEN : on n'écarte une étape que
-# lorsqu'on est certain qu'elle est hors juridiction.
+# Familles de juridiction. DEUX vocabulaires, comme pour les noms de type de
+# demande : le dataset écrit un STATUT (« supported_quebec »), le live écrit
+# un NOM de juridiction (« Québec »), parce que ResearchState.jurisdiction_
+# status reçoit resolved_jurisdiction. Ne connaître que le premier rendait la
+# garde inerte en live — exactement là où le planner choisit librement.
+#
+# Les valeurs absentes de cette table (municipal_coverage_uncertain,
+# supported_other_canadian, unsupported_foreign, unknown, «») ne bloquent
+# RIEN : on n'écarte que ce dont on est sûr.
+_QUEBEC = frozenset({"Québec"})
+_FEDERAL = frozenset({"Federal", "Canada"})
+
 _FAMILLES: dict[str, frozenset[str]] = {
-    "supported_quebec": frozenset({"Québec"}),
-    "supported_federal": frozenset({"Federal", "Canada"}),
+    "supported_quebec": _QUEBEC,
+    "quebec": _QUEBEC,
+    "qc": _QUEBEC,
+    "supported_federal": _FEDERAL,
+    "federal": _FEDERAL,
+    "canada": _FEDERAL,
 }
 
 _RE_ARTICLE = re.compile(r"\barticles?\s+\d{1,4}", re.IGNORECASE)
@@ -116,14 +129,25 @@ GARDES: dict[str, Optional[Callable[[GardeContexte], bool]]] = {
 }
 
 
+def _famille(valeur: str) -> Optional[frozenset[str]]:
+    """Famille de juridiction, quel que soit le vocabulaire employé."""
+    brut = (valeur or "").strip().lower()
+    if not brut:
+        return None
+    sans_accent = unicodedata.normalize("NFD", brut)
+    sans_accent = "".join(c for c in sans_accent
+                          if unicodedata.category(c) != "Mn")
+    return _FAMILLES.get(brut) or _FAMILLES.get(sans_accent)
+
+
 def juridiction_compatible(tool: str, jurisdiction_status: str) -> bool:
     """Couche 1 : l'outil est-il de la bonne juridiction pour ce scénario ?
 
     Permissif par défaut : outil inconnu de ``tool_coverage``, outil sans
-    juridiction déclarée, ou statut hors des deux familles connues → on
+    juridiction déclarée, ou valeur hors des deux familles connues → on
     n'écarte pas. On ne bloque que ce dont on est sûr.
     """
-    attendue = _FAMILLES.get(jurisdiction_status)
+    attendue = _famille(jurisdiction_status)
     if attendue is None:
         return True
     from lexior.services.tool_coverage import TOOL_COVERAGE

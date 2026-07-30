@@ -144,3 +144,40 @@ def test_une_condition_de_jugement_reste_hors_route():
 def test_une_condition_inconnue_ne_leve_pas_dexception():
     assert not etape_facultative_retenue(
         "semantic_search_ccq", "condition jamais vue", _ctx())
+
+
+# ── La garde vaut aussi pour le choix libre du planner ───────────────────
+
+
+class TestGardeDeuxVocabulaires:
+    """Le dataset écrit un statut, le live écrit un nom de juridiction.
+
+    ``ResearchState.jurisdiction_status`` reçoit ``resolved_jurisdiction``,
+    donc « Québec » en live et « supported_quebec » en dataset. Ne connaître
+    que le second rendait la garde inerte précisément là où le planner
+    choisit librement : le premier test réel a vu fetch_document — déclaré
+    fédéral — appelé avec la citation « CCQ 1466 » sur un scénario québécois.
+    """
+
+    @pytest.mark.parametrize("valeur", [
+        "Québec", "Quebec", "quebec", "QC", "supported_quebec"])
+    def test_un_outil_federal_est_refuse_au_quebec(self, valeur):
+        assert not juridiction_compatible("fetch_document", valeur), valeur
+        assert not juridiction_compatible("search_legal_documents", valeur)
+        assert juridiction_compatible("get_ccq_articles", valeur)
+
+    @pytest.mark.parametrize("valeur", [
+        "Federal", "Canada", "fédéral", "supported_federal"])
+    def test_un_outil_quebecois_est_refuse_au_federal(self, valeur):
+        assert not juridiction_compatible("get_ccq_articles", valeur), valeur
+        assert juridiction_compatible("fetch_document", valeur)
+
+    @pytest.mark.parametrize("valeur", [
+        "", "unknown", "unsupported_foreign", "municipal_coverage_uncertain",
+        "supported_other_canadian"])
+    def test_on_ne_bloque_que_ce_dont_on_est_sur(self, valeur):
+        assert juridiction_compatible("fetch_document", valeur), valeur
+        assert juridiction_compatible("get_ccq_articles", valeur), valeur
+
+    def test_un_outil_hors_catalogue_ne_bloque_pas(self):
+        assert juridiction_compatible("outil_inconnu", "Québec")

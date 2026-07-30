@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .prompts import CHAT_PLANNER_SUPPLEMENT, planner_system_prompt
-from .taxonomy_conditions import GardeContexte, etape_facultative_retenue
+from .taxonomy_conditions import (
+    GardeContexte, etape_facultative_retenue, juridiction_compatible,
+)
 from .schemas import Decision, DecisionTrace, PlannerDecision, ResearchState
 from .tool_catalog import ToolCatalog
 from .validators import validate_next_action, validate_planner_decision
@@ -583,7 +585,16 @@ class PlannerAgent:
         from .taxonomy import REQUEST_TYPES
         rt = REQUEST_TYPES.get(state.scenario.request_type)
         policy = rt.route_policy if rt else None
-        if policy and policy.required_capabilities:
+        # La garde de juridiction s'applique AUSSI au choix libre du planner,
+        # pas seulement au chemin de repli : en live, policy.allows_tool()
+        # laissait passer fetch_document — déclaré fédéral dans tool_coverage —
+        # avec la citation « CCQ 1466 » sur un scénario québécois. L'appel
+        # revenait « document fédéral vide », après avoir consommé un tour.
+        juridiction = (getattr(state, "jurisdiction_status", "")
+                       or getattr(state.scenario, "jurisdiction_status", ""))
+        if not juridiction_compatible(decision.next_tool, juridiction):
+            pass                      # incompatible : repli sur la route
+        elif policy and policy.required_capabilities:
             if policy.allows_tool(decision.next_tool):
                 return decision
         else:
