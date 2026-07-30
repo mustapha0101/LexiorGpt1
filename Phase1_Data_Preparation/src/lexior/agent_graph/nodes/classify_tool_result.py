@@ -12,6 +12,9 @@ from dataclasses import asdict
 from typing import Any
 
 from lexior.services.evidence import EvidenceLevel
+from lexior.services.provenance import (
+    a_une_provenance, numero_demande, reponses_reussies,
+)
 
 from ..context import GraphContext
 from ..state import LexiorState
@@ -26,6 +29,13 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
 
     observation = tool_history[-1]
     prior = state.get("last_tool_assessment") or {}
+    # Un numéro d'article dont la provenance est établie échappe au veto
+    # lexical : sa pertinence a été jugée quand le numéro a été produit.
+    numero = numero_demande(observation.tool_name, observation.arguments)
+    provenance = numero is not None and a_une_provenance(
+        numero,
+        state.get("active_issue") or state.get("latest_user_message", ""),
+        reponses_reussies(tool_history, avant=observation))
     assessment = ctx.services.verification.assess(
         observation,
         prior.get("verifier_issues"),
@@ -41,6 +51,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         # morsure de chien. update_active_task conserve la question d'origine.
         user_query=(state.get("active_issue")
                     or state.get("latest_user_message", "")),
+        provenance_verifiee=provenance,
     )
 
     index = len(tool_history) - 1

@@ -164,12 +164,14 @@ class ResultVerificationService:
         requested_court_scope: str = "",
         requested_document_type: str = "",
         user_query: str = "",
+        provenance_verifiee: bool = False,
     ) -> ToolResultAssessment:
         # La question de l'usager fait partie du verdict : un résultat bien
         # formé mais étranger au sujet est `irrelevant`, ce qui déclenche la
         # reformulation via route_after_classification.
         status = self.classifier.classify_observation(
-            observation, user_query=user_query)
+            observation, user_query=user_query,
+            provenance_verifiee=provenance_verifiee)
         is_retrieval_only = observation.tool_name in _RETRIEVAL_ONLY_TOOLS
         is_official = observation.tool_name in _OFFICIAL_TOOLS
         # Une synthèse rédigée par un modèle n'est pas une source, quelle

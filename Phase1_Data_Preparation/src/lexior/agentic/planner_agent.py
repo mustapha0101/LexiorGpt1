@@ -13,6 +13,9 @@ from .prompts import CHAT_PLANNER_SUPPLEMENT, planner_system_prompt
 from .taxonomy_conditions import (
     GardeContexte, etape_facultative_retenue, juridiction_compatible,
 )
+from lexior.services.provenance import (
+    a_une_provenance, numero_demande, reponses_reussies,
+)
 from .schemas import Decision, DecisionTrace, PlannerDecision, ResearchState
 from .tool_catalog import ToolCatalog
 from .validators import validate_next_action, validate_planner_decision
@@ -594,6 +597,8 @@ class PlannerAgent:
                        or getattr(state.scenario, "jurisdiction_status", ""))
         if not juridiction_compatible(decision.next_tool, juridiction):
             pass                      # incompatible : repli sur la route
+        elif not self._numero_a_une_provenance(decision, state):
+            pass                      # article sorti de mémoire : repli
         elif policy and policy.required_capabilities:
             if policy.allows_tool(decision.next_tool):
                 return decision
@@ -882,6 +887,22 @@ class PlannerAgent:
             f"Pour répondre à cette question de type {request_type}, j'utilise "
             f"l'outil {tool} afin de récupérer les sources juridiques nécessaires."
         )
+
+    def _numero_a_une_provenance(
+        self, decision: PlannerDecision, state: ResearchState,
+    ) -> bool:
+        """Le numéro demandé a-t-il été produit par une recherche ou l'usager ?
+
+        Un numéro sorti de la mémoire du modèle fait retomber sur la route :
+        le planner devra chercher avant de récupérer. Voir services/provenance.
+        """
+        numero = numero_demande(decision.next_tool, decision.arguments)
+        if numero is None:
+            return True
+        return a_une_provenance(
+            numero,
+            getattr(state.scenario, "user_query", "") or "",
+            reponses_reussies(state.tool_history))
 
     def _effective_route(self, state: ResearchState) -> list[str]:
         request_type = state.scenario.request_type

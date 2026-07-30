@@ -99,15 +99,26 @@ class ResultClassifier:
         ok: bool,
         error: Optional[str] = None,
         user_query: str = "",
+        provenance_verifiee: bool = False,
     ) -> SearchResultStatus:
         """Classify a single tool result.
 
         ``user_query`` reste optionnel pour ne pas casser les appelants
         existants, mais sans lui ``usable`` ne signifie que « bien formé et
         non vide » — jamais « répond à la question ».
+
+        ``provenance_verifiee`` : le numéro d'article demandé provient d'une
+        recherche ou de la question. Voir ``services/provenance``.
         """
         status = self._classify_shape(tool_name, response, ok)
+        # Le veto lexical ne s'applique pas à un texte récupéré par un numéro
+        # dont la provenance est établie : la pertinence a déjà été jugée au
+        # moment où le numéro a été produit. Sans cette exemption, « le chien
+        # de ma voisine m'a mordue » ne partage aucune racine avec « le
+        # propriétaire d'un animal est tenu de réparer le préjudice », et
+        # l'article 1466 — le bon — ressortait irrelevant.
         if (status == SearchResultStatus.usable
+                and not provenance_verifiee
                 and self.is_off_topic(tool_name, response, user_query)):
             return SearchResultStatus.irrelevant
         return status
@@ -170,6 +181,7 @@ class ResultClassifier:
 
     def classify_observation(
         self, observation: ToolObservation, user_query: str = "",
+        provenance_verifiee: bool = False,
     ) -> SearchResultStatus:
         """Classify a ToolObservation directly."""
         return self.classify(
@@ -178,6 +190,7 @@ class ResultClassifier:
             observation.ok,
             observation.error,
             user_query=user_query,
+            provenance_verifiee=provenance_verifiee,
         )
 
     def classify_case(

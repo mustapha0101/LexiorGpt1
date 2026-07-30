@@ -251,8 +251,19 @@ def test_planner_rejects_repeated_identical_tool_call_from_teacher(catalog):
 
     state = _article_state()
     decision = PlannerAgent(catalog, client=JsonClient()).decide(state)
-    assert decision.decision == Decision.call_tool
     assert decision.thinking_text
+    # L'appel répété est bien écarté. Ce qui le remplace ne doit PAS être une
+    # récupération d'article sortie de nulle part : _CCQ_TOPIC_ARTICLES devine
+    # un numéro par préfixe de mot-clé, et « Peux-tu me DONner… » y matchait
+    # ("donation", "don") -> article 1806, sans rapport avec la question sur
+    # 1457. La garde de provenance l'écarte, donc le planner conclut au lieu
+    # de récupérer un article deviné.
+    if decision.decision == Decision.call_tool:
+        numero = (decision.arguments or {}).get("start_article")
+        assert numero is None or str(numero) in state.scenario.user_query, (
+            f"article {numero} récupéré sans provenance")
+    else:
+        assert decision.decision == Decision.final_answer
 
 
 def test_non_legal_question_guard_converts_to_final_answer(catalog):
