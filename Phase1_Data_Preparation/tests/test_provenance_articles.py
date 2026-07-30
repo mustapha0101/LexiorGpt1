@@ -150,3 +150,73 @@ class TestRegleSansSource:
         assert _regle_sans_source({
             "answer_contract": {"answer_mode": "no_evidence"},
             "final_answer": reponse})
+
+
+# ── Pas de numéro d'article dans une recherche par le sens ───────────────
+
+
+from lexior.agentic.schemas import Decision, PlannerDecision  # noqa: E402
+from lexior.agent_graph.nodes.validate_plan import (  # noqa: E402
+    _retirer_numeros_des_recherches, _sans_numero,
+)
+
+
+class TestNumerosDansLesRecherches:
+    """query et legal_terms décrivent une SITUATION.
+
+    L'index compare du texte, pas des références : « article 1465 CCQ » n'y
+    cherche rien. Sa présence trahit un modèle qui part d'une croyance —
+    d'autant que l'article des animaux est 1466, pas 1465.
+    """
+
+    @pytest.mark.parametrize("avant,apres", [
+        ("responsabilité du propriétaire d'un animal, article 1465 CCQ",
+         "responsabilité du propriétaire d'un animal"),
+        ("vices cachés, art. 1726, obligation de garantie",
+         "vices cachés, obligation de garantie"),
+        ("servitude de passage selon 1177 C.c.Q.", "servitude de passage"),
+        ("responsabilité civile (articles 1457 et 1458)",
+         "responsabilité civile"),
+        ("responsabilité, articles 1457, 1458 à 1460, faute",
+         "responsabilité, faute"),
+        ("prescription art. 2925 CPC et délai", "prescription et délai"),
+    ])
+    def test_les_references_sont_retirees(self, avant, apres):
+        assert _sans_numero(avant) == apres
+
+    @pytest.mark.parametrize("texte", [
+        "mon chien a mordu quelqu'un dans la rue",
+        "je réclame 5000 $ pour 3 jours de travail",
+        "bail de 12 mois, augmentation de 4 %",
+        "mon ex ne paie plus depuis 6 mois",
+    ])
+    def test_les_nombres_legitimes_survivent(self, texte):
+        """Un montant ou une durée n'est pas une référence d'article."""
+        assert _sans_numero(texte) == texte
+
+    def test_les_deux_champs_sont_nettoyes(self):
+        d = PlannerDecision(
+            request_type="case_analysis", jurisdiction="Québec",
+            decision=Decision.call_tool, next_tool="semantic_search_ccq",
+            arguments={"query": "mon chien a mordu, voir article 1466",
+                       "legal_terms": "responsabilité animal, art. 1465 CCQ"})
+        _retirer_numeros_des_recherches(d)
+        assert d.arguments["query"] == "mon chien a mordu, voir"
+        assert d.arguments["legal_terms"] == "responsabilité animal"
+
+    def test_les_autres_outils_ne_sont_pas_touches(self):
+        """get_ccq_articles a BESOIN du numéro ; on ne touche qu'aux recherches."""
+        d = PlannerDecision(
+            request_type="case_analysis", jurisdiction="Québec",
+            decision=Decision.call_tool, next_tool="get_ccq_articles",
+            arguments={"start_article": 1466})
+        _retirer_numeros_des_recherches(d)
+        assert d.arguments["start_article"] == 1466
+
+    def test_une_recherche_par_mots_cles_nest_pas_touchee(self):
+        d = PlannerDecision(
+            request_type="case_analysis", jurisdiction="Québec",
+            decision=Decision.call_tool, next_tool="search_ccq_keywords",
+            arguments={"keyword": "article 1466"})
+        _retirer_numeros_des_recherches(d)
+        assert d.arguments["keyword"] == "article 1466"

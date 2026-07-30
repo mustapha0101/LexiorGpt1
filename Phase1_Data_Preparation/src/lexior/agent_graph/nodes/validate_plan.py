@@ -37,6 +37,55 @@ NAME = "validate_plan"
 # les redemander revient à ignorer la réponse de l'usager.
 _RE_FAIT_JURIDICTION = re.compile(r"juridiction|province", re.IGNORECASE)
 
+# Recherches par le sens : leurs deux champs décrivent une SITUATION. Un
+# numéro d'article n'y sert à rien — l'index compare du texte, pas des
+# références — et sa présence signale que le modèle part d'une croyance au
+# lieu de décrire les faits. Vu en mesure : legal_terms « responsabilité du
+# propriétaire d'un animal, dommages causés, article 1465 CCQ », alors que
+# l'article des animaux est 1466.
+_CHAMPS_DE_RECHERCHE = {"semantic_search_ccq": ("query", "legal_terms"),
+                        "semantic_search_cpc": ("query", "legal_terms")}
+
+_NUM = r"\d{1,4}(?:\.\d+)?"
+_CODE = r"C\.?\s?c\.?\s?Q\.?|CCQ|C\.?\s?p\.?\s?c\.?|CPC"
+
+_RE_NUMERO_ARTICLE = re.compile(
+    # « article 1465 CCQ », « articles 1457 et 1458 », « art. 1457, 1458 à 1460 »
+    rf"\b(?:articles?|art\.?)\s*{_NUM}"
+    rf"(?:\s*(?:,|;|et|and|ou|à|au|-|–)\s*{_NUM})*"
+    rf"(?:\s*(?:du\s+|selon\s+le\s+)?(?:{_CODE}))?"
+    # « 1177 C.c.Q. » sans le mot « article »
+    rf"|\b{_NUM}\s*(?:{_CODE})\b",
+    re.IGNORECASE)
+
+# Résidus laissés par la suppression : « selon . », « ( ) », « ,, ».
+_RE_RESIDU = re.compile(
+    r"\(\s*\)|\[\s*\]"                       # parenthèses vidées
+    r"|\b(?:selon|suivant|prévu\s+(?:à|par)|en\s+vertu\s+d[eu])\s*(?=[.,;)]|$)",
+    re.IGNORECASE)
+
+
+def _sans_numero(valeur: str) -> str:
+    nettoye = _RE_NUMERO_ARTICLE.sub(" ", valeur or "")
+    nettoye = _RE_RESIDU.sub(" ", nettoye)
+    nettoye = re.sub(r"\s*([,;])\s*(?=[,;])", "", nettoye)
+    nettoye = re.sub(r"\s+([,;.)])", r"\1", nettoye)
+    return re.sub(r"\s{2,}", " ", nettoye).strip(" ,;.-")
+
+
+def _retirer_numeros_des_recherches(decision: PlannerDecision) -> None:
+    """Retire les références d'article des arguments de recherche sémantique."""
+    champs = _CHAMPS_DE_RECHERCHE.get(decision.next_tool or "")
+    if not champs or not decision.arguments:
+        return
+    for champ in champs:
+        valeur = decision.arguments.get(champ)
+        if not isinstance(valeur, str) or not valeur:
+            continue
+        nettoye = _sans_numero(valeur)
+        if nettoye != valeur:
+            decision.arguments[champ] = nettoye
+
 
 def _forced(decision: PlannerDecision, jurisdiction: str, need: str,
             thinking: str, action: Decision,
@@ -254,5 +303,6 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                            state.get("stop_reason") or
                            decision.decision.value)
 
+    _retirer_numeros_des_recherches(decision)
     updates["latest_decision"] = decision.model_dump(mode="json")
     return updates
