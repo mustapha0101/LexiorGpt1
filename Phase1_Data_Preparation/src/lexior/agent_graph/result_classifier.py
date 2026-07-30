@@ -36,6 +36,14 @@ _LEGISLATION_KEYWORDS = ("loi sur", "règlement sur", "code civil",
                          "code de procédure")
 _TRUNCATION_MARKERS = ("...", "[suite]", "[truncated]", "[tronqué]")
 
+# Réponses « rien trouvé » du serveur MCP : « Aucune décision valide trouvée
+# pour … », « Aucun règlement trouvé pour … ». Sans ce motif, une recherche
+# sans résultat tombait dans la classification par contenu et ressortait
+# « irrelevant », c'est-à-dire « reformule » — alors qu'il n'y a rien à
+# trouver et que reformuler consomme le budget pour rien.
+_NO_RESULT_RE = re.compile(
+    r"^\s*aucun(?:e)?\b[^.\n]{0,120}?\btrouv[ée]e?s?\b", re.IGNORECASE)
+
 _QC_STUB_RE = re.compile(
     r"^\s*\(\s*(?:abrog|omis|modification)", re.IGNORECASE)
 _FED_REPEAL_RE = re.compile(r"\[\s*(?:Abrog|Repealed)", re.IGNORECASE)
@@ -139,6 +147,12 @@ class ResultClassifier:
 
         if tool_name == "fetch_document":
             return self._classify_federal_doc(stripped)
+
+        # Après les outils de récupération, qui ont leur propre lecture, et
+        # avant la classification par contenu : « rien trouvé » est vide, pas
+        # hors sujet.
+        if _NO_RESULT_RE.match(stripped):
+            return SearchResultStatus.empty
 
         if len(stripped) < MIN_CONTENT_CHARS:
             return SearchResultStatus.empty

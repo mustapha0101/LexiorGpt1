@@ -260,3 +260,47 @@ class TestThematicRelevance:
             observation,
             user_query="Quel délai ai-je pour porter un jugement en appel?",
         ) == SearchResultStatus.irrelevant
+
+
+# ── « Rien trouvé » est vide, pas hors sujet ─────────────────────────────
+
+
+class TestNoResultIsEmpty:
+    """Une recherche sans résultat ne doit pas déclencher de reformulation.
+
+    Le serveur répond « Aucune décision valide trouvée pour … ». Cette phrase
+    dépasse la longueur minimale, tombait donc dans la classification par
+    contenu et ressortait ``irrelevant`` — c'est-à-dire « reformule », alors
+    qu'il n'y a rien à trouver et que le vivier est épuisé.
+    """
+
+    @pytest.mark.parametrize("reponse", [
+        'Aucune décision valide trouvée pour "bail animaux" (les résultats '
+        "indexés étaient des pages de loi ou des pages d'erreur).",
+        'Aucune décision de justice trouvée pour la recherche "bail animaux".',
+        'Aucun règlement trouvé pour la recherche "xyz" sur LégisQuébec.',
+        'Aucun document CanLII valide trouvé pour "abc" (résultats en erreur '
+        "404).",
+        'Aucun résultat valide trouvé pour la recherche "q" sur le domaine '
+        "educaloi.qc.ca.",
+    ])
+    def test_les_messages_du_serveur_sont_vides(self, classifier, reponse):
+        assert classifier.classify(
+            "search_quebec_jurisprudence", reponse, ok=True
+        ) == SearchResultStatus.empty
+
+    def test_une_vraie_decision_reste_utilisable(self, classifier):
+        reponse = ("\n### 2022 QCTAL 35727\nhttps://www.canlii.org/fr/qc/"
+                   "qctal/doc/2022/2022qctal35727/2022qctal35727.html\n  ")
+        assert classifier.classify(
+            "search_quebec_jurisprudence", reponse, ok=True
+        ) == SearchResultStatus.usable
+
+    def test_un_article_commencant_par_aucun_nest_pas_vide(self, classifier):
+        """Le motif ne doit pas manger un texte d'article légitime."""
+        assert classifier.classify(
+            "get_ccq_articles",
+            "Aucun bien ne peut être trouvé sans propriétaire selon cette "
+            "disposition ancienne du code civil du Québec.",
+            ok=True,
+        ) != SearchResultStatus.empty
