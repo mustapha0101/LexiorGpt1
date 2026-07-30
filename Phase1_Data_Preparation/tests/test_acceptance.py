@@ -435,6 +435,62 @@ class TestToolSequenceLogic:
         )
         assert not warnings
 
+    def test_jurisprudence_alone_warned(self):
+        """Une décision applique une règle, elle ne l'énonce pas."""
+        warnings = validate_tool_sequence_logic(
+            "case_analysis",
+            ["semantic_search_ccq", "search_quebec_jurisprudence"],
+        )
+        assert any("sans récupération du texte officiel" in w
+                   for w in warnings)
+
+    def test_jurisprudence_alone_exempt_types_silent(self):
+        """Les quatre types exclus ne déclenchent pas le nouvel avertissement."""
+        for request_type in ("case_law_research", "non_legal",
+                             "dataset_coverage", "comparative_law"):
+            warnings = validate_tool_sequence_logic(
+                request_type,
+                ["semantic_search_ccq", "search_quebec_jurisprudence"],
+            )
+            assert not warnings, request_type
+
+    def test_article_retrieved_no_alone_warning(self):
+        """Le texte officiel récupéré : ni l'ordre ni l'absence ne fâchent."""
+        warnings = validate_tool_sequence_logic(
+            "case_analysis",
+            ["get_cpc_articles", "search_quebec_jurisprudence"],
+        )
+        assert not warnings
+
+    def test_french_taxonomy_names_are_exempt_too(self):
+        """Les trajectoires archivées portent les noms v1, le code les v2."""
+        for ancien in ("jurisprudence_quebecoise", "jurisprudence_federale",
+                       "question_non_juridique", "couverture_dataset",
+                       "comparaison_quebec_federal"):
+            warnings = validate_tool_sequence_logic(
+                ancien, ["search_quebec_jurisprudence"])
+            assert not warnings, ancien
+
+    def test_taxonomy_vocabulary_never_changes_the_verdict(self):
+        """L'invariant : un contrôle ne dépend pas du vocabulaire employé.
+
+        Deux vocabulaires sans rien qui vérifie la correspondance, c'est le
+        motif exact des cinq listes de tribunaux divergentes du lot 5.
+        """
+        from lexior.agentic.migration import _OLD_TO_NEW, canonical_request_type
+        sequences = (
+            ["search_quebec_jurisprudence"],
+            ["semantic_search_ccq", "search_quebec_jurisprudence"],
+            ["search_quebec_jurisprudence", "get_ccq_articles"],
+            ["get_ccq_articles", "search_quebec_jurisprudence"],
+        )
+        for ancien in _OLD_TO_NEW:
+            nouveau = canonical_request_type(ancien)
+            for sequence in sequences:
+                assert (validate_tool_sequence_logic(ancien, sequence)
+                        == validate_tool_sequence_logic(nouveau, sequence)), (
+                    f"{ancien} et {nouveau} divergent sur {sequence}")
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # Test 12: Non-blocking issues don't cause rejection

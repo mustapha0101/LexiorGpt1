@@ -12,6 +12,7 @@ from typing import Iterable, Optional
 
 from .citations import CASE_CITATION_RE, CASE_NAME_RE
 from .error_codes import BLOCKING_CODES, ErrorCode, extract_code, tag
+from .migration import canonical_request_type
 from .response_verifier import contains_generated_summary
 from .schemas import Decision, ExpectedRoute, PlannerDecision, Role, RoutePolicy, TrainingTrajectory
 from .taxonomy import REQUEST_TYPES, NO_JURISPRUDENCE, OFFICIAL_TEXT_REQUIRED
@@ -139,8 +140,13 @@ def validate_tool_sequence_logic(
     """
     warnings: list[str] = []
 
-    if request_type in ("case_law_research", "non_legal", "dataset_coverage",
-                        "comparative_law"):
+    # Par le nom canonique : les trajectoires archivées portent les noms v1
+    # (« jurisprudence_quebecoise »), la liste ci-dessous les noms v2. Comparer
+    # sans normaliser laissait passer cinq types français vers un avertissement
+    # que leur équivalent anglais excluait déjà.
+    if canonical_request_type(request_type) in (
+            "case_law_research", "non_legal", "dataset_coverage",
+            "comparative_law"):
         return warnings
 
     jurisprudence_indices = [
@@ -158,6 +164,18 @@ def validate_tool_sequence_logic(
                 tag(ErrorCode.QUERY_IMPROVABLE,
                 "séquence: jurisprudence recherchée avant récupération du "
                 "texte officiel"))
+    elif jurisprudence_indices and not article_indices:
+        # Une décision applique une règle, elle ne l'énonce pas : une réponse
+        # fondée sur la seule jurisprudence, sans jamais citer l'article, est
+        # une erreur de méthode. Avertissement et non rejet tant qu'on ignore
+        # combien de trajectoires déjà produites sont dans ce cas —
+        # OFFICIAL_TEXT_MISSING décrirait mieux le défaut mais il est dans
+        # BLOCKING_CODES, et basculer sans le chiffre ferait chuter le corpus
+        # d'un coup.
+        warnings.append(
+            tag(ErrorCode.QUERY_IMPROVABLE,
+            "séquence: jurisprudence citée sans récupération du texte "
+            "officiel d'un article"))
 
     return warnings
 

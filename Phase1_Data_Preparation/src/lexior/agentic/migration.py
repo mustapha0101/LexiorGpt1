@@ -99,6 +99,20 @@ _OLD_TO_NEW: dict[str, dict[str, Any]] = {
 }
 
 
+def canonical_request_type(request_type: str) -> str:
+    """Nom de taxonomie agentic-2.0, que l'entrée soit v1 ou v2.
+
+    Les trajectoires archivées portent les noms v1 (``jurisprudence_
+    quebecoise``), le code porte les noms v2 (``case_law_research``). Tout
+    contrôle qui compare un ``request_type`` à une liste écrite en dur doit
+    passer par ici, sinon il ignore la moitié du corpus : c'est ce qui
+    faisait qu'un contrôle de séquence semblait toucher 1,4 % des
+    trajectoires alors qu'il en touchait 0 %.
+    """
+    return (_OLD_TO_NEW.get(request_type) or {}).get(
+        "request_type", request_type)
+
+
 def migrate_v1_to_v2(record: dict[str, Any]) -> dict[str, Any]:
     """Convert a v1 (agentic-1.0) record dict to v2 (agentic-2.0) structure.
 
