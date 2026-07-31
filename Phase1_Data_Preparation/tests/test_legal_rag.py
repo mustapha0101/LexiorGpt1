@@ -238,7 +238,7 @@ def test_thresholds_are_part_of_the_cache_signature(tmp_path):
     assert permissive != strict
 
 
-# ── Le reranker peut écarter, jamais inventer ────────────────────────────
+# ── Le reranker ordonne, sans jamais retirer ni inventer ─────────────────
 
 
 def _witness_rag(tmp_path, reranker):
@@ -260,15 +260,39 @@ def _witness_rag(tmp_path, reranker):
     )
 
 
-def test_llm_reranker_can_drop_an_irrelevant_candidate(tmp_path):
+def test_llm_reranker_receives_legal_issue_separate_from_facts(tmp_path):
+    class CapturingReranker:
+        def __init__(self):
+            self.payload = None
+
+        def complete_json(self, role, messages, temperature=0.0):
+            self.payload = json.loads(messages[-1]["content"])
+            return {"ranking": ["269", "279"], "rejected": []}
+
+    reranker = CapturingReranker()
+    rag = _witness_rag(tmp_path, reranker)
+
+    rag.search(
+        "Une personne demande comment faire comparaître un témoin.", "CPC", 2,
+        legal_terms="preuve testimoniale et citation à comparaître",
+    )
+
+    assert reranker.payload["faits"] == (
+        "Une personne demande comment faire comparaître un témoin.")
+    assert reranker.payload["qualification_juridique"] == (
+        "preuve testimoniale et citation à comparaître")
+    assert "question" not in reranker.payload
+
+
+def test_llm_reranker_keeps_the_retrieval_nucleus_despite_a_rejection(tmp_path):
     rag = _witness_rag(tmp_path, RejectingReranker(["269"], ["279"]))
 
     results = rag.search("Comment assigner un témoin à comparaître?", "CPC", 2)
 
-    assert [item["article_number"] for item in results] == ["269"]
+    assert [item["article_number"] for item in results] == ["269", "279"]
 
 
-def test_llm_reranker_may_reject_every_candidate(tmp_path):
+def test_llm_reranker_cannot_empty_the_retrieval_nucleus(tmp_path):
     """« Aucun article pertinent » est une sortie valide, pas une erreur.
 
     La requête doit passer les planchers, sinon le rerank n'est jamais
@@ -278,7 +302,7 @@ def test_llm_reranker_may_reject_every_candidate(tmp_path):
 
     results = rag.search("Comment assigner un témoin à comparaître?", "CPC", 2)
 
-    assert results == []
+    assert [item["article_number"] for item in results] == ["269", "279"]
     assert rag.last_rerank_rejection is not None, (
         "le rejet doit venir du reranker, pas du plancher")
 
@@ -309,12 +333,7 @@ def test_llm_reranker_ignores_a_malformed_answer(tmp_path):
 
 
 def test_a_total_rejection_records_its_reason(tmp_path):
-    """Sans motif, un rejet total est indiscernable d'un échec de recherche.
-
-    C'est exactement la confusion qu'a produite « ccq-mise-en-demeure » :
-    liste vide, et rien pour dire si le reranker avait écarté de bons
-    candidats ou si la recherche n'avait jamais remonté le bon article.
-    """
+    """Un rejet total est conservé comme diagnostic sans masquer les sources."""
     class Explaining:
         def complete_json(self, role, messages, temperature=0.0):
             return {"ranking": [], "rejected": ["269", "279"],
@@ -324,12 +343,12 @@ def test_a_total_rejection_records_its_reason(tmp_path):
 
     results = rag.search("Comment assigner un témoin à comparaître?", "CPC", 2)
 
-    assert results == []
+    assert [item["article_number"] for item in results] == ["269", "279"]
     trace = rag.last_rerank_rejection
     assert trace is not None
     assert trace["reason"] == "aucun candidat ne traite du sujet demandé"
     assert trace["rejected"] == ["269", "279"]
-    assert trace["kept"] == []
+    assert trace["kept"] == ["269", "279"]
 
 
 def test_a_partial_rejection_records_what_survived(tmp_path):
@@ -338,7 +357,7 @@ def test_a_partial_rejection_records_what_survived(tmp_path):
     rag.search("Comment assigner un témoin à comparaître?", "CPC", 2)
 
     trace = rag.last_rerank_rejection
-    assert trace["rejected"] == ["279"] and trace["kept"] == ["269"]
+    assert trace["rejected"] == ["279"] and trace["kept"] == ["269", "279"]
 
 
 def test_nothing_is_recorded_when_nothing_is_rejected(tmp_path):

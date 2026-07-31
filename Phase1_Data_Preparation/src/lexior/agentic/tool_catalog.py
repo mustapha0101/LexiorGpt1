@@ -222,6 +222,13 @@ class ToolCatalog:
                     f"{name} : type incorrect pour « {key} » "
                     f"(attendu {expected}, reçu {type(value).__name__})")
                 continue
+            min_length = prop.get("minLength")
+            if (isinstance(value, str) and isinstance(min_length, int)
+                    and len(value.strip()) < min_length):
+                errors.append(
+                    f"{name} : « {key} » doit contenir au moins "
+                    f"{min_length} caractère non blanc")
+                continue
             enum = prop.get("enum")
             if enum is not None and value is not None and value not in enum:
                 errors.append(

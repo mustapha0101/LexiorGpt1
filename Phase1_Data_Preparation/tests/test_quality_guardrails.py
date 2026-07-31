@@ -64,6 +64,24 @@ def test_precise_article_answer_is_verbatim_without_llm_call():
     assert thinking  # thinking should be non-empty
 
 
+def test_follow_up_article_text_is_verbatim_without_llm_call():
+    """Un suivi peut demander le texte d'articles cités au tour précédent.
+
+    Son type de requête initial demeure une analyse de cas; c'est le contrat
+    du tour courant qui impose alors une réponse strictement textuelle.
+    """
+    class FailingClient:
+        def complete(self, *args, **kwargs):
+            raise AssertionError("le rédacteur LLM ne doit pas être appelé")
+
+    thinking, answer = TrajectoryAgent(client=FailingClient()).final_answer(
+        _article_state("case_analysis"),
+        contract={"type_de_sortie": "article_text"},
+    )
+    assert answer == ARTICLE_TEXT
+    assert thinking
+
+
 def test_article_explanation_keeps_the_complete_official_text():
     class TextClient:
         def complete(self, *args, **kwargs):
@@ -252,12 +270,9 @@ def test_planner_rejects_repeated_identical_tool_call_from_teacher(catalog):
     state = _article_state()
     decision = PlannerAgent(catalog, client=JsonClient()).decide(state)
     assert decision.thinking_text
-    # L'appel répété est bien écarté. Ce qui le remplace ne doit PAS être une
-    # récupération d'article sortie de nulle part : _CCQ_TOPIC_ARTICLES devine
-    # un numéro par préfixe de mot-clé, et « Peux-tu me DONner… » y matchait
-    # ("donation", "don") -> article 1806, sans rapport avec la question sur
-    # 1457. La garde de provenance l'écarte, donc le planner conclut au lieu
-    # de récupérer un article deviné.
+    # L'appel répété est bien écarté. Son remplacement ne doit jamais être un
+    # numéro d'article deviné à partir de mots-clés : sans provenance, le
+    # planner conclut au lieu de récupérer un texte arbitraire.
     if decision.decision == Decision.call_tool:
         numero = (decision.arguments or {}).get("start_article")
         assert numero is None or str(numero) in state.scenario.user_query, (
@@ -317,7 +332,7 @@ def test_critics_never_receive_raw_mcp_response():
     assert len(serialized) < 50_000
 
 
-def test_semantic_search_uses_full_question_and_topic_fallback(catalog):
+def test_semantic_search_uses_full_question_without_topic_fallback(catalog):
     planner = PlannerAgent(catalog, offline=True)
     scenario = ScenarioGenerator(seed=3407, offline=True).generate("topic_research")
     scenario.user_query = "Je cherche des informations sur les baux résidentiels au Québec."
@@ -343,9 +358,7 @@ def test_semantic_search_uses_full_question_and_topic_fallback(catalog):
     retry = planner._arguments("semantic_search_ccq", state)
     assert scenario.user_query in retry["query"]
     assert retry["query"] != scenario.user_query
-    fallback = planner._arguments("get_ccq_articles", state)
-    assert fallback is not None
-    assert "start_article" in fallback
+    assert planner._arguments("get_ccq_articles", state) is None
 
 
 def test_article_is_selected_only_from_actual_search_result(catalog):

@@ -4,8 +4,8 @@
 Dataset : règles complètes (validation déterministe + seuils des
 critiques + cohérence juridiction/clarification/grounding) +
 typed deterministic blockers from evidence classification.
-Live : livraison si une réponse existe; les problèmes restent visibles
-dans l'état (transparence sans blocage).
+Live : une réponse non vide est livrée seulement en l'absence de bloqueur
+déterministe, notamment une affirmation juridique non fondée.
 
 Deterministic blockers CANNOT be overridden by LLM critic scores.
 """
@@ -87,10 +87,17 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
 
     if live:
         answer = (state.get("final_answer") or "").strip()
-        acceptance = AcceptanceResult(accepted=bool(answer))
+        blockers = list(dict.fromkeys(
+            list(state.get("deterministic_blockers", []))
+            + list(state.get("acceptance_blockers", []))
+            + _compute_evidence_blockers(state)))
+        acceptance = AcceptanceResult(accepted=bool(answer) and not blockers)
         if not answer:
             acceptance.blocking_errors = ["réponse finale vide"]
-        return {"acceptance_result": acceptance}
+        elif blockers:
+            acceptance.blocking_errors = blockers
+        return {"acceptance_result": acceptance,
+                "acceptance_blockers": blockers}
 
     critics = state.get("critic_results", {}) or {}
     trajectory = to_trajectory(state)

@@ -31,7 +31,7 @@ CODE_NAMES = {
     "CCQ": "Code civil du Québec",
     "CPC": "Code de procédure civile du Québec",
 }
-RETRIEVAL_VERSION = "legal-rag-1.3-absolute-floor"
+RETRIEVAL_VERSION = "legal-rag-1.9-wide-reviewed-diverse-rerank"
 
 # Saturation BM25 pour ramener un score lexical non borné dans [0, 1[. Seule
 # la forme de la courbe compte : les planchers sont calibrés après coup sur
@@ -426,9 +426,8 @@ class LegalRAG:
         self.embeddings = _normalize_rows(embeddings)
         self.manifest = manifest
         self.reranker = reranker
-        # Dernier rejet du reranker, avec son motif : un rejet total et un
-        # échec de la recherche en amont produisent tous deux une liste
-        # vide, et rien ne permettait de les distinguer après coup.
+        # Dernier diagnostic de rejet du reranker. Il est conservé pour
+        # l'observabilité, sans retirer de candidat de la recherche.
         self.last_rerank_rejection: dict[str, Any] | None = None
         # Moyennes de recentrage, dérivées des vecteurs indexés : elles
         # correspondent donc TOUJOURS au corpus effectivement chargé, sans
@@ -635,14 +634,18 @@ class LegalRAG:
         return np.isin(candidats, positions_dense[:largeur])
 
     def _llm_rerank(self, query: str, code: str,
-                    results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Réordonne et peut écarter des candidats, sans jamais en créer.
+                    results: list[dict[str, Any]],
+                    legal_terms: str = "",
+                    preserve_top_k: int = 1) -> list[dict[str, Any]]:
+        """Réordonne les candidats sans réduire le rappel de la recherche.
 
         Le reranker est le seul point de la chaîne où la question rencontre
-        le texte des articles : il peut donc déclarer un candidat hors sujet
-        et le retirer. Il ne peut en revanche pas introduire un numéro absent
-        des candidats récupérés — cette garantie est vérifiée par les tests.
+        le texte des articles : il peut donc mieux les classer. Il ne peut en
+        revanche ni introduire un numéro absent, ni masquer un candidat du
+        noyau initial. L'applicabilité est tranchée ensuite, sur les textes
+        officiels complets, par le filtre dédié.
         """
+        self.last_rerank_rejection = None
         if not (self.cfg.llm_rerank_enabled and self.reranker and results):
             return results
         judged = results[:max(int(self.cfg.llm_rerank_k), 1)]
@@ -660,27 +663,31 @@ class LegalRAG:
                         "content": (
                             "Tu es un reranker de recherche législative québécoise. "
                             "Classe seulement les articles candidats fournis selon leur "
-                            "capacité à répondre directement à la question. Pénalise un "
-                            "article limité à un contexte spécial absent de la question "
+                            "applicabilité aux faits et à la qualification juridique "
+                            "fournies. Ne favorise pas un article uniquement parce qu'il "
+                            "répète les mêmes objets ou mots que les faits : une règle "
+                            "générale peut être pertinente même si son vocabulaire est plus "
+                            "abstrait. À l'inverse, pénalise un article dont les conditions "
+                            "d'application sont expressément incompatibles avec les faits "
+                            "connus, ou limité à un contexte spécial absent de la question "
                             "(autre province, appel, exécution, etc.). Place dans "
-                            '"rejected" tout candidat qui ne traite pas du sujet de la '
-                            "question : mieux vaut ne rien retourner que de retourner "
-                            "un article hors sujet, et rejeter tous les candidats est "
-                            "une réponse valide. N'invente aucun numéro. Réponds "
+                            '"rejected" les candidats manifestement incompatibles : '
+                            "ce champ est diagnostique et ne les supprime pas de la "
+                            "recherche. N'invente aucun numéro. Réponds "
                             "uniquement par l'objet JSON "
                             '{"ranking":["numéro"],"rejected":["numéro"],'
                             '"reason":"une phrase"}, où chaque numéro candidat '
                             "apparaît exactement une fois dans l'une ou l'autre des "
-                            "listes. « reason » explique brièvement le rejet quand "
-                            "il y en a un : sans cette phrase, un rejet total est "
-                            "indiscernable d'un échec de la recherche en amont."
+                            "listes. « reason » explique brièvement le diagnostic de "
+                            "rejet lorsqu'il y en a un."
                         ),
                     },
                     {
                         "role": "user",
                         "content": json.dumps({
                             "code": code,
-                            "question": query,
+                            "faits": query,
+                            "qualification_juridique": legal_terms,
                             "candidats": payload,
                         }, ensure_ascii=False),
                     },
@@ -702,19 +709,27 @@ class LegalRAG:
             if str(value).strip() in judged_numbers
         } if isinstance(raw_rejected, list) else set()
 
+        protected = results[:max(int(preserve_top_k), 1)]
+        protected_keys = {str(item["article_number"]) for item in protected}
         ordered: list[dict[str, Any]] = []
         seen: set[str] = set()
         for value in ranking:
             key = str(value).strip()
-            if key in allowed and key not in seen and key not in rejected:
+            if key in protected_keys and key not in seen:
                 ordered.append(allowed[key])
                 seen.add(key)
-        # Une sortie incomplète ne supprime jamais un candidat récupéré :
-        # seul un rejet explicite le fait.
-        ordered.extend(
-            item for item in results
-            if item["article_number"] not in seen
-            and item["article_number"] not in rejected)
+        # Le reranker ne peut pas écarter une source avant que le filtre
+        # d'applicabilité ait comparé son texte officiel aux faits.
+        ordered.extend(item for item in protected
+                       if str(item["article_number"]) not in seen)
+        seen.update(str(item["article_number"]) for item in ordered)
+        for value in ranking:
+            key = str(value).strip()
+            if key in allowed and key not in seen:
+                ordered.append(allowed[key])
+                seen.add(key)
+        ordered.extend(item for item in results
+                       if str(item["article_number"]) not in seen)
         reason = str(answer.get("reason") or "").strip()
         for position, item in enumerate(ordered, start=1):
             item["rerank_position"] = position
@@ -827,7 +842,7 @@ class LegalRAG:
         wanted = min(max(int(top_k or self.cfg.top_k), 1), len(order), 20)
 
         pre_rerank_count = min(
-            max(wanted, int(self.cfg.llm_rerank_k)), len(order), 20)
+            max(wanted, int(self.cfg.llm_rerank_k)), len(order), 40)
         results: list[dict[str, Any]] = []
         for rank, order_position in enumerate(order[:pre_rerank_count], start=1):
             candidate_position = int(candidate_positions[int(order_position)])
@@ -851,7 +866,9 @@ class LegalRAG:
                 "excerpt": document.text[:700],
                 "source_url": document.source_url,
             })
-        final = self._llm_rerank(query, code, results)[:wanted]
+        final = self._llm_rerank(
+            query, code, results, legal_terms=terms,
+            preserve_top_k=max(1, wanted // 2))[:wanted]
         # ``rank`` était figé AVANT le reranker, qui peut réordonner : le
         # champ annonçait une position que la liste ne respectait plus. On le
         # renumérote sur l'ordre réellement renvoyé.

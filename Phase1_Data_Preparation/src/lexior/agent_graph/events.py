@@ -45,11 +45,6 @@ NODE_LABELS = {
 }
 
 _TOOL_RESULT_PREVIEW_CHARS = 500
-# Défaut historique. Configurable par ``chat.thinking_preview_chars`` ou
-# LEXIOR_THINKING_PREVIEW_CHARS : 280 caractères coupent un raisonnement au
-# milieu. C'est un réglage d'AFFICHAGE — le thinking_text produit par le
-# modèle et enregistré dans les trajectoires n'est jamais modifié.
-_THINKING_PREVIEW_CHARS = 280
 
 # Nœuds après lesquels un résultat d'outil encore non classé doit être émis
 # quand même : mieux vaut l'afficher sans classification que le perdre.
@@ -67,11 +62,8 @@ class StreamTranslator:
     dans le MÊME événement plutôt que dans un second.
     """
 
-    def __init__(self, thinking_preview_chars: Optional[int] = None) -> None:
+    def __init__(self) -> None:
         self._tool_count = 0
-        self._thinking_chars = int(
-            _THINKING_PREVIEW_CHARS if thinking_preview_chars is None
-            else max(0, thinking_preview_chars))
         self._en_attente: list[dict[str, Any]] = []
 
     def translate_chunk(
@@ -105,8 +97,6 @@ class StreamTranslator:
                         "jurisdiction": update.get(
                             "resolved_jurisdiction",
                             decision.get("jurisdiction", "")),
-                        "thinking": (decision.get("thinking_text")
-                                     or "")[:self._thinking_chars],
                     }
 
             tool_history = update.get("tool_history")

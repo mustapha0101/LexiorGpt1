@@ -25,8 +25,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from lexior.services.assertion_grounding import (  # noqa: E402
-    AssertionGroundingService, affirmation_autour, textes_recuperes,
+    AssertionGroundingService, articles_incompatibles_deterministes,
+    affirmation_autour, textes_recuperes,
 )
+from lexior.agentic.trajectory_agent import _articles_retenus  # noqa: E402
 
 ART_984 = ("Les fruits qui tombent d’un arbre sur un fonds voisin "
            "appartiennent au propriétaire de l’arbre.")
@@ -228,3 +230,132 @@ def test_sans_client_le_controle_ne_bloque_rien():
 def test_en_mode_offline_le_controle_est_inerte():
     assert AssertionGroundingService(client=_Client(), offline=True).verifier(
         INVENTION, {"984": ART_984}) == []
+
+
+def test_selection_pre_redaction_ne_garde_pas_un_texte_incompatible():
+    textes = {
+        "10": "La mesure ne peut être prise qu'avant la survenance du fait.",
+        "20": "Toute personne doit réparer le préjudice causé par sa faute.",
+    }
+    client = _Client({"articles": [
+        {"article": "10", "statut": "incompatible",
+         "motif": "le fait est déjà survenu"},
+        {"article": "20", "statut": "incertain",
+         "motif": "la faute reste à établir"},
+    ]})
+    selection = AssertionGroundingService(client=client).selectionner_articles(
+        textes, faits="le fait s'est déjà produit")
+    assert selection["10"].statut == "incompatible"
+    assert selection["20"].statut == "incertain"
+    systeme = client.appels[0]["messages"][0]["content"]
+    assert "sans règle mémorisée" in systeme
+
+
+def test_selection_partielle_ne_filtre_pas_les_textes_officiels():
+    client = _Client({"articles": [
+        {"article": "10", "statut": "incompatible", "motif": ""},
+    ]})
+    selection = AssertionGroundingService(client=client).selectionner_articles(
+        {"10": "Texte A", "20": "Texte B"}, faits="faits")
+    assert selection == {}
+
+
+def test_un_lot_incomplet_nefface_pas_les_verdicts_des_lots_precedents():
+    """A late failed batch must not re-authorize already excluded sources."""
+    class ClientParLot:
+        def __init__(self):
+            self.appels = 0
+
+        def complete_json(self, *_args, **_kwargs):
+            self.appels += 1
+            if self.appels == 1:
+                return {"articles": [
+                    {"article": str(numero),
+                     "statut": "incompatible" if numero == 2 else "applicable",
+                     "motif": ""}
+                    for numero in range(1, 9)
+                ]}
+            return {"articles": []}  # incomplete second batch
+
+    selection = AssertionGroundingService(client=ClientParLot()).selectionner_articles(
+        {str(numero): f"Texte officiel {numero}." for numero in range(1, 10)},
+        faits="faits")
+
+    assert set(selection) == {str(numero) for numero in range(1, 9)}
+    assert selection["2"].statut == "incompatible"
+
+
+def test_cause_incompatible_force_lexclusion_du_texte():
+    client = _Client({"articles": [
+        {"article": "10", "cause_compatible": False,
+         "statut": "applicable", "motif": ""},
+    ]})
+    selection = AssertionGroundingService(client=client).selectionner_articles(
+        {"10": "Texte officiel."}, faits="faits")
+    assert selection["10"].statut == "incompatible"
+
+
+@pytest.mark.parametrize("faits", [
+    "Le dommage est déjà survenu.",
+    "Le dommage est deja survenu.",
+    "Le fait est tombe et a causé un dommage.",
+])
+def test_regle_preventive_ecartee_apres_un_dommage_realise(faits):
+    client = _Client({"articles": [
+        {"article": "10", "statut": "applicable", "motif": ""},
+    ]})
+    selection = AssertionGroundingService(client=client).selectionner_articles(
+        {"10": "La mesure vise à prévenir un risque avant qu'il survienne."},
+        faits=faits)
+    assert selection["10"].statut == "incompatible"
+
+
+def test_incompatibilite_preventive_reste_active_sans_relecteur():
+    exclusions = articles_incompatibles_deterministes(
+        {"10": "La mesure vise à prévenir un risque avant qu'il survienne."},
+        faits="Le dommage est déjà survenu.")
+
+    assert exclusions["10"].statut == "incompatible"
+
+
+def test_verifier_bloque_une_regle_preventive_apres_le_dommage():
+    verdicts = AssertionGroundingService(client=_Client({
+        "non_soutenues": []
+    })).verifier(
+        "Selon l'article 10, vous pouvez imposer une mesure préventive.",
+        {"10": "La mesure vise à prévenir un risque avant qu'il survienne."},
+        faits="Le dommage est déjà survenu.")
+
+    assert verdicts and not verdicts[0].soutenue
+    assert verdicts[0].motif
+
+
+def test_selection_par_lots_ne_devient_pas_partielle_sur_neuf_textes():
+    textes = {str(numero): f"Texte officiel {numero}." for numero in range(1, 10)}
+    client = _Client({"articles": [
+        {"article": str(numero), "statut": "incertain", "motif": ""}
+        for numero in range(1, 10)
+    ]})
+
+    selection = AssertionGroundingService(client=client).selectionner_articles(
+        textes, faits="faits")
+
+    assert set(selection) == set(textes)
+    assert len(client.appels) == 2
+
+
+def test_redacteur_ne_recoit_que_les_articles_retenus():
+    contenu = (
+        "Article 10\nTexte incompatible.\n\n"
+        "Article 20\nTexte retenu."
+    )
+    assert _articles_retenus(contenu, {"20"}) == "Article 20\nTexte retenu."
+
+
+def test_juge_accepte_une_application_conditionnelle_dune_regle_generale():
+    client = _Client({"non_soutenues": []})
+    AssertionGroundingService(client=client).verifier(
+        "Selon l'article 10, une obligation peut exister si ses conditions "
+        "sont établies.", {"10": "Toute personne doit respecter son obligation."})
+    systeme = client.appels[0]["messages"][0]["content"]
+    assert "règle générale peut soutenir une application CONDITIONNELLE" in systeme

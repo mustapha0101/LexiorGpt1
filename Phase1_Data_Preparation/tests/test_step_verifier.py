@@ -113,7 +113,10 @@ class TestVerifyProposal:
         decision = PlannerDecision(
             decision=Decision.call_tool,
             next_tool="semantic_search_ccq",
-            arguments={"query": "vice caché"},
+            arguments={
+                "query": "vice caché",
+                "legal_terms": "vice caché, garantie de qualité",
+            },
         )
         result = sv.verify_proposal(
             decision, "case_analysis", [], max_tool_calls=4)
@@ -125,7 +128,10 @@ class TestVerifyProposal:
         decision = PlannerDecision(
             decision=Decision.call_tool,
             next_tool="semantic_search_ccq",
-            arguments={"query": "vice caché"},
+            arguments={
+                "query": "vice caché",
+                "legal_terms": "vice caché, garantie de qualité",
+            },
         )
         history = [_observation() for _ in range(4)]
         result = sv.verify_proposal(

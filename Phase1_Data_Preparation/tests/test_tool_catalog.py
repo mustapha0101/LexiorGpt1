@@ -18,6 +18,19 @@ def test_call_validation_rejects_unknown_missing_type_and_enum(catalog):
     assert not catalog.validate_call("get_ccq_articles", {"start_article": 1457})
 
 
+def test_semantic_search_requires_a_nonempty_legal_formulation(catalog):
+    for tool in ("semantic_search_ccq", "semantic_search_cpc"):
+        assert "legal_terms" in catalog.tools[tool].required
+        assert catalog.validate_call(tool, {"query": "faits à rechercher"})
+        assert catalog.validate_call(
+            tool, {"query": "faits à rechercher", "legal_terms": " "})
+        assert not catalog.validate_call(
+            tool,
+            {"query": "faits à rechercher",
+             "legal_terms": "qualification juridique abstraite"},
+        )
+
+
 def test_live_schema_drift_is_detected(catalog):
     live = {name: copy.deepcopy(spec.input_schema) for name, spec in catalog.tools.items()}
     live["get_ccq_articles"]["properties"]["start_article"]["type"] = "string"

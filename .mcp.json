@@ -2,7 +2,9 @@
   "mcpServers": {
     "lexior-ccq": {
       "type": "sse",
-      "url": "https://lexior-ccq-mcp.onrender.com/sse"
+      "url": "http://localhost:3001/sse",
+      "_url_render_remplacee": "https://lexior-ccq-mcp.onrender.com/sse",
+      "_note": "Copie locale (C:/Users/imenb/Desktop/Lexior/mcp-local) le temps de corriger la jurisprudence. Remettre _url_render_remplacee pour revenir au serveur de Mustapha."
     },
     "a2aj": {
       "type": "streamable-http",

@@ -378,11 +378,30 @@ def test_deterministic_blockers_override_critic_scores():
         acceptance.accepted = False
         acceptance.blocking_errors = list(
             acceptance.blocking_errors or []) + blockers
-
     assert not acceptance.accepted, (
         "coverage_mismatch blocker must override high critic scores")
     assert AcceptanceBlocker.coverage_mismatch.value in (
         acceptance.blocking_errors)
+
+
+def test_live_rejects_a_nonempty_answer_with_a_grounding_blocker():
+    from lexior.agent_graph.nodes import compute_acceptance
+
+    result = compute_acceptance.run({
+        "mode": "live",
+        "final_answer": "Le voisin est tenu de réparer les dommages.",
+        "deterministic_blockers": [
+            "[ungrounded_article] l'article 985 vise un arbre qui menace de tomber",
+        ],
+        "acceptance_blockers": [],
+        "usable_evidence_entries": [],
+        "coverage_gaps": [],
+        "alternative_sources": [],
+        "answer_contract": {},
+    }, None)
+
+    assert not result["acceptance_result"].accepted
+    assert result["acceptance_result"].blocking_errors
 
 
 # ── 15. Both modes use the same verification and coverage rules ──────────

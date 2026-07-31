@@ -31,9 +31,11 @@ from typing import Any, Iterable, Optional
 
 # Outils qui récupèrent un texte officiel par son numéro, et le champ qui le
 # porte.
-RECUPERATION_PAR_NUMERO: dict[str, str] = {
-    "get_ccq_articles": "start_article",
-    "get_cpc_articles": "start_article",
+RECUPERATION_PAR_NUMERO: dict[str, tuple[str, ...]] = {
+    # ``start_article`` est le format historique. Les serveurs MCP actuels
+    # acceptent aussi ``articles: [..]`` pour récupérer plusieurs textes.
+    "get_ccq_articles": ("start_article", "articles"),
+    "get_cpc_articles": ("start_article", "articles"),
 }
 
 _RE_NUMERO = re.compile(r"\b(\d{1,4}(?:\.\d+)?)\b")
@@ -43,15 +45,35 @@ def numeros_dans(texte: str) -> set[str]:
     return set(_RE_NUMERO.findall(texte or ""))
 
 
+def numeros_demandes(tool_name: str, arguments: Optional[dict]) -> tuple[str, ...]:
+    """Numéros réellement passés à un outil de récupération officiel.
+
+    Un appel groupé doit conserver la provenance de *chaque* article. Le
+    réduire au premier, ou ne reconnaître que le schéma historique
+    ``start_article``, permettrait à un résultat officiel pertinent d'être
+    rejeté par le veto lexical après une récupération valide.
+    """
+    champs = RECUPERATION_PAR_NUMERO.get(tool_name or "")
+    if not champs:
+        return ()
+    numeros: list[str] = []
+    for champ in champs:
+        brut = (arguments or {}).get(champ)
+        valeurs = brut if isinstance(brut, (list, tuple, set)) else (brut,)
+        for valeur in valeurs:
+            numero = str(valeur).strip() if valeur is not None else ""
+            if numero and numero not in numeros:
+                numeros.append(numero)
+    return tuple(numeros)
+
+
 def numero_demande(tool_name: str, arguments: Optional[dict]) -> Optional[str]:
-    """Numéro passé à un outil de récupération, ou ``None``."""
-    champ = RECUPERATION_PAR_NUMERO.get(tool_name or "")
-    if not champ:
-        return None
-    brut = (arguments or {}).get(champ)
-    if brut is None:
-        return None
-    return str(brut).strip() or None
+    """Compatibilité : premier numéro demandé, ou ``None``.
+
+    Les nouveaux appelants qui évaluent la provenance doivent utiliser
+    :func:`numeros_demandes` afin de ne pas perdre les articles groupés.
+    """
+    return next(iter(numeros_demandes(tool_name, arguments)), None)
 
 
 def a_une_provenance(

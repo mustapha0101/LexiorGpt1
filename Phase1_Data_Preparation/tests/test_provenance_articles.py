@@ -25,7 +25,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from lexior.services.provenance import (  # noqa: E402
-    a_une_provenance, numero_demande, numeros_dans, reponses_reussies,
+    a_une_provenance, numero_demande, numeros_dans, numeros_demandes,
+    reponses_reussies,
 )
 from lexior.agent_graph.result_classifier import ResultClassifier  # noqa: E402
 from lexior.agent_graph.nodes.validate_final import (  # noqa: E402
@@ -76,6 +77,8 @@ def test_seules_les_reponses_reussies_comptent():
 def test_les_outils_hors_recuperation_ne_sont_pas_concernes():
     assert numero_demande("semantic_search_ccq", {"query": "1466"}) is None
     assert numero_demande("get_ccq_articles", {"start_article": 1466}) == "1466"
+    assert numeros_demandes("get_ccq_articles", {"articles": [1457, 1465]}) == (
+        "1457", "1465")
     assert numero_demande("get_ccq_articles", {}) is None
 
 

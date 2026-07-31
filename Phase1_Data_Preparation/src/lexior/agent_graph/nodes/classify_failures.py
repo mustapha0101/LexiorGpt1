@@ -32,7 +32,9 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     outcome = CriticsOutcome(
         legal=critics.get("legal"), agentic=critics.get("agentic"))
 
-    reports = ctx.services.repair.classify_failures(outcome)
+    reports = ctx.services.repair.classify_failures(
+        outcome,
+        validation_issues=state.get("preflight_grounding_issues", []))
     updates: dict[str, Any] = {
         "failure_reports": [asdict(r) for r in reports],
     }

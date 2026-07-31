@@ -99,8 +99,10 @@ def test_le_rang_du_json_suit_lordre_reellement_renvoye(tmp_path):
     assert rangs == list(range(1, len(rangs) + 1)), (
         "le champ rank doit décrire la liste renvoyée, pas l'ordre d'avant "
         "le reranker")
-    assert [r["article_number"] for r in avec["results"]] == list(
-        reversed(numeros)), "le reranker a bien réordonné"
+    reranked = [r["article_number"] for r in avec["results"]]
+    assert reranked[0] == numeros[0], "le noyau de rappel reste protégé"
+    assert reranked[1:] == list(reversed(numeros))[0:-1], (
+        "le reranker réordonne les candidats hors noyau")
 
 
 def test_aucun_resultat_reste_lisible_comme_vide(tmp_path):

@@ -44,7 +44,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
 
     repaired_thinking, repaired_answer = ctx.services.repair.repair_answer(
         to_research_state(state), state.get("mode", "dataset"),
-        answer, thinking, instructions)
+        answer, thinking, instructions,
+        contract=state.get("answer_contract"))
 
     history_entry = {
         "from_node": NAME,

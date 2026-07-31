@@ -57,6 +57,8 @@ READER_DIRECTED_MARKERS = (
     "voulez-vous que je", "dites-moi", "n'hésitez pas",
     "je peux extraire", "je peux rechercher", "je peux vous",
     "je peux affiner", "je peux préparer", "je vous oriente",
+    "vous pouvez demander", "il est recommandé de", "consultez votre",
+    "faites appel à un médiateur", "procédures judiciaires",
 )
 
 # En-têtes de synthèse générée.
@@ -218,19 +220,29 @@ def _check_qc_article(obs: ToolObservation) -> tuple[ToolObservation, list[str]]
     issues: list[str] = []
     text = obs.normalized_response.strip()
 
-    if not text:
-        obs = obs.model_copy(update={
+    def reject(reason: str, message: str) -> tuple[ToolObservation, list[str]]:
+        rejected = obs.model_copy(update={
             "ok": False,
-            "error": "article vide",
+            "error": reason,
             "normalized_response": json.dumps(
-                {"error": "article vide",
-                 "message": "L'article récupéré est vide."},
-                ensure_ascii=False),
+                {"error": reason, "message": message}, ensure_ascii=False),
             "content_hash": "",
         })
-        obs.finalize_hash()
-        issues.append("FATAL : article québécois vide")
-        return obs, issues
+        rejected.finalize_hash()
+        return rejected, [f"FATAL : {reason}"]
+
+    if not text:
+        return reject("article québécois vide", "L'article récupéré est vide.")
+
+    # Un article officiel ne contient pas de conseil rédigé pour le lecteur.
+    # Cela protège aussi le grounding : il ne doit jamais valider la réponse
+    # finale contre une prose ajoutée par un serveur MCP ou un intermédiaire.
+    if contains_generated_summary(text):
+        return reject(
+            "article québécois contaminé par une synthèse générée",
+            "La réponse prétendument officielle contient du conseil destiné au lecteur "
+            "et ne peut pas servir de source législative.",
+        )
 
     if _is_qc_unusable(text):
         m = _QC_STUB_RE.match(text)
@@ -241,18 +253,32 @@ def _check_qc_article(obs: ToolObservation) -> tuple[ToolObservation, list[str]]
                 kind = "omis"
             elif body.startswith("modification"):
                 kind = "épuisé (modification intégrée)"
-        obs = obs.model_copy(update={
-            "ok": False,
-            "error": f"article {kind}",
-            "normalized_response": json.dumps(
-                {"error": f"article {kind}",
-                 "message": f"L'article récupéré est {kind} et ne contient "
-                            "aucun contenu normatif exploitable."},
-                ensure_ascii=False),
-            "content_hash": "",
-        })
-        obs.finalize_hash()
-        issues.append(f"FATAL : article québécois {kind}")
+        return reject(
+            f"article québécois {kind}",
+            f"L'article récupéré est {kind} et ne contient aucun contenu "
+            "normatif exploitable.",
+        )
+
+    headings = re.findall(
+        r"(?mi)^\s*Article\s+(\d{1,4}(?:\.\d+)?)\b", text)
+    if not headings:
+        return reject(
+            "article québécois sans en-tête vérifiable",
+            "La réponse ne respecte pas le format attendu « Article <numéro> ».",
+        )
+
+    requested = obs.arguments.get("articles")
+    if isinstance(requested, list) and requested:
+        expected = {str(value) for value in requested}
+    else:
+        start = obs.arguments.get("start_article")
+        end = obs.arguments.get("end_article", start)
+        expected = ({str(start)} if start is not None and end == start else set())
+    if expected and not expected.issubset(set(headings)):
+        return reject(
+            "article québécois différent de la demande",
+            "La réponse ne contient pas tous les articles demandés.",
+        )
 
     return obs, issues
 

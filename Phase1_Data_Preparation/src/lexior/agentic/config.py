@@ -122,11 +122,11 @@ class RAGConfig:
     embedding_model: str = "text-embedding-3-small"
     embedding_batch_size: int = 128
     embedding_price_per_1m_usd: float = 0.02
-    top_k: int = 8
+    top_k: int = 20
     candidate_k: int = 40
     dense_weight: float = 0.60
     llm_rerank_enabled: bool = True
-    llm_rerank_k: int = 10
+    llm_rerank_k: int = 40
     # Planchers de pertinence sur l'échelle ABSOLUE (la normalisation min-max
     # ramène toujours le meilleur candidat à 1.0, même quand il est hors
     # sujet). Un corpus sans réponse doit produire une liste vide.
@@ -194,7 +194,7 @@ class AgenticConfig:
     push_to_hf: bool = False
 
     # --- limites de contenu ----------------------------------------------
-    max_tool_response_chars: int = 6000
+    max_tool_response_chars: int = 14000
     near_duplicate_jaccard: float = 0.90
 
     # --- seuils critiques ------------------------------------------------
@@ -211,10 +211,6 @@ class AgenticConfig:
     # distinct du corpus — ces sessions sont un jeu de test, jamais des
     # données d'entraînement.
     chat_sessions_dir: str = ""
-    # Longueur du raisonnement diffusé à l'interface. N'affecte QUE
-    # l'affichage : le thinking_text produit par le modèle et enregistré
-    # dans les trajectoires n'est pas touché.
-    thinking_preview_chars: int = 280
 
     # --- endpoints -------------------------------------------------------
     teacher: EndpointConfig = field(default_factory=EndpointConfig)
@@ -332,10 +328,6 @@ def load_config(config_path: Optional[str] = None,
     cfg.chat_sessions_dir = os.environ.get(
         "LEXIOR_CHAT_SESSIONS_DIR",
         paths.get("chat_sessions", cfg.chat_sessions_dir))
-    cfg.thinking_preview_chars = int(os.environ.get(
-        "LEXIOR_THINKING_PREVIEW_CHARS",
-        raw.get("chat", {}).get("thinking_preview_chars",
-                                cfg.thinking_preview_chars)))
     # Chemins relatifs : ancrés sur Phase1_Data_Preparation.
     for attr in ("data_root", "catalog_path", "mcp_config_path",
                  "chat_sessions_dir"):

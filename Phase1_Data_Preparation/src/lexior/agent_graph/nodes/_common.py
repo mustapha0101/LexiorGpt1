@@ -13,8 +13,13 @@ _GREETING_RE = re.compile(
     r"^\s*(bonjour|salut|allo|hello|hi|merci)\b[\s!.,]*$", re.I)
 
 _ARTICLE_REQUEST_RE = re.compile(
-    r"\b(cite|donne|montre|texte\s+(?:exact|int[ée]gral|officiel))\b.*"
-    r"\barticle\b|\barticle\s+exact\b",
+    r"(?:"
+    r"\b(?:cite|donne|montre|reproduis|fournis)\b.*\barticles?\b"
+    r"|\btexte\s+(?:exact|int[ée]gral|officiel)\b.*\barticles?\b"
+    r"|\bque\s+di(?:t|sent)\b.*\barticles?\b"
+    r"|\barticles?\b.*\b(?:exactement|mot\s+[àa]\s+mot|"
+    r"texte\s+(?:exact|int[ée]gral|officiel))\b"
+    r")",
     re.I | re.S,
 )
 
@@ -86,6 +91,11 @@ def looks_like_follow_up(text: str, has_previous_answer: bool) -> bool:
     stripped = (text or "").strip()
     if not stripped:
         return False
+    # Une demande explicite de texte ou de source prolonge naturellement la
+    # réponse précédente, même si elle commence par « que disent... » plutôt
+    # que par l'un des verbes courts ci-dessous.
+    if _ARTICLE_REQUEST_RE.search(stripped) or _SOURCE_REQUEST_RE.search(stripped):
+        return True
     if _ANAPHORA_RE.search(stripped):
         return True
     return (len(stripped) <= 80

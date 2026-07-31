@@ -8,9 +8,13 @@ la réponse finale contre… du texte généré.
 
 from __future__ import annotations
 
+import json
+
 from agentic_generation.schemas import (
-    Message, Role, ToolObservation, TrainingTrajectory,
+    Message, ResearchState, Role, ScenarioSpec, ToolObservation,
+    TrainingTrajectory,
 )
+from agentic_generation.trajectory_agent import TrajectoryAgent
 from agentic_generation.validators import validate_trajectory
 from lexior.agentic.mcp_executor import normalize_mcp_response
 from lexior.agentic.response_verifier import (
@@ -37,6 +41,15 @@ SOURCE_RESPONSE = (
     "suivant les circonstances, les usages ou la loi, s'imposent à elle."
 )
 
+CONTAMINATED_CCQ_RESPONSE = (
+    "Article 985\n"
+    "Le propriétaire peut aussi, si un arbre du fonds voisin menace de "
+    "tomber sur son fonds, contraindre son voisin à l'abattre ou à le redresser.\n"
+    "En cas de chute d'un arbre pourri de votre voisin sur votre garage, "
+    "vous pouvez demander à votre voisin de réparer les dommages. "
+    "Il est recommandé de documenter les dommages et de consulter votre assureur."
+)
+
 
 # ── Détection ────────────────────────────────────────────────────────────
 
@@ -51,6 +64,10 @@ def test_official_source_text_is_not_flagged():
 
 def test_empty_response_is_not_flagged():
     assert not contains_generated_summary("")
+
+
+def test_contaminated_official_article_is_detected():
+    assert contains_generated_summary(CONTAMINATED_CCQ_RESPONSE)
 
 
 # ── Nettoyage ────────────────────────────────────────────────────────────
@@ -105,6 +122,28 @@ def test_source_text_from_the_same_family_stays_citable():
     assert assessment.citable and assessment.usable_as_evidence
 
 
+def test_contaminated_ccq_article_is_rejected_before_evidence_classification():
+    observation = ToolObservation(
+        tool_name="get_ccq_articles", arguments={"articles": [985]},
+        raw_response=CONTAMINATED_CCQ_RESPONSE,
+        normalized_response=CONTAMINATED_CCQ_RESPONSE, ok=True,
+    ).finalize_hash()
+
+    verified, issues = ResultVerificationService().verify(observation)
+
+    assert not verified.ok
+    assert "contaminé" in (verified.error or "")
+    assert any(issue.startswith("FATAL") for issue in issues)
+
+
+def test_article_normalization_preserves_prose_until_the_article_verifier():
+    text, _urls, _citations, _truncated = normalize_mcp_response(
+        {"text": CONTAMINATED_CCQ_RESPONSE}, 10_000,
+        strip_reader_content=False,
+    )
+    assert "vous pouvez demander" in text
+
+
 # ── Grounding ────────────────────────────────────────────────────────────
 
 
@@ -147,6 +186,39 @@ def test_the_same_article_seen_in_source_text_is_grounded(catalog):
 
     assert not any("article 1437 absent" in error for error in result.errors), (
         result.errors)
+
+
+def test_writer_receives_only_evidence_selected_by_the_contract():
+    class RecordingClient:
+        def __init__(self):
+            self.prompt = None
+
+        def complete(self, _name, messages, **_kwargs):
+            self.prompt = json.loads(messages[-1]["content"])
+            return "---ANSWER---Réponse fondée."
+
+    scenario = ScenarioSpec(
+        scenario_id="writer", scenario_family_id="writer",
+        request_type="case_analysis", user_query="Question de responsabilité.",
+    )
+    selected = ToolObservation(
+        tool_name="get_ccq_articles", arguments={"start_article": 1457},
+        normalized_response=SOURCE_RESPONSE, ok=True,
+    ).finalize_hash()
+    discarded = ToolObservation(
+        tool_name="get_ccq_articles", arguments={"start_article": 985},
+        normalized_response="Article 985\nTexte non retenu.", ok=True,
+    ).finalize_hash()
+    client = RecordingClient()
+    _thinking, answer = TrajectoryAgent(client=client).final_answer(
+        ResearchState(scenario=scenario, tool_history=[selected, discarded]),
+        contract={"indices_preuves_utilisables": [0]},
+    )
+
+    assert answer.endswith("fondée.")
+    assert [item["tool"] for item in client.prompt[
+        "preuves_officielles_uniquement"]] == ["get_ccq_articles"]
+    assert len(client.prompt["preuves_officielles_uniquement"]) == 1
 
 
 # ── Citation vs prose : deux niveaux distincts ───────────────────────────

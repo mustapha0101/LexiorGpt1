@@ -9,7 +9,10 @@ from agentic_generation.orchestrator import AgenticOrchestrator
 from agentic_generation.acceptance import _critic_failure_reasons
 from agentic_generation.planner_agent import PlannerAgent
 from agentic_generation.scenario_generator import ScenarioGenerator
-from agentic_generation.schemas import CriticResult, Decision, Message, ResearchState, Role
+from agentic_generation.schemas import (
+    CriticResult, Decision, Message, PlannerDecision, ResearchState, Role,
+    ToolObservation,
+)
 from agentic_generation.trajectory_agent import TrajectoryAgent
 from agentic_generation.taxonomy import REQUEST_TYPES
 
@@ -96,6 +99,17 @@ class _JsonClient:
         return dict(self.payload)
 
 
+class _SequentialJsonClient:
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.calls = 0
+
+    def complete_json(self, *args, **kwargs):
+        payload = self.payloads[min(self.calls, len(self.payloads) - 1)]
+        self.calls += 1
+        return dict(payload)
+
+
 def test_planner_normalizes_tool_name_used_as_decision(catalog):
     scenario = ScenarioGenerator(seed=3407, offline=True).generate("topic_research")
     state = ResearchState(
@@ -109,6 +123,7 @@ def test_planner_normalizes_tool_name_used_as_decision(catalog):
         "decision": "semantic_search_ccq",
         "next_tool": "semantic_search_ccq",
         "arguments": {"query": scenario.user_query},
+        "legal_terms": "qualification juridique pertinente",
         "decision_trace": {"next_action": "semantic_search_ccq"},
     })
     decision = PlannerAgent(catalog, client=client).decide(state)
@@ -132,12 +147,96 @@ def test_validate_arguments_replaces_teacher_keywords_with_full_query(catalog):
         "decision": "call_tool",
         "next_tool": "semantic_search_ccq",
         "arguments": {"query": "clôture"},
+        "legal_terms": "droit de propriété et empiètement",
     })
 
     decision = PlannerAgent(catalog, client=client).decide(state)
 
-    assert decision.arguments == {"query": scenario.user_query}
+    assert decision.arguments == {
+        "query": scenario.user_query,
+        "legal_terms": "droit de propriété et empiètement",
+    }
     assert decision.next_tool == "semantic_search_ccq"
+
+
+def test_planner_retries_when_semantic_legal_terms_are_missing(catalog):
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate(
+        "topic_research")
+    state = ResearchState(
+        scenario=scenario,
+        messages=[Message(role=Role.user, content=scenario.user_query)],
+        max_tool_calls=4,
+    )
+    base = {
+        "request_type": "topic_research",
+        "jurisdiction": "Québec",
+        "decision": "call_tool",
+        "next_tool": "semantic_search_ccq",
+        "arguments": {"query": scenario.user_query},
+    }
+    client = _SequentialJsonClient([
+        base,
+        {**base, "arguments": {
+            "query": scenario.user_query,
+            "legal_terms": "qualification juridique abstraite",
+        }},
+    ])
+
+    decision = PlannerAgent(catalog, client=client, chat_mode=True).decide(state)
+
+    assert client.calls == 2
+    assert decision.arguments["legal_terms"] == "qualification juridique abstraite"
+
+
+def test_planner_moves_its_legal_terms_to_the_semantic_tool(catalog):
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate(
+        "topic_research")
+    state = ResearchState(
+        scenario=scenario,
+        messages=[Message(role=Role.user, content=scenario.user_query)],
+        max_tool_calls=4,
+    )
+    client = _JsonClient({
+        "request_type": "topic_research",
+        "jurisdiction": "Québec",
+        "decision": "call_tool",
+        "next_tool": "semantic_search_ccq",
+        "arguments": {"query": scenario.user_query},
+        "legal_terms": "qualification juridique abstraite",
+    })
+
+    decision = PlannerAgent(catalog, client=client, chat_mode=True).decide(state)
+
+    assert decision.arguments["legal_terms"] == "qualification juridique abstraite"
+
+
+def test_fetch_uses_every_candidate_returned_by_semantic_search(catalog):
+    scenario = ScenarioGenerator(seed=3407, offline=True).generate(
+        "topic_research")
+    state = ResearchState(
+        scenario=scenario,
+        messages=[Message(role=Role.user, content=scenario.user_query)],
+        tool_history=[ToolObservation(
+            tool_name="semantic_search_ccq",
+            arguments={"query": scenario.user_query,
+                       "legal_terms": "qualification juridique abstraite"},
+            normalized_response=(
+                "1. Article 101 — confiance 0.8\n"
+                "2. Article 202 — confiance 0.7\n"
+                "3. Article 303 — confiance 0.6"),
+            ok=True,
+        )],
+    )
+    decision = PlannerAgent(catalog, chat_mode=True)._raise_if_invalid(
+        state,
+        PlannerDecision(
+            request_type="topic_research", jurisdiction="Québec",
+            decision=Decision.call_tool, next_tool="get_ccq_articles",
+            arguments={"articles": [101]},
+        ),
+    )
+
+    assert decision.arguments == {"articles": [101, 202, 303]}
 
 
 def test_online_precise_article_scenario_replaces_unverified_number():

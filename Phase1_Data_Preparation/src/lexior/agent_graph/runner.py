@@ -220,9 +220,7 @@ class GraphRunner:
                 query, thread_id=thread_id, history=history,
                 system_prompt=system_prompt)
 
-        translator = StreamTranslator(
-            thinking_preview_chars=getattr(
-                self.context.config, "thinking_preview_chars", None))
+        translator = StreamTranslator()
         final: dict[str, Any] = {}
         interrupted_question: Optional[str] = None
 
@@ -248,7 +246,6 @@ class GraphRunner:
             return
 
         answer = final.get("final_answer", "")
-        reasoning = final.get("final_reasoning_summary", "")
         if final.get("status") == "rejected":
             yield {"type": "token",
                    "content": ("Request could not be completed: "
@@ -257,8 +254,6 @@ class GraphRunner:
                    "thread_id": thread_id}
             return
 
-        if reasoning:
-            yield {"type": "thinking", "content": f"\n\n{reasoning}"}
         for start in range(0, len(answer), 20):
             yield {"type": "token", "content": answer[start:start + 20]}
         yield {"type": "done", "accepted": True, "thread_id": thread_id}

@@ -37,6 +37,7 @@ from lexior.agent_graph.nodes import (
     classify_failures as node_classify_failures,
     classify_follow_up as node_classify_follow_up,
     classify_request as node_classify_request,
+    validate_final as node_validate_final,
     validate_plan as node_validate_plan,
 )
 from lexior.agent_graph.state import initial_state
@@ -379,6 +380,25 @@ def test_writing_failure_returns_only_to_answer_repair(runner):
     assert ("repair_answer", "run_critics") in graph_edges
 
 
+def test_preflight_grounding_failure_reaches_answer_repair(runner):
+    state = initial_state(_scenario(), system_prompt="t")
+    state.update(
+        critic_results={
+            "legal": CriticResult(critic="legal", accepted=True, score=1.0),
+            "agentic": CriticResult(critic="agentic", accepted=True, score=1.0),
+        },
+        preflight_grounding_issues=[
+            "article 1457 : une condition citée n'est pas soutenue par le texte"
+        ],
+        repair_count=0,
+        max_repairs=1,
+    )
+
+    update = node_classify_failures.run(state, runner.context)
+
+    assert update["repair_from_node"] == "repair_answer"
+
+
 def test_jurisdiction_failure_returns_to_jurisdiction(runner):
     state = initial_state(_scenario(), system_prompt="t")
     state.update(
@@ -497,7 +517,178 @@ def test_follow_up_site_request_targets_current_question(runner):
     assert any("ne répète pas" in c for c in contract["consignes"])
 
 
+def test_follow_up_asking_what_articles_say_requests_their_exact_text(runner):
+    state = initial_state(
+        _scenario(user_query="que disent exactement ces deux articles"),
+        mode="live", system_prompt="t")
+    state["messages"] = [
+        Message(role=Role.system, content="t"),
+        Message(role=Role.user, content="Quel recours ai-je?"),
+        Message(role=Role.assistant,
+                content="Les articles 1457 et 1465 peuvent être pertinents."),
+        Message(role=Role.user, content="que disent exactement ces deux articles"),
+    ]
+    state["latest_user_message"] = "que disent exactement ces deux articles"
+
+    for module in (node_classify_request, node_classify_follow_up):
+        state.update(module.run(state, runner.context))
+
+    assert state["refers_to_previous_answer"] is True
+    assert state["requested_output_type"] == "article_text"
+
+
+def test_live_contract_authorizes_only_articles_reviewed_as_applicable(runner):
+    """An incomplete batch must not let its unreviewed articles reach writer."""
+    from lexior.services.assertion_grounding import ApplicabiliteArticle
+
+    class PartialReviewer:
+        @staticmethod
+        def disponible():
+            return True
+
+        @staticmethod
+        def selectionner_articles(*_args, **_kwargs):
+            return {
+                "1457": ApplicabiliteArticle("applicable"),
+                "1467": ApplicabiliteArticle("incompatible"),
+                "1474": ApplicabiliteArticle("incertain"),
+                # 1607 is absent: its batch was not reviewed.
+            }
+
+    state = initial_state(_scenario(), mode="live", system_prompt="t")
+    state.update(
+        tool_history=[ToolObservation(
+            tool_name="get_ccq_articles",
+            arguments={"articles": [1457, 1467, 1474, 1607]},
+            normalized_response=(
+                "Article 1457\nRegle generale.\n\n"
+                "Article 1467\nRuine d'un immeuble.\n\n"
+                "Article 1474\nFaute lourde.\n\n"
+                "Article 1607\nDefaut du debiteur."),
+            ok=True)],
+        usable_evidence=[0],
+    )
+    runner.context.services.assertion_grounding = PartialReviewer()
+
+    update = node_build_answer_contract.run(state, runner.context)
+
+    assert update["answer_contract"]["articles_retenus"] == ["1457"]
+
+
+def test_live_unsupported_grounding_verdict_uses_source_bounded_fallback(runner):
+    """A negative grounding verdict must never be silently ignored in live."""
+    from lexior.services.assertion_grounding import VerdictAffirmation
+
+    class RejectingGrounder:
+        @staticmethod
+        def verifier(*_args, **_kwargs):
+            return [VerdictAffirmation(
+                article="1457", affirmation="recours automatique",
+                soutenue=False, motif="la condition manque")]
+
+    state = initial_state(_scenario(), mode="live", system_prompt="t")
+    state.update(
+        tool_history=[ToolObservation(
+            tool_name="get_ccq_articles", arguments={"articles": [1457]},
+            normalized_response=(
+                "Article 1457\nToute personne doit respecter les regles de conduite."),
+            ok=True)],
+        final_answer="Selon l'article 1457, vous avez un recours automatique.",
+        answer_contract={
+            "filtre_articles_officiels": True,
+            "articles_retenus": ["1457"],
+        },
+    )
+    runner.context.services.assertion_grounding = RejectingGrounder()
+
+    update = node_validate_final.run(state, runner.context)
+
+    assert update["final_answer"].startswith("Je ne peux pas déterminer")
+    assert "Article 1457" in update["final_answer"]
+    assert update["deterministic_blockers"] == []
+
+
 # ── 16-17. JSONL intermédiaire compatible; ChatML reste un pas séparé ────
+
+
+def test_live_fallback_uses_contract_sources_not_invalid_draft_citation(runner):
+    """Le repli ne doit jamais reprendre la mauvaise citation du brouillon."""
+    from lexior.services.assertion_grounding import VerdictAffirmation
+
+    class RejectingGrounder:
+        @staticmethod
+        def verifier(*_args, **_kwargs):
+            return [VerdictAffirmation(
+                article="2396", affirmation="recours automatique",
+                soutenue=False, motif="article non applicable")]
+
+    state = initial_state(_scenario(), mode="live", system_prompt="t")
+    state.update(
+        tool_history=[ToolObservation(
+            tool_name="get_ccq_articles", arguments={"articles": [1457, 1465, 2396]},
+            normalized_response=(
+                "Article 1457\nRegle generale.\n\n"
+                "Article 1465\nFait autonome d'un bien.\n\n"
+                "Article 2396\nContrat d'assurance."),
+            ok=True)],
+        final_answer="Selon l'article 2396, vous avez un recours automatique.",
+        answer_contract={
+            "filtre_articles_officiels": True,
+            "articles_retenus": ["1457", "1465"],
+        },
+    )
+    runner.context.services.assertion_grounding = RejectingGrounder()
+
+    update = node_validate_final.run(state, runner.context)
+
+    assert "Article 1457" in update["final_answer"]
+    assert "Article 1465" in update["final_answer"]
+    assert "Article 2396" not in update["final_answer"]
+
+
+def test_live_fallback_without_retained_source_never_returns_technical_error(runner):
+    """Aucun article retenu : répondre prudemment plutôt que rejeter le chat."""
+    from lexior.services.assertion_grounding import VerdictAffirmation
+
+    class RejectingGrounder:
+        @staticmethod
+        def verifier(*_args, **_kwargs):
+            return [VerdictAffirmation(
+                article="2396", affirmation="recours automatique",
+                soutenue=False, motif="article non applicable")]
+
+    state = initial_state(_scenario(), mode="live", system_prompt="t")
+    state.update(
+        final_answer="Selon l'article 2396, vous avez un recours automatique.",
+        answer_contract={
+            "filtre_articles_officiels": True,
+            "articles_retenus": [],
+        },
+    )
+    runner.context.services.assertion_grounding = RejectingGrounder()
+
+    update = node_validate_final.run(state, runner.context)
+
+    assert update["final_answer"].startswith("Je ne peux pas")
+    assert "Article 2396" not in update["final_answer"]
+    assert update["deterministic_blockers"] == []
+
+
+def test_live_memory_rule_without_evidence_uses_safe_fallback(runner):
+    """Une conclusion de droit sans source est bloquée même sans article cité."""
+    state = initial_state(_scenario(), mode="live", system_prompt="t")
+    state.update(
+        final_answer=(
+            "La loi québécoise stipule que la responsabilité civile peut "
+            "être engagée en cas de négligence."),
+        answer_contract={"mode_de_reponse": "no_evidence"},
+    )
+
+    update = node_validate_final.run(state, runner.context)
+
+    assert update["final_answer"].startswith("Je ne peux pas")
+    assert "responsabilité civile peut être engagée" not in update["final_answer"]
+    assert update["deterministic_blockers"] == []
 
 
 def test_jsonl_intermediate_output_remains_compatible(catalog, tmp_path):

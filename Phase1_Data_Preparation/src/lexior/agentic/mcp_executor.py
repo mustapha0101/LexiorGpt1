@@ -78,7 +78,12 @@ def _text_content(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-def normalize_mcp_response(raw: Any, max_chars: int) -> tuple[str, list[str], list[str], bool]:
+def normalize_mcp_response(
+    raw: Any,
+    max_chars: int,
+    *,
+    strip_reader_content: bool = True,
+) -> tuple[str, list[str], list[str], bool]:
     jsonable = _jsonable(raw)
     text = _text_content(jsonable).replace("\r\n", "\n").strip()
     # Les chemins temporaires ne sont jamais propagés au dataset.
@@ -86,7 +91,11 @@ def normalize_mcp_response(raw: Any, max_chars: int) -> tuple[str, list[str], li
     # Certains serveurs terminent leur réponse par des offres adressées au
     # lecteur (« Si vous souhaitez, je peux… ») : un modèle entraîné là-dessus
     # apprendrait qu'un outil de recherche lui pose des questions.
-    text = strip_reader_directed(text)
+    # Le texte des articles est conservé intact jusqu'au vérificateur : le
+    # supprimer ici ferait disparaître l'indice d'une réponse MCP contaminée
+    # avant que ``_check_qc_article`` puisse la rejeter.
+    if strip_reader_content:
+        text = strip_reader_directed(text)
     text = normalize_soquij_urls(text)
     structured_urls: list[str] = []
     structured_citations: list[str] = []
@@ -318,7 +327,11 @@ class MCPExecutor:
                 if call.name == "search_legal_documents" else raw
             )
             normalized, urls, citations, truncated = normalize_mcp_response(
-                normalized_raw, self.max_response_chars)
+                normalized_raw,
+                self.max_response_chars,
+                strip_reader_content=(
+                    call.name not in {"get_ccq_articles", "get_cpc_articles"}),
+            )
             obs = ToolObservation(tool_name=call.name, server=spec.server,
                                   arguments=call.arguments, raw_response=_jsonable(raw),
                                   normalized_response=normalized, source_urls=urls,

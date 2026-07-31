@@ -121,7 +121,7 @@ if _CFG.rag.enabled:
             _RAG = LegalRAG.load(
                 _CFG.rag,
                 OpenAIEmbedder(_CFG.rag, allow_remote_calls=True),
-                reranker=_TEACHER,
+                reranker=_CRITIC,
             )
     except Exception as exc:
         print(f"[api] RAG indisponible: {type(exc).__name__}", flush=True)

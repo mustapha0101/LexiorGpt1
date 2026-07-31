@@ -11,6 +11,8 @@ from .schemas import ResearchState
 
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.I | re.S)
+_ARTICLE_BLOCK_RE = re.compile(
+    r"(?ms)^\s*Article\s+(\d{1,4}(?:\.\d+)?)\s*\n(.*?)(?=^\s*Article\s+\d{1,4}(?:\.\d+)?\s*\n|\Z)")
 PRECISE_ARTICLE_TYPES = {"exact_text_retrieval"}
 ARTICLE_FETCH_TOOLS = {"get_ccq_articles", "get_cpc_articles"}
 RETRIEVAL_ONLY_TOOLS = {"semantic_search_ccq", "semantic_search_cpc"}
@@ -27,6 +29,16 @@ def normalize_final_answer(text: str) -> str:
         if set(payload) == {"answer"} and isinstance(payload["answer"], str):
             return payload["answer"].strip()
     return cleaned
+
+
+def _articles_retenus(contenu: str, numeros: set[str]) -> str:
+    """Ne transmet au rédacteur que les blocs officiels retenus par le juge."""
+    blocs = _ARTICLE_BLOCK_RE.findall(contenu or "")
+    if not blocs:
+        return contenu
+    return "\n\n".join(
+        f"Article {numero}\n{texte.strip()}"
+        for numero, texte in blocs if numero in numeros).strip()
 
 
 class TrajectoryAgent:
@@ -50,8 +62,13 @@ class TrajectoryAgent:
         utilisables, type de sortie demandé. Injecté dans le prompt du
         rédacteur; ignoré en mode offline.
         """
-        official_text = self._official_article_text(state)
-        if state.scenario.request_type in PRECISE_ARTICLE_TYPES and official_text:
+        exact_article_text = (
+            state.scenario.request_type in PRECISE_ARTICLE_TYPES
+            or (contract or {}).get("type_de_sortie") == "article_text"
+        )
+        official_text = self._official_article_text(
+            state, allow_article_fetch=exact_article_text)
+        if exact_article_text and official_text:
             art_nums = ", ".join(
                 str(a) for o in state.tool_history
                 if o.ok and o.tool_name in ARTICLE_FETCH_TOOLS
@@ -74,11 +91,36 @@ class TrajectoryAgent:
             return self._offline_answer(state)
         if self.client is None:
             raise RuntimeError("client Teacher requis hors mode offline")
-        evidence = [{
-            "tool": o.tool_name, "content": o.normalized_response,
-            "urls": o.source_urls, "citations": o.citations,
-            "truncated": o.truncated, "error": o.error,
-        } for o in state.tool_history if o.tool_name not in RETRIEVAL_ONLY_TOOLS]
+        usable_indices = None
+        if contract is not None:
+            usable_indices = {
+                index for index in contract.get("indices_preuves_utilisables", [])
+                if isinstance(index, int)
+            }
+        filtre_articles = bool(contract and contract.get(
+            "filtre_articles_officiels"))
+        numeros_retenus = {
+            str(numero) for numero in (contract or {}).get(
+                "articles_retenus", [])
+        }
+        evidence = []
+        for index, observation in enumerate(state.tool_history):
+            if (observation.tool_name in RETRIEVAL_ONLY_TOOLS
+                    or (usable_indices is not None and index not in usable_indices)):
+                continue
+            content = observation.normalized_response
+            if (filtre_articles
+                    and observation.tool_name in ARTICLE_FETCH_TOOLS):
+                content = _articles_retenus(content, numeros_retenus)
+                if not content:
+                    continue
+            evidence.append({
+                "tool": observation.tool_name, "content": content,
+                "urls": observation.source_urls,
+                "citations": observation.citations,
+                "truncated": observation.truncated,
+                "error": observation.error,
+            })
         prompt = {
             "question": state.scenario.user_query,
             "messages_utilisateur": [
@@ -122,24 +164,44 @@ class TrajectoryAgent:
         return thinking, answer
 
     def repair(self, state: ResearchState, answer: str,
-               thinking: str, instructions: list[str]) -> tuple[str, str]:
+               thinking: str, instructions: list[str],
+               contract: dict | None = None) -> tuple[str, str]:
         """Retourne (thinking, answer) après réparation."""
-        official_text = self._official_article_text(state)
-        if state.scenario.request_type in PRECISE_ARTICLE_TYPES and official_text:
+        exact_article_text = (
+            state.scenario.request_type in PRECISE_ARTICLE_TYPES
+            or (contract or {}).get("type_de_sortie") == "article_text"
+        )
+        official_text = self._official_article_text(
+            state, allow_article_fetch=exact_article_text)
+        if exact_article_text and official_text:
             return thinking, official_text
         if self.offline or not self.client:
             return thinking, answer
+        filtre_articles = bool(contract and contract.get(
+            "filtre_articles_officiels"))
+        numeros_retenus = {
+            str(numero) for numero in (contract or {}).get(
+                "articles_retenus", [])
+        }
+        sources = []
+        for observation in state.tool_history:
+            if observation.tool_name in RETRIEVAL_ONLY_TOOLS:
+                continue
+            content = observation.normalized_response
+            if (filtre_articles
+                    and observation.tool_name in ARTICLE_FETCH_TOOLS):
+                content = _articles_retenus(content, numeros_retenus)
+                if not content:
+                    continue
+            sources.append(content)
         result = self.client.complete("repair", [
             {"role": "system", "content": (
                 self._system_prompt() +
                 "\nRépare sans ajouter de fait, source, URL, article ou décision."
             )},
             {"role": "user", "content": json.dumps({"answer": answer, "instructions": instructions,
-                                                     "sources": [
-                                                         o.normalized_response
-                                                         for o in state.tool_history
-                                                         if o.tool_name not in RETRIEVAL_ONLY_TOOLS
-                                                     ]}, ensure_ascii=False)},
+                                                     "sources": sources},
+                                ensure_ascii=False)},
         ], temperature=0.0)
         repaired_thinking, repaired_answer = self._split_thinking_answer(result)
         repaired_answer = normalize_final_answer(repaired_answer)
@@ -220,10 +282,11 @@ class TrajectoryAgent:
         return f"{official_text}\n\nExplication\n{explanation}"
 
     @staticmethod
-    def _official_article_text(state: ResearchState) -> str:
-        if state.scenario.request_type not in (
-            PRECISE_ARTICLE_TYPES | {"article_explanation"}
-        ):
+    def _official_article_text(state: ResearchState,
+                               *, allow_article_fetch: bool = False) -> str:
+        if (not allow_article_fetch
+                and state.scenario.request_type not in (
+                    PRECISE_ARTICLE_TYPES | {"article_explanation"})):
             return ""
         for observation in reversed(state.tool_history):
             if (observation.tool_name in ARTICLE_FETCH_TOOLS and observation.ok and

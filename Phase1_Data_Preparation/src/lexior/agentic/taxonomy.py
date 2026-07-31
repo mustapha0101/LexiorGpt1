@@ -309,7 +309,7 @@ REQUEST_TYPES: dict[str, RequestTypeSpec] = {rt.name: rt for rt in [
         description="Comparaison entre le régime québécois et le régime fédéral "
                     "ou entre juridictions.",
         expected_route=_route(
-            ("semantic_search_ccq", True),
+            "semantic_search_ccq",
             "get_ccq_articles",
             "search_legal_documents",
             ("fetch_document", True, "federal document identified"),

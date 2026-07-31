@@ -13,7 +13,7 @@ from typing import Any
 
 from lexior.services.evidence import EvidenceLevel
 from lexior.services.provenance import (
-    a_une_provenance, numero_demande, reponses_reussies,
+    a_une_provenance, numeros_demandes, reponses_reussies,
 )
 
 from ..context import GraphContext
@@ -31,11 +31,23 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     prior = state.get("last_tool_assessment") or {}
     # Un numéro d'article dont la provenance est établie échappe au veto
     # lexical : sa pertinence a été jugée quand le numéro a été produit.
-    numero = numero_demande(observation.tool_name, observation.arguments)
-    provenance = numero is not None and a_une_provenance(
-        numero,
-        state.get("active_issue") or state.get("latest_user_message", ""),
-        reponses_reussies(tool_history, avant=observation))
+    # Les appels groupés du MCP portent ``articles: [...]`` : tous les
+    # numéros doivent être vérifiés, pas seulement le premier.
+    numeros = numeros_demandes(observation.tool_name, observation.arguments)
+    # En conversation live, les outils du tour précédent ne sont pas
+    # nécessairement réinjectés. Une demande comme « que disent ces deux
+    # articles ? » s'appuie alors légitimement sur les numéros cités dans la
+    # réponse précédente, qui fait partie de l'historique conversationnel.
+    reponses_precedentes = reponses_reussies(tool_history, avant=observation)
+    reponses_precedentes.extend(
+        message.content for message in state.get("messages", [])
+        if getattr(message.role, "value", message.role) == "assistant")
+    provenance = bool(numeros) and all(
+        a_une_provenance(
+            numero,
+            state.get("active_issue") or state.get("latest_user_message", ""),
+            reponses_precedentes)
+        for numero in numeros)
     assessment = ctx.services.verification.assess(
         observation,
         prior.get("verifier_issues"),

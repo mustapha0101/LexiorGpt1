@@ -19,6 +19,10 @@ from __future__ import annotations
 from typing import Any
 
 from lexior.services.modes import is_live
+from lexior.services.assertion_grounding import (
+    articles_incompatibles_deterministes,
+    textes_recuperes,
+)
 
 from ..context import GraphContext
 from ..state import LexiorState
@@ -66,6 +70,71 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         if 0 <= i < len(tool_history)
     ]
 
+    # Search returns candidates and official retrieval can return several
+    # articles. Before substantive writing, an independent reviewer compares
+    # their conditions with the facts. In live mode, a source that was not
+    # reviewed is not authorized as a legal basis.
+    textes_officiels = textes_recuperes(tool_history)
+    texte_exact_demande = (
+        state.get("requested_output_type") == "article_text"
+        or state["scenario"].request_type == "exact_text_retrieval"
+    )
+    faits = state.get("active_issue") or state.get("latest_user_message", "")
+    service_selection = ctx.services.assertion_grounding
+    selection_disponible = (
+        bool(textes_officiels)
+        and not texte_exact_demande
+        and service_selection.disponible()
+    )
+    incompatibles_deterministes = (
+        articles_incompatibles_deterministes(textes_officiels, faits=faits)
+        if not texte_exact_demande else {})
+    selection_articles = (
+        service_selection.selectionner_articles(textes_officiels, faits=faits)
+        if selection_disponible else {})
+    filtre_articles_effectue = bool(
+        incompatibles_deterministes or selection_disponible)
+    if texte_exact_demande:
+        # A request for exact text reproduces the sources without drawing a
+        # legal conclusion, so it does not need the applicability filter.
+        articles_retenus = list(textes_officiels)
+    elif selection_disponible:
+        # Allowlist: no verdict means the batch could not be reviewed, not
+        # that the article is applicable.
+        # In a fact-specific case analysis, an ``incertain`` article has a
+        # material condition missing from the user's facts. It cannot support
+        # a legal conclusion until that fact is established. Topic research
+        # may still retain such a source to describe its conditional scope.
+        statuts_autorises = (
+            {"applicable"}
+            if (state.get("request_type") or state["scenario"].request_type)
+            == "case_analysis"
+            else {"applicable", "incertain"}
+        )
+        articles_retenus = [
+            numero for numero, verdict in selection_articles.items()
+            if (numero not in incompatibles_deterministes
+                and verdict.statut in statuts_autorises)
+        ]
+    else:
+        # Offline mode does not simulate an LLM relevance decision. The
+        # deterministic exclusions remain active.
+        articles_retenus = [
+            numero for numero in textes_officiels
+            if numero not in incompatibles_deterministes
+        ]
+    if filtre_articles_effectue and not articles_retenus:
+        usable_idx = [
+            index for index in usable_idx
+            if not (0 <= index < len(tool_history)
+                    and tool_history[index].tool_name in {
+                        "get_ccq_articles", "get_cpc_articles"})
+        ]
+        usable_tools = [
+            tool_history[i].tool_name for i in usable_idx
+            if 0 <= i < len(tool_history)
+        ]
+
     unusable = [
         {"tool": e.tool_name, "status": e.result_status}
         for e in state.get("search_evaluations", [])
@@ -73,7 +142,10 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     ]
 
     attempted_research = bool(tool_history)
-    has_usable = bool(usable_entries) or bool(usable_idx)
+    # ``usable_entries`` reste l'historique de classification; ``usable_idx``
+    # est la liste effectivement autorisée dans le contrat, après le filtre
+    # d'applicabilité des articles officiels.
+    has_usable = bool(usable_idx)
     needs_evidence = (
         state.get("request_type", "")
         in _SUBSTANTIVE_TYPES_NEEDING_EVIDENCE)
@@ -100,6 +172,16 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             "AUCUNE preuve utilisable n'a été récupérée : n'affirme "
             "aucune règle de fond; explique la limite de recherche et "
             "oriente vers les sources officielles (CanLII, SOQUIJ).")
+    if filtre_articles_effectue:
+        if articles_retenus:
+            directives.append(
+                "Les textes officiels ont été comparés aux faits : utilise "
+                "uniquement les articles retenus dans le contrat et exprime "
+                "comme condition tout fait encore incertain.")
+        else:
+            directives.append(
+                "Les textes officiels récupérés sont incompatibles avec les "
+                "faits connus : n'en déduis aucune règle de fond.")
 
     # Coverage gap directives.
     for gap in coverage_gaps:
@@ -134,7 +216,15 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "juridiction_verrouillee": state.get("jurisdiction_locked", False),
         "mode_de_reponse": answer_mode,
         "preuves_utilisables": usable_tools,
+        # Indices, et non seulement noms d'outils : le rédacteur peut ainsi
+        # recevoir exactement les observations classées utilisables.
+        "indices_preuves_utilisables": [
+            index for index in usable_idx
+            if isinstance(index, int) and 0 <= index < len(tool_history)
+        ],
         "preuves_inutilisables": unusable,
+        "filtre_articles_officiels": filtre_articles_effectue,
+        "articles_retenus": articles_retenus,
         "sources_alternatives": alternatives_for_contract,
         "lacunes_de_couverture": [g for g in coverage_gaps],
         "consignes": directives,

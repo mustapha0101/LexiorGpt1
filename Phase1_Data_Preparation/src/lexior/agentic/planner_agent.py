@@ -17,7 +17,7 @@ from lexior.services.provenance import (
     a_une_provenance, numero_demande, reponses_reussies,
 )
 from .schemas import Decision, DecisionTrace, PlannerDecision, ResearchState
-from .tool_catalog import ToolCatalog
+from .tool_catalog import MAX_ARTICLES_PAR_APPEL, ToolCatalog
 from .validators import validate_next_action, validate_planner_decision
 
 ARTICLE_RE = re.compile(r"\b(?:article\s+)?(\d{1,4}(?:\.\d+)?)\b", re.I)
@@ -210,6 +210,8 @@ class PlannerAgent:
 
     def _raise_if_invalid(self, state: ResearchState,
                           decision: PlannerDecision) -> PlannerDecision:
+        self._attach_semantic_legal_terms(decision)
+        self._attach_retrieved_candidates(state, decision)
         errors = validate_planner_decision(decision, self.catalog)
         if (decision.decision == Decision.call_tool and decision.next_tool
                 and not self.chat_mode):
@@ -239,6 +241,72 @@ class PlannerAgent:
                 )
             raise ValueError("décision Planner invalide : " + "; ".join(errors))
         return decision
+
+    @staticmethod
+    def _attach_semantic_legal_terms(decision: PlannerDecision) -> None:
+        """Recopie la qualification du plan dans l'appel de recherche.
+
+        ``legal_terms`` appartient au schéma du Planner et au schéma de
+        l'outil. Les deux emplacements représentent la même information :
+        le Planner peut la fournir au niveau de sa décision, alors que
+        l'exécuteur ne lit que les arguments de l'outil. Cette normalisation
+        ne crée aucune qualification; en son absence, la validation du
+        contrat demande au modèle de corriger sa décision.
+        """
+        if decision.next_tool not in {
+                "semantic_search_ccq", "semantic_search_cpc"}:
+            return
+        terms = (decision.legal_terms or "").strip()
+        if not terms:
+            return
+        arguments = dict(decision.arguments or {})
+        if not str(arguments.get("legal_terms") or "").strip():
+            arguments["legal_terms"] = terms
+            decision.arguments = arguments
+
+    @staticmethod
+    def _attach_retrieved_candidates(state: ResearchState,
+                                     decision: PlannerDecision) -> None:
+        """Transforme des candidats sémantiques en textes à vérifier.
+
+        Une recherche sémantique ne prouve rien; son résultat est un ensemble
+        de candidats. Lorsque le tour suivant demande leurs textes officiels,
+        conserver uniquement le premier rang ferait perdre les autres pistes
+        avant toute lecture de la loi. Cette règle transporte donc les numéros
+        réellement renvoyés par la dernière recherche vers ``get_*_articles``
+        sans décider de leur pertinence juridique.
+        """
+        fetch_to_search = {
+            "get_ccq_articles": "semantic_search_ccq",
+            "get_cpc_articles": "semantic_search_cpc",
+        }
+        search_tool = fetch_to_search.get(decision.next_tool or "")
+        if not search_tool:
+            return
+        latest_search = next(
+            (observation for observation in reversed(state.tool_history)
+             if observation.tool_name == search_tool and observation.ok),
+            None,
+        )
+        if latest_search is None:
+            return
+        raw_numbers = ARTICLE_LABEL_RE.findall(
+            latest_search.normalized_response or "")
+        numbers: list[int | float] = []
+        seen: set[float] = set()
+        for raw in raw_numbers:
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            numbers.append(int(value) if value.is_integer() else value)
+            if len(numbers) >= MAX_ARTICLES_PAR_APPEL:
+                break
+        if numbers:
+            decision.arguments = {"articles": numbers}
 
     def _guard_clarification(self, state: ResearchState,
                              decision: PlannerDecision) -> PlannerDecision:
@@ -799,7 +867,8 @@ class PlannerAgent:
                                              need="sources prévues récupérées",
                                              next_action="final_answer"))
         tool = route[len(state.tool_history)]
-        args = self._arguments(tool, state)
+        terms = self._offline_legal_terms(state)
+        args = self._arguments(tool, state, legal_terms=terms)
         if args is None:
             return PlannerDecision(
                 request_type=request_type, jurisdiction=jurisdiction,
@@ -820,6 +889,33 @@ class PlannerAgent:
             thinking_text=thinking,
             decision_trace=DecisionTrace(request_type=request_type, jurisdiction=jurisdiction,
                                          need=f"source via {tool}", next_action=f"call_tool:{tool}"))
+
+    @staticmethod
+    def _offline_legal_terms(state: ResearchState) -> str:
+        """Qualification disponible sans modèle dans un scénario synthétique.
+
+        Le mode hors ligne sert à vérifier les routes et ne doit ni inventer
+        de règle de droit, ni inscrire un numéro d'article dans la recherche.
+        Il réutilise seulement le domaine et l'intention de source déclarés
+        par le scénario, qui décrivent déjà le type de recherche attendu.
+        """
+        scenario = state.scenario
+        parts = [
+            str(getattr(scenario, "legal_domain", "") or "").strip(),
+            *(str(value).strip() for value in
+              (getattr(scenario, "source_intent", []) or []) if str(value).strip()),
+        ]
+        terms = ", ".join(dict.fromkeys(part for part in parts if part))
+        prior_searches = sum(
+            observation.tool_name in {"semantic_search_ccq", "semantic_search_cpc"}
+            for observation in state.tool_history)
+        if prior_searches:
+            # Le marqueur distingue une nouvelle tentative pour le cache. Il
+            # ne qualifie pas juridiquement les faits et ne modifie pas les
+            # candidats d'un RAG réel : le mode offline ne fait ici que
+            # rejouer les routes synthétiques sans appel de modèle.
+            return f"{terms}, analyse complémentaire"
+        return terms
 
     @staticmethod
     def _generate_offline_thinking(tool: str, args: dict, state: ResearchState) -> str:
@@ -931,7 +1027,8 @@ class PlannerAgent:
                 o for o in state.tool_history
                 if o.tool_name == search_tool
             ]
-            if searches and self._no_result(searches[0].normalized_response):
+            if searches and (not searches[0].ok or self._no_result(
+                    searches[0].normalized_response)):
                 route.insert(route.index(search_tool) + 1, search_tool)
         _SEARCH_TO_FETCH = {
             "semantic_search_ccq": "get_ccq_articles",
@@ -984,9 +1081,6 @@ class PlannerAgent:
                 c for c in candidates if float(c) not in already_fetched
             ]
             if not candidates:
-                fallback = self._topic_article(tool, query, already_fetched)
-                if fallback is not None:
-                    return fallback
                 return None
             values = [float(value) for value in candidates[:3]]
             primary = values[0]
@@ -1161,59 +1255,6 @@ class PlannerAgent:
             elif getattr(state.scenario, "planned_failure_mode", None) == "truncated_source":
                 args.update({"start_char": 0, "end_char": 6000})
             return args
-        return None
-
-    _CCQ_TOPIC_ARTICLES: dict[tuple[str, ...], int] = {
-        ("vice caché", "vice", "garantie de qualité"): 1726,
-        ("responsab", "préjudice", "dommage"): 1457,
-        ("contrat", "obligation"): 1375,
-        ("vente", "vendeur", "acheteur"): 1708,
-        ("bail", "locataire", "loyer", "logement"): 1851,
-        ("mandat", "mandataire"): 2130,
-        ("succession", "héritier", "testament"): 613,
-        ("hypothèque", "sûreté"): 2660,
-        ("prescription", "délai"): 2875,
-        ("mariage", "divorce", "séparation"): 392,
-        ("propriété", "bien", "immeuble"): 947,
-        ("tutelle", "mineur", "curatelle", "protection"): 177,
-        ("société", "associé", "entreprise"): 2186,
-        ("assurance",): 2389,
-        ("donation", "don"): 1806,
-        ("servitude",): 1177,
-        ("usufruit",): 1120,
-        ("copropriété", "condo"): 1038,
-        ("travail", "salarié", "employeur"): 2085,
-    }
-
-    _CPC_TOPIC_ARTICLES: dict[tuple[str, ...], int] = {
-        ("signif", "notifi"): 109,
-        ("injonction",): 509,
-        ("appel",): 351,
-        ("exécution",): 681,
-        ("médiation", "conférence"): 161,
-        ("demande", "action", "recours"): 141,
-        ("preuve", "témoin"): 251,
-        ("saisie",): 696,
-    }
-
-    _CCQ_DEFAULT_ARTICLE = 1375
-    _CPC_DEFAULT_ARTICLE = 1
-
-    @classmethod
-    def _topic_article(cls, tool: str, query: str,
-                       already_fetched: set[float]) -> Optional[dict]:
-        """Fallback article number from query topic when search failed."""
-        folded = query.casefold()
-        is_ccq = "ccq" in tool
-        topics = cls._CCQ_TOPIC_ARTICLES if is_ccq else cls._CPC_TOPIC_ARTICLES
-        for markers, article in topics.items():
-            if float(article) in already_fetched:
-                continue
-            if any(m in folded for m in markers):
-                return {"start_article": article}
-        default = cls._CCQ_DEFAULT_ARTICLE if is_ccq else cls._CPC_DEFAULT_ARTICLE
-        if float(default) not in already_fetched:
-            return {"start_article": default}
         return None
 
     @classmethod

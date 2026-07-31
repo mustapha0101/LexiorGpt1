@@ -3,7 +3,9 @@ generation:
   language: fr
   target_accepted: 100
   max_tool_calls: 4
-  max_tool_response_chars: 6000
+  # Une récupération groupée contient au plus 20 articles; le contexte doit
+  # pouvoir conserver intégralement leurs textes officiels pour les vérifier.
+  max_tool_response_chars: 14000
   near_duplicate_jaccard: 0.90
   prompt_version: agentic-4.0-intermediate
   max_search_reformulations: 1
@@ -56,7 +58,10 @@ teacher:
 
 critic:
   base_url: ""
-  model: ""
+  # Les contrôles de pertinence, de causalité et de grounding déterminent ce
+  # qui peut être livré : ils utilisent un modèle de revue distinct du modèle
+  # de rédaction plus économique.
+  model: "gpt-4o"
   temperature: 0.0
 
 # Index local des articles CCQ/CPC. Les embeddings sont calculés une fois,
@@ -70,11 +75,16 @@ rag:
   embedding_model: text-embedding-3-small
   embedding_batch_size: 128
   embedding_price_per_1m_usd: 0.02
-  top_k: 8
+  # La recherche et la récupération sont bornées à la même largeur : le
+  # filtre d'applicabilité peut donc comparer toutes les pistes avant d'en
+  # écarter une, y compris les règles générales moins lexicalement proches.
+  top_k: 20
   candidate_k: 40
   dense_weight: 0.60
   llm_rerank_enabled: true
-  llm_rerank_k: 10
+  # Le relecteur juridique examine une liste large, puis réordonne une
+  # sélection bornée; cela préserve les règles générales derrière les faits.
+  llm_rerank_k: 40
   # Planchers de pertinence sur l'echelle absolue (0.0 = desactive).
   # Calibres le 2026-07-25 sur tests/fixtures/retrieval_gold.jsonl.
   # min_dense_score 0.40 : ameliore le classement (MRR 0.340 -> 0.397,
@@ -114,13 +124,6 @@ paths:
   # désactiverait l'enregistrement en silence, et on poserait des questions
   # sans rien garder sans s'en apercevoir.
   chat_sessions: "data/chat_sessions"
-
-chat:
-  # Longueur du raisonnement diffusé à l'interface. Réglage d'AFFICHAGE :
-  # le thinking_text produit par le modèle n'est pas modifié.
-  # Équivalent env : LEXIOR_THINKING_PREVIEW_CHARS. 280 coupait un
-  # raisonnement au milieu.
-  thinking_preview_chars: 4000
 
 split:
   train: 0.90

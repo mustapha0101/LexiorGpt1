@@ -74,7 +74,8 @@ _CATEGORY_PATTERNS: list[tuple[str, re.Pattern]] = [
         re.I)),
     ("grounding", re.compile(
         r"URL absente|citation absente|article .* absent|"
-        r"certitude non justifi[ée]e|source r[ée]cup[ée]r[ée]e|invent[ée]",
+        r"certitude non justifi[ée]e|source r[ée]cup[ée]r[ée]e|invent[ée]|"
+        r"non soutenu|n'est pas soutenu|ungrounded_article",
         re.I)),
 ]
 
@@ -158,8 +159,8 @@ class RepairService:
     # ── Réparation de la rédaction ───────────────────────────────────────
 
     def repair_answer(self, state: ResearchState, mode: str, answer: str,
-                      thinking: str,
-                      instructions: list[str]) -> tuple[str, str]:
+                      thinking: str, instructions: list[str],
+                      contract: dict | None = None) -> tuple[str, str]:
         writer: TrajectoryAgent = self.answer_service.writer_for(
             normalize_mode(mode))
-        return writer.repair(state, answer, thinking, instructions)
+        return writer.repair(state, answer, thinking, instructions, contract)

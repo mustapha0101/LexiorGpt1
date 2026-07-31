@@ -6,16 +6,10 @@
 preuves. Jamais que ce qui est affirmé à son sujet corresponde à ce que
 l'article dit.
 
-Le trou est démontré. Sur une question de branches d'arbre, le modèle a
-inventé le contenu des articles 984, 985 et 986 AVANT de les lire, a récupéré
-leur vrai texte, et a gardé son invention :
-
-    « les fruits qui tombent d'un arbre appartiennent au propriétaire de
-      l'arbre, ce qui souligne la responsabilité du propriétaire en cas de
-      dommages »
-
-La première moitié est exacte, la seconde ne découle pas du texte. Le numéro
-étant bien dans les preuves, la trajectoire a été acceptée.
+Le trou est démontré lorsqu'un modèle conserve une conséquence juridique
+inventée après avoir récupéré le texte officiel. Vérifier uniquement que le
+numéro de disposition est présent dans les preuves ne suffit pas : il faut
+vérifier le lien entre l'affirmation et les conditions du texte.
 
 Ce module pose au modèle la seule question qui compte : *ce texte-ci
 soutient-il cette affirmation-là*. Pas si le numéro est le bon, pas si
@@ -29,6 +23,7 @@ Laisser passer faute d'avoir pu vérifier reviendrait à ne pas vérifier.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -40,6 +35,17 @@ _RE_CITATION = re.compile(
 _RE_AUTRES_NUMEROS = re.compile(r"\d{1,4}(?:\.\d+)?")
 # Fin de phrase : point, point-virgule ou saut de ligne.
 _RE_PHRASE = re.compile(r"[^.;\n]+[.;\n]?")
+_FAIT_DEJA_REALISE_RE = re.compile(
+    r"\b(?:deja|a\s+(?:cause|subi|detruit|endommage)|est\s+"
+    r"(?:survenu|tombe|arrive)|s['']est\s+(?:produit|effondre)|"
+    r"has\s+(?:occurred|caused)|was\s+(?:damaged|destroyed))\b", re.I)
+_MESURE_PREVENTIVE_RE = re.compile(
+    r"\b(?:menace|risque|susceptible|prevenir|prevention|eviter|empecher|"
+    r"avant\s+que|may\s+fall|threatens?|prevent)\b", re.I)
+_REPARATION_RE = re.compile(
+    r"\b(?:repar(?:er|ation)|indemnis(?:er|ation)|dedommag|rembours|"
+    r"prejudice|dommages?|compensat(?:ion|e)|repair|compensat)\b", re.I)
+_ARTICLE_SELECTION_BATCH_SIZE = 8
 
 _SYSTEME = (
     "On te donne le TEXTE OFFICIEL d'un ou plusieurs articles, les FAITS "
@@ -53,8 +59,13 @@ _SYSTEME = (
     "2. elle énonce une conséquence, une condition ou une portée absente du "
     "texte ;\n"
     "3. elle applique un article dont les CONDITIONS ne correspondent pas aux "
-    "faits — un article qui vise un arbre « qui MENACE de tomber » ne "
-    "s'applique pas à un arbre DÉJÀ tombé.\n"
+    "faits — par exemple une disposition conditionnée à un événement futur "
+    "alors que les faits indiquent que cet événement est déjà survenu.\n"
+    "\n"
+    "Une règle générale peut soutenir une application CONDITIONNELLE même si "
+    "elle ne répète pas littéralement l'objet ou l'événement décrit par la "
+    "personne. Ne l'écarte pas pour cette seule absence de mots identiques si "
+    "la réponse expose les conditions du texte comme restant à établir.\n"
     "\n"
     "Ne relève PAS :\n"
     "- une omission : on ne juge pas si la réponse est complète ;\n"
@@ -72,6 +83,44 @@ _SYSTEME = (
     'exacte de la réponse", "motif": "une phrase"}]}. Liste vide si tout est '
     "soutenu.")
 
+_SELECTION_SYSTEME = (
+    "On te donne les FAITS décrits par une personne et le TEXTE OFFICIEL de "
+    "plusieurs articles. Évalue chaque article seulement à partir de son "
+    "texte, sans règle mémorisée et sans choisir l'article qui serait le plus "
+    "complet en général.\n\n"
+    "Pour chaque article, donne un statut :\n"
+    "- applicable : une règle opérante du texte vise le même événement et "
+    "le même objet que la demande, et ses conditions exprimées sont "
+    "compatibles avec les faits;\n"
+    "- incertain : un fait nécessaire manque ou demeure ambigu, mais une "
+    "règle opérante vise déjà le même événement et le même objet;\n"
+    "- incompatible : aucune règle opérante du texte ne vise l'événement ou "
+    "l'objet de la demande, ou une condition exprimée contredit les faits.\n\n"
+    "N'utilise pas « incertain » pour conserver un texte qui porte sur une "
+    "situation différente. Une simple proximité de vocabulaire, de personnes "
+    "ou de lieux ne rend pas un article applicable. Une mesure de prévention "
+    "d'un dommage éventuel ne répond pas, à elle seule, à une demande de "
+    "réparation d'un dommage déjà réalisé. Compare aussi la chaîne causale : "
+    "le bien ou le fait que le texte désigne comme CAUSE doit correspondre à "
+    "la cause décrite dans les faits; le seul fait que le bien endommagé soit "
+    "semblable ne suffit pas. Pour chaque article, indique aussi la "
+    "cause_du_texte et la cause_des_faits. Mets cause_compatible à false si "
+    "le texte désigne une cause concrète différente; mets-la à true si elle "
+    "correspond ou si la règle ne vise qu'une cause juridique générale. Un "
+    "statut applicable est interdit lorsque cause_compatible vaut false. "
+    "Compare enfin l'OPÉRATION juridique : le texte doit répondre à la "
+    "question effectivement posée. N'utilise pas « incertain » pour une "
+    "exception, une défense ou une limitation qui ne devient pertinente que "
+    "si un nouveau fait ou une nouvelle prétention, absents de la demande, "
+    "survenait plus tard.\n\n"
+    "Un article applicable ou incertain ne permet pas d'affirmer une issue "
+    "certaine : les conditions non établies doivent rester conditionnelles. "
+    "Réponds uniquement par {\"articles\":[{\"article\":\"numéro\","
+    "\"cause_du_texte\":\"...\",\"cause_des_faits\":\"...\","
+    "\"cause_compatible\":true,\"statut\":\"applicable|incertain|incompatible\","
+    "\"motif\":\"une phrase\"}]}. Chaque article fourni doit apparaître "
+    "exactement une fois.")
+
 
 @dataclass
 class VerdictAffirmation:
@@ -87,6 +136,52 @@ class VerdictAffirmation:
                     f"({self.motif})")
         return (f"article {self.article} : « {self.affirmation[:120]} » "
                 f"n'est pas soutenu par le texte — {self.motif}")
+
+
+@dataclass(frozen=True)
+class ApplicabiliteArticle:
+    """Compatibilité factuelle d'un texte officiel avant sa rédaction."""
+
+    statut: str
+    motif: str = ""
+
+
+def _prevention_incompatible_avec_fait_realise(texte: str, faits: str) -> bool:
+    """Écarte une règle seulement préventive après un dommage accompli.
+
+    C'est un contrôle de temporalité commun à toute disposition : il ne
+    dépend ni d'un article ni d'un type de bien. Un texte qui prévoit aussi
+    la réparation demeure disponible pour le juge de pertinence.
+    """
+    def normaliser(value: str) -> str:
+        decomposed = unicodedata.normalize("NFKD", value or "")
+        return "".join(char for char in decomposed
+                       if not unicodedata.combining(char)).casefold()
+
+    texte_normalise = normaliser(texte)
+    faits_normalises = normaliser(faits)
+    return bool(
+        _FAIT_DEJA_REALISE_RE.search(faits_normalises)
+        and _MESURE_PREVENTIVE_RE.search(texte_normalise)
+        and not _REPARATION_RE.search(texte_normalise)
+    )
+
+
+def articles_incompatibles_deterministes(
+        textes: dict[str, str], faits: str = "") -> dict[str, ApplicabiliteArticle]:
+    """Exclut les incompatibilitÃ©s temporelles lisibles sans modÃ¨le.
+
+    Cette garantie reste active si le relecteur LLM est indisponible ou ne
+    parvient pas Ã  classifier toute une grande liste de textes.
+    """
+    return {
+        numero: ApplicabiliteArticle(
+            statut="incompatible",
+            motif=("le texte ne pr\u00e9voit qu'une mesure pr\u00e9ventive alors que "
+                   "les faits d\u00e9crivent un dommage d\u00e9j\u00e0 r\u00e9alis\u00e9"))
+        for numero, texte in textes.items()
+        if _prevention_incompatible_avec_fait_realise(texte, faits)
+    }
 
 
 def _numeros_cites(reponse: str) -> list[tuple[str, int, int]]:
@@ -134,9 +229,9 @@ class AssertionGroundingService:
         """Les affirmations de droit de la réponse tiennent-elles ?
 
         UN seul appel, sur la réponse ENTIÈRE. Une fenêtre autour de chaque
-        citation manquait la phrase fautive dès qu'elle en débordait : sur
-        l'arbre tombé, « vous pourriez avoir droit à une compensation » était
-        la troisième phrase et n'entrait dans aucune fenêtre.
+        citation manquait la phrase fautive dès qu'elle en débordait : une
+        affirmation peut se trouver dans la phrase suivante et n'entrer dans
+        aucune fenêtre.
 
         Les articles cités sans texte récupéré ne sont pas jugés ici : c'est
         le contrôle d'ancrage par numéro qui les couvre déjà.
@@ -146,8 +241,91 @@ class AssertionGroundingService:
         cites = {n for n, _, _ in _numeros_cites(reponse)} & set(textes)
         if not cites:
             return []
+        temporal = [
+            VerdictAffirmation(
+                article=numero,
+                affirmation=affirmation_autour(reponse, debut, fin),
+                soutenue=False,
+                motif=("le texte ne pr\u00e9voit qu'une mesure pr\u00e9ventive alors "
+                       "que les faits d\u00e9crivent un dommage d\u00e9j\u00e0 r\u00e9alis\u00e9"),
+            )
+            for numero, debut, fin in _numeros_cites(reponse)
+            if (numero in cites
+                and _prevention_incompatible_avec_fait_realise(
+                    textes[numero], faits))
+        ]
+        if temporal:
+            return temporal
         return self._juger(reponse, {n: textes[n] for n in sorted(cites)},
                            faits)
+
+    def selectionner_articles(self, textes: dict[str, str],
+                              faits: str = "") -> dict[str, ApplicabiliteArticle]:
+        """Classe les textes par lots afin de conserver une rÃ©ponse complÃ¨te."""
+        if not self.disponible() or not textes:
+            return {}
+        items = list(textes.items())
+        resultat: dict[str, ApplicabiliteArticle] = {}
+        for start in range(0, len(items), _ARTICLE_SELECTION_BATCH_SIZE):
+            lot = dict(items[start:start + _ARTICLE_SELECTION_BATCH_SIZE])
+            selection = self._selectionner_lot(lot, faits)
+            # Un lot incomplet ne permet aucune conclusion sur ses articles,
+            # mais ne doit jamais annuler les incompatibilites deja etablies
+            # dans les lots complets precedents.
+            if set(selection) == set(lot):
+                resultat.update(selection)
+        return resultat
+
+    def _selectionner_lot(self, textes: dict[str, str],
+                          faits: str = "") -> dict[str, ApplicabiliteArticle]:
+        """Classe les textes avant rédaction, sans introduire de disposition.
+
+        Une sélection vide signifie que le service est indisponible ou que sa
+        sortie est illisible : l'appelant conserve alors les preuves plutôt
+        que d'écarter silencieusement un texte officiel.
+        """
+        if not self.disponible() or not textes:
+            return {}
+        corpus = "\n\n".join(
+            f"TEXTE OFFICIEL DE L'ARTICLE {numero} :\n{texte}"
+            for numero, texte in sorted(textes.items()))
+        contenu = f"FAITS DÉCRITS PAR LA PERSONNE :\n{(faits or '').strip()}\n\n{corpus}"
+        try:
+            brut = self.client.complete_json(
+                self.role,
+                [{"role": "system", "content": _SELECTION_SYSTEME},
+                 {"role": "user", "content": contenu}],
+                temperature=0.0)
+        except Exception:  # noqa: BLE001 -- la conservation est le repli sûr
+            return {}
+        entrees = brut.get("articles") if isinstance(brut, dict) else None
+        if not isinstance(entrees, list):
+            return {}
+        statuts = {"applicable", "incertain", "incompatible"}
+        resultat: dict[str, ApplicabiliteArticle] = {}
+        for entree in entrees:
+            if not isinstance(entree, dict):
+                continue
+            numero = str(entree.get("article") or "").strip()
+            statut = str(entree.get("statut") or "").strip().lower()
+            if numero not in textes or statut not in statuts:
+                continue
+            if entree.get("cause_compatible") is False:
+                statut = "incompatible"
+            resultat[numero] = ApplicabiliteArticle(
+                statut=statut,
+                motif=str(entree.get("motif") or "").strip()[:300])
+        for numero, texte in textes.items():
+            if (numero in resultat
+                    and _prevention_incompatible_avec_fait_realise(texte, faits)):
+                resultat[numero] = ApplicabiliteArticle(
+                    statut="incompatible",
+                    motif=("le texte ne prévoit qu'une mesure préventive alors "
+                           "que les faits décrivent un dommage déjà réalisé"))
+        # Une sélection partielle ne doit jamais faire disparaître un texte
+        # officiel par accident : on ne filtre que si tous les articles ont
+        # été classés exactement une fois.
+        return resultat if set(resultat) == set(textes) else {}
 
     def _juger(self, reponse_finale: str, textes: dict[str, str],
                faits: str) -> list[VerdictAffirmation]:
