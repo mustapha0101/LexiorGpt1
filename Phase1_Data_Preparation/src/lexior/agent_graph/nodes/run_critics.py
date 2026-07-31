@@ -8,7 +8,12 @@ from typing import Any
 from lexior.services.assertion_grounding import textes_recuperes
 
 from ..context import GraphContext
-from ..state import LexiorState, to_research_state
+from ..state import (
+    LexiorState,
+    canonical_case_description,
+    to_research_state,
+    visible_tool_history,
+)
 
 NAME = "run_critics"
 
@@ -19,9 +24,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         to_research_state(state), answer)
     verdicts = ctx.services.assertion_grounding.verifier(
         answer,
-        textes_recuperes(state.get("tool_history", [])),
-        faits=(state.get("active_issue")
-               or state.get("latest_user_message", "")),
+        textes_recuperes(visible_tool_history(state)),
+        faits=canonical_case_description(state),
     )
     grounding_issues = [verdict.probleme() for verdict in verdicts
                         if not verdict.soutenue]

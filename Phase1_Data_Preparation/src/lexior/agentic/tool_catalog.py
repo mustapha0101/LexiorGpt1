@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+from dataclasses import dataclass
 from typing import Any, Optional
 
 # Préfixes des noms observés par VS Code, interdits dans le dataset.
@@ -28,6 +29,20 @@ _VSCODE_PREFIX_RE = re.compile(r"^mcp[_-]", re.IGNORECASE)
 
 class CatalogError(Exception):
     """Catalogue illisible, incohérent, ou divergent des serveurs réels."""
+
+
+@dataclass(frozen=True)
+class LiveCallNormalization:
+    """Résultat d'une normalisation tolérante, réservée au chat live.
+
+    Les trajectoires dataset restent soumises à :meth:`validate_call` sans
+    aucune modification. En live, seul un champ *inconnu* est supprimé;
+    aucune valeur connue n'est convertie ou devinée.
+    """
+
+    arguments: dict[str, Any]
+    removed_fields: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
 
 
 class ToolSpec:
@@ -84,6 +99,49 @@ def _schema_types(schema: dict[str, Any]) -> Any:
                  if isinstance(part, dict) and part.get("type") is not None]
         return types or None
     return None
+
+
+def _validate_schema_value(name: str, key: str, value: Any,
+                           schema: dict[str, Any]) -> list[str]:
+    """Validation JSON-Schema minimale partagée par les deux modes."""
+    errors: list[str] = []
+    expected = _schema_types(schema)
+    if expected and not _type_ok(value, expected):
+        return [
+            f"{name} : type incorrect pour « {key} » "
+            f"(attendu {expected}, reçu {type(value).__name__})"
+        ]
+    min_length = schema.get("minLength")
+    if (isinstance(value, str) and isinstance(min_length, int)
+            and len(value.strip()) < min_length):
+        errors.append(
+            f"{name} : « {key} » doit contenir au moins "
+            f"{min_length} caractère non blanc")
+    enum = schema.get("enum")
+    if enum is not None and value is not None and value not in enum:
+        errors.append(
+            f"{name} : valeur hors enum pour « {key} » : {value!r} "
+            f"(valides : {enum})")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        for bound, operator, label in (
+                (schema.get("minimum"), lambda a, b: a < b, "minimum"),
+                (schema.get("maximum"), lambda a, b: a > b, "maximum")):
+            if bound is not None and operator(value, bound):
+                errors.append(
+                    f"{name} : « {key} » viole {label} {bound}")
+    if isinstance(value, list):
+        if (isinstance(schema.get("minItems"), int)
+                and len(value) < schema["minItems"]):
+            errors.append(f"{name} : « {key} » contient trop peu d'éléments")
+        if (isinstance(schema.get("maxItems"), int)
+                and len(value) > schema["maxItems"]):
+            errors.append(f"{name} : « {key} » contient trop d'éléments")
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                errors.extend(_validate_schema_value(
+                    name, f"{key}[{index}]", item, item_schema))
+    return errors
 
 
 # Récupération d'articles par plage. Le schéma déclare deux nombres et rien
@@ -210,32 +268,46 @@ class ToolCatalog:
         for req in spec.required:
             if req not in arguments:
                 errors.append(f"{name} : argument obligatoire absent : « {req} »")
+            elif (isinstance(arguments.get(req), str)
+                  and not arguments[req].strip()):
+                errors.append(f"{name} : argument obligatoire vide : « {req} »")
 
         for key, value in arguments.items():
             if key not in spec.properties:
                 errors.append(f"{name} : argument inconnu : « {key} »")
                 continue
-            prop = spec.properties[key]
-            expected = _schema_types(prop)
-            if expected and not _type_ok(value, expected):
-                errors.append(
-                    f"{name} : type incorrect pour « {key} » "
-                    f"(attendu {expected}, reçu {type(value).__name__})")
-                continue
-            min_length = prop.get("minLength")
-            if (isinstance(value, str) and isinstance(min_length, int)
-                    and len(value.strip()) < min_length):
-                errors.append(
-                    f"{name} : « {key} » doit contenir au moins "
-                    f"{min_length} caractère non blanc")
-                continue
-            enum = prop.get("enum")
-            if enum is not None and value is not None and value not in enum:
-                errors.append(
-                    f"{name} : valeur hors enum pour « {key} » : {value!r} "
-                    f"(valides : {enum})")
+            errors.extend(_validate_schema_value(
+                name, key, value, spec.properties[key]))
         errors.extend(_erreurs_de_plage(name, arguments))
         return errors
+
+    def normalize_live_call(self, name: str, arguments: Any) -> LiveCallNormalization:
+        """Supprime seulement les champs non déclarés, puis revalide.
+
+        Le catalogue reste la seule source de vérité. Un appel inconnu, non
+        objet, incomplet ou invalide après suppression est retourné avec ses
+        erreurs : l'appelant doit alors demander une correction au planner ou
+        suivre une route de repli. Cette méthode ne doit jamais servir au
+        dataset, où l'appel brut reste volontairement strict.
+        """
+        if name not in self.tools or not isinstance(arguments, dict):
+            raw = dict(arguments) if isinstance(arguments, dict) else {}
+            return LiveCallNormalization(
+                arguments=raw,
+                errors=tuple(self.validate_call(name, arguments)),
+            )
+        spec = self.tools[name]
+        normalized = {
+            key: value for key, value in arguments.items()
+            if key in spec.properties
+        }
+        removed = tuple(
+            key for key in arguments if key not in spec.properties)
+        return LiveCallNormalization(
+            arguments=normalized,
+            removed_fields=removed,
+            errors=tuple(self.validate_call(name, normalized)),
+        )
 
     def server_of(self, name: str) -> str:
         spec = self.tools.get(name)

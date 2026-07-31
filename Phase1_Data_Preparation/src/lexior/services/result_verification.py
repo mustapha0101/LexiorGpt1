@@ -67,6 +67,10 @@ _DOCUMENT_SEARCH_TOOLS = {"search_legal_documents", "fetch_document"}
 _RETRIEVAL_ONLY_TOOLS = {
     "semantic_search_ccq", "semantic_search_cpc",
     "search_ccq_keywords", "search_cpc_keywords",
+    # Une recherche de jurisprudence identifie des décisions candidates. Leur
+    # contenu intégral doit être lu via get_quebec_regulation avant toute
+    # citation ou application dans la réponse.
+    "search_quebec_jurisprudence",
     "coverage",
 }
 

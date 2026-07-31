@@ -25,6 +25,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         research_state, state.get("mode", "dataset"),
         feedback=feedback or None,
     )
+    agent = ctx.services.planner.agent_for(state.get("mode", "dataset"))
+    normalization = dict(getattr(agent, "last_live_normalization", {}) or {})
 
     log_line = (
         f"[planner] etape {state.get('step', 0) + 1}: "
@@ -45,4 +47,5 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "step": state.get("step", 0) + 1,
         "missing_critical_facts": decision.missing_critical_facts,
         "planner_feedback": "",  # correctif consommé
+        "last_tool_normalization": normalization,
     }

@@ -9,6 +9,8 @@ export interface ToolCallEvent {
   type: "tool_call";
   tool: string;
   args: Record<string, unknown>;
+  /** Champs ignorés car absents du schéma courant de l'outil. */
+  schema_correction?: string[];
 }
 
 export interface ToolResultEvent {
@@ -84,6 +86,7 @@ export interface ToolCall {
   ok?: boolean;
   classification?: string;
   reason?: string;
+  schemaCorrection?: string[];
 }
 
 export interface ChatMessage {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactElement } from "react";
 import type { AgentLogEntry, AppView, RawSSELine } from "../types";
 
 interface Props {
@@ -135,7 +136,7 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-const navItems: { view: AppView; label: string; Icon: () => JSX.Element }[] = [
+const navItems: { view: AppView; label: string; Icon: () => ReactElement }[] = [
   { view: "chat", label: "Chat", Icon: ChatIcon },
   { view: "dashboard", label: "Dashboard", Icon: DashboardIcon },
 ];

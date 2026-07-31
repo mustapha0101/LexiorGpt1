@@ -25,3 +25,28 @@ def test_decision_event_omits_unverified_model_reasoning():
     decision = next(event for event in events if event["type"] == "decision")
     assert decision["tool"] == "get_ccq_articles"
     assert "thinking" not in decision
+
+
+def test_tool_event_exposes_live_schema_correction():
+    translator = StreamTranslator()
+    list(translator.translate_chunk({
+        "plan": {
+            "last_tool_normalization": {
+                "tool": "search_quebec_jurisprudence",
+                "removed_fields": ["legal_terms"],
+                "remaining_arguments": {"query": "dommages"},
+            },
+        },
+    }))
+    events = list(translator.translate_chunk({
+        "execute_tool": {
+            "tool_history": [type("Observation", (), {
+                "tool_name": "search_quebec_jurisprudence",
+                "arguments": {"query": "dommages"},
+                "normalized_response": "[]",
+                "ok": True,
+            })()],
+        },
+    }))
+    call = next(event for event in events if event["type"] == "tool_call")
+    assert call["schema_correction"] == ["legal_terms"]

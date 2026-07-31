@@ -385,9 +385,21 @@ class ResearchState(BaseModel):
     usable_case_sources: list[CaseRelevanceResult] = Field(default_factory=list)
     case_law_search_status: str = "not_required"
     reformulation_count: int = 0
+    # ``tool_history`` est la vue des preuves (dossier + tour). Le budget
+    # dépend exclusivement de cette valeur, afin qu'un suivi ne consomme pas
+    # les appels réalisés au tour précédent.
+    # -1 signifie « état historique construit directement » : les tests et
+    # appels legacy conservent alors le comptage de tool_history. Le graphe
+    # renseigne toujours une valeur >= 0, strictement limitée au tour live.
+    current_turn_tool_count: int = Field(default=-1, ge=-1)
+    article_reviews: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    clarification_history: list[dict[str, Any]] = Field(default_factory=list)
+    case_description: str = ""
 
     def tool_calls_made(self) -> int:
-        return len(self.tool_history)
+        return (self.current_turn_tool_count
+                if self.current_turn_tool_count >= 0
+                else len(self.tool_history))
 
 
 # ---------------------------------------------------------------------------

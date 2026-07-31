@@ -213,6 +213,34 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             question=(f"Pour répondre précisément, il me manque : "
                       f"{', '.join(missing[:3])}. Pouvez-vous préciser?"))
 
+    # Une règle conditionnellement compatible signale une lacune FACTUELLE,
+    # distincte de la juridiction. La catégorie est enregistrée par
+    # handle_clarification et empêche de répéter cette étape au tour suivant.
+    conditional_reviews = [
+        review for review in (state.get("article_reviews") or {}).values()
+        if review.get("status") == "conditionally_applicable"
+    ]
+    fact_already_answered = any(
+        entry.get("category") == "fact" and entry.get("answered")
+        for entry in state.get("clarification_history", []))
+    if (live and state.get("request_type") == "case_analysis"
+            and conditional_reviews and not fact_already_answered
+            and state.get("clarification_count", 0) < 2
+            and decision.decision not in (Decision.ask_clarification,
+                                          Decision.cannot_conclude)):
+        reason = next((str(review.get("reason") or "").strip()
+                       for review in conditional_reviews
+                       if str(review.get("reason") or "").strip()),
+                      "un fait déterminant")
+        decision = _forced(
+            decision, resolved,
+            need="fait matériel requis par la règle revue",
+            thinking=("Un texte officiel est potentiellement pertinent, mais "
+                      "sa revue indique qu'un fait nécessaire reste à établir."),
+            action=Decision.ask_clarification,
+            question=("Pour appliquer les textes récupérés à votre situation, "
+                      f"il faut préciser : {reason}. Que pouvez-vous confirmer?"))
+
     # 2. Clarification bornée.
     if decision.decision == Decision.ask_clarification:
         count = state.get("clarification_count", 0)

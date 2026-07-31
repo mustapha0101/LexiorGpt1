@@ -13,6 +13,7 @@ Un seul graphe compilé, un seul contexte de services. L'ancien
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional
 
@@ -165,7 +166,8 @@ class GraphRunner:
     def build_live_state(self, query: str, *, thread_id: str,
                          history: Optional[list[dict]] = None,
                          system_prompt: Optional[str] = None,
-                         request_type: str = "case_analysis") -> dict:
+                         request_type: str = "case_analysis",
+                         prior_case_context: Optional[dict] = None) -> dict:
         """État initial d'un tour live (historique client inclus)."""
         from lexior.agentic.schemas import Message, Role
 
@@ -186,6 +188,38 @@ class GraphRunner:
             max_reformulations=self.context.max_reformulations,
             max_repairs=self.context.max_repairs,
         )
+        if prior_case_context:
+            context = deepcopy(prior_case_context)
+            state.update({
+                "case_context": context,
+                "prior_evidence": list(context.get("prior_evidence", [])),
+                "article_reviews": dict(context.get("article_reviews", {})),
+                "clarification_history": list(
+                    context.get("clarification_history", [])),
+                "active_issue": context.get("active_issue", ""),
+                "facts": dict(context.get("facts", {})),
+                "missing_facts_before_application": list(
+                    context.get("missing_facts_before_application", [])),
+                "resolved_jurisdiction": context.get(
+                    "resolved_jurisdiction", ""),
+                "jurisdiction_status": context.get(
+                    "jurisdiction_status", "unknown"),
+                "jurisdiction_locked": bool(context.get(
+                    "jurisdiction_locked", False)),
+                "jurisdiction_verified": bool(context.get(
+                    "jurisdiction_verified", False)),
+                "jurisdiction_basis": context.get("jurisdiction_basis", ""),
+                "official_rule_retrieved": bool(context.get(
+                    "official_rule_retrieved", False)),
+                "official_rule_sources": list(context.get(
+                    "official_rule_sources", [])),
+                "usable_case_sources": list(context.get(
+                    "usable_case_sources", [])),
+                "case_law_search_status": context.get(
+                    "case_law_search_status", "not_required"),
+                "clarification_count": len(context.get(
+                    "clarification_history", [])),
+            })
         if history:
             turns = []
             for turn in history:
@@ -199,6 +233,17 @@ class GraphRunner:
                 messages = state["messages"]
                 state["messages"] = messages[:-1] + turns + messages[-1:]
         return state
+
+    def _prior_case_context(self, config: dict) -> dict:
+        """Lit uniquement le contexte persistant du dernier checkpoint."""
+        try:
+            snapshot = self.graph.get_state(config)
+            values = getattr(snapshot, "values", {}) or {}
+            context = values.get("case_context", {})
+            return deepcopy(context) if isinstance(context, dict) else {}
+        except (AttributeError, KeyError, TypeError, ValueError):
+            # Checkpointer absent ou thread encore inexistant.
+            return {}
 
     def stream_live(self, query: str, *, thread_id: Optional[str] = None,
                     history: Optional[list[dict]] = None,
@@ -218,7 +263,8 @@ class GraphRunner:
         else:
             payload = self.build_live_state(
                 query, thread_id=thread_id, history=history,
-                system_prompt=system_prompt)
+                system_prompt=system_prompt,
+                prior_case_context=self._prior_case_context(config))
 
         translator = StreamTranslator()
         final: dict[str, Any] = {}
@@ -270,7 +316,8 @@ class GraphRunner:
         else:
             payload = self.build_live_state(
                 query, thread_id=thread_id, history=history,
-                system_prompt=system_prompt)
+                system_prompt=system_prompt,
+                prior_case_context=self._prior_case_context(config))
 
         result = self.graph.invoke(payload, config=config)
         question = extract_interrupt_question(result)

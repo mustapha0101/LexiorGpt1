@@ -127,6 +127,9 @@ class RAGConfig:
     dense_weight: float = 0.60
     llm_rerank_enabled: bool = True
     llm_rerank_k: int = 40
+    # Réserve de rappel : elle maintient des candidats visibles, sans les
+    # verrouiller devant un meilleur jugement de pertinence.
+    rerank_recall_reserve_k: int = 2
     # Planchers de pertinence sur l'échelle ABSOLUE (la normalisation min-max
     # ramène toujours le meilleur candidat à 1.0, même quand il est hors
     # sujet). Un corpus sans réponse doit produire une liste vide.
@@ -170,6 +173,7 @@ class RAGConfig:
             "dense_weight": self.dense_weight,
             "llm_rerank_enabled": self.llm_rerank_enabled,
             "llm_rerank_k": self.llm_rerank_k,
+            "rerank_recall_reserve_k": self.rerank_recall_reserve_k,
             "min_dense_score": self.min_dense_score,
             "min_hybrid_score": self.min_hybrid_score,
             "dense_floor_exempt_top_k": self.dense_floor_exempt_top_k,
@@ -186,6 +190,11 @@ class AgenticConfig:
     target_accepted: int = 100
     max_scenarios: int = -1            # -1 = illimité (borné par target)
     max_tool_calls: int = 4
+    # Recherche d'articles en lots progressifs. Ces bornes sont des
+    # paramètres de coût/qualité, jamais des correspondances de droit.
+    initial_article_fetch_k: int = 6
+    article_fetch_batch_size: int = 6
+    max_articles_per_issue: int = 20
     dry_run: bool = False
     offline: bool = False
     allow_remote_calls: bool = False   # refus par défaut : sécurité
@@ -265,6 +274,9 @@ class AgenticConfig:
             "target_accepted": self.target_accepted,
             "max_scenarios": self.max_scenarios,
             "max_tool_calls": self.max_tool_calls,
+            "initial_article_fetch_k": self.initial_article_fetch_k,
+            "article_fetch_batch_size": self.article_fetch_batch_size,
+            "max_articles_per_issue": self.max_articles_per_issue,
             "dry_run": self.dry_run,
             "offline": self.offline,
             "allow_remote_calls": self.allow_remote_calls,
@@ -415,6 +427,8 @@ def load_config(config_path: Optional[str] = None,
             bool(rag_yaml.get("llm_rerank_enabled", RAGConfig.llm_rerank_enabled)),
         ),
         llm_rerank_k=int(rag_yaml.get("llm_rerank_k", RAGConfig.llm_rerank_k)),
+        rerank_recall_reserve_k=int(rag_yaml.get(
+            "rerank_recall_reserve_k", RAGConfig.rerank_recall_reserve_k)),
         min_dense_score=float(
             rag_yaml.get("min_dense_score", RAGConfig.min_dense_score)),
         min_hybrid_score=float(
@@ -435,6 +449,12 @@ def load_config(config_path: Optional[str] = None,
         gen.get("failure_injection_rate", cfg.failure_injection_rate))
     cfg.max_search_reformulations = int(
         gen.get("max_search_reformulations", cfg.max_search_reformulations))
+    cfg.initial_article_fetch_k = int(
+        gen.get("initial_article_fetch_k", cfg.initial_article_fetch_k))
+    cfg.article_fetch_batch_size = int(gen.get(
+        "article_fetch_batch_size", cfg.article_fetch_batch_size))
+    cfg.max_articles_per_issue = int(gen.get(
+        "max_articles_per_issue", cfg.max_articles_per_issue))
     cfg.max_thinking_words = int(
         gen.get("max_thinking_words", cfg.max_thinking_words))
 

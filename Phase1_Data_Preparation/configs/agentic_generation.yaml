@@ -3,6 +3,13 @@ generation:
   language: fr
   target_accepted: 100
   max_tool_calls: 4
+  # Les articles issus de la recherche sont lus en lots : on commence assez
+  # large pour vérifier plusieurs hypothèses, puis on élargit seulement si la
+  # revue ne trouve aucune règle utilisable. Aucun numéro d'article n'est
+  # encodé dans cette politique.
+  initial_article_fetch_k: 6
+  article_fetch_batch_size: 6
+  max_articles_per_issue: 20
   # Une récupération groupée contient au plus 20 articles; le contexte doit
   # pouvoir conserver intégralement leurs textes officiels pour les vérifier.
   max_tool_response_chars: 14000
@@ -85,6 +92,9 @@ rag:
   # Le relecteur juridique examine une liste large, puis réordonne une
   # sélection bornée; cela préserve les règles générales derrière les faits.
   llm_rerank_k: 40
+  # Filet de rappel sans verrou de rang : un candidat initialement 17e peut
+  # devenir premier après comparaison de sa règle et des faits.
+  rerank_recall_reserve_k: 2
   # Planchers de pertinence sur l'echelle absolue (0.0 = desactive).
   # Calibres le 2026-07-25 sur tests/fixtures/retrieval_gold.jsonl.
   # min_dense_score 0.40 : ameliore le classement (MRR 0.340 -> 0.397,

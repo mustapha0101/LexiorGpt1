@@ -14,7 +14,7 @@ from .taxonomy_conditions import (
     GardeContexte, etape_facultative_retenue, juridiction_compatible,
 )
 from lexior.services.provenance import (
-    a_une_provenance, numero_demande, reponses_reussies,
+    a_une_provenance, numero_demande, numeros_demandes, reponses_reussies,
 )
 from .schemas import Decision, DecisionTrace, PlannerDecision, ResearchState
 from .tool_catalog import MAX_ARTICLES_PAR_APPEL, ToolCatalog
@@ -165,13 +165,22 @@ FEDERAL_KNOWN_CITATIONS: dict[str, str] = {
 
 class PlannerAgent:
     def __init__(self, catalog: ToolCatalog, client=None, offline: bool = False,
-                 chat_mode: bool = False):
+                 chat_mode: bool = False, *, initial_article_fetch_k: int = 6,
+                 article_fetch_batch_size: int = 6,
+                 max_articles_per_issue: int = 20):
         self.catalog = catalog
         self.client = client
         self.offline = offline
         # chat_mode : requête libre sans route scriptée — les gardes fondés
         # sur expected_route/request_type ne s'appliquent pas.
         self.chat_mode = chat_mode
+        self.last_live_normalization: dict[str, object] = {}
+        self.initial_article_fetch_k = max(1, min(
+            int(initial_article_fetch_k), MAX_ARTICLES_PAR_APPEL))
+        self.article_fetch_batch_size = max(1, min(
+            int(article_fetch_batch_size), MAX_ARTICLES_PAR_APPEL))
+        self.max_articles_per_issue = max(1, min(
+            int(max_articles_per_issue), MAX_ARTICLES_PAR_APPEL))
 
     def decide(self, state: ResearchState) -> PlannerDecision:
         if self.offline:
@@ -199,12 +208,18 @@ class PlannerAgent:
                 else:
                     decision = self._guard_chat_jurisdiction(
                         state, decision, retried=bool(feedback))
+                    decision = self._guard_progressive_article_review(
+                        state, decision)
                 decision = self._guard_budget(state, decision)
                 decision = self._raise_if_invalid(state, decision)
                 return decision
             except ValueError as exc:
                 # ValidationError pydantic incluse (sous-classe de ValueError).
                 if feedback:
+                    if (self.chat_mode
+                            and self._has_usable_official_evidence(state)):
+                        return self._safe_final_after_invalid_live_call(
+                            state, decision)
                     raise
                 feedback = str(exc) or "décision invalide"
 
@@ -212,6 +227,18 @@ class PlannerAgent:
                           decision: PlannerDecision) -> PlannerDecision:
         self._attach_semantic_legal_terms(decision)
         self._attach_retrieved_candidates(state, decision)
+        self.last_live_normalization = {}
+        if (self.chat_mode and decision.decision == Decision.call_tool
+                and decision.next_tool):
+            normalized = self.catalog.normalize_live_call(
+                decision.next_tool, decision.arguments)
+            decision.arguments = normalized.arguments
+            if normalized.removed_fields:
+                self.last_live_normalization = {
+                    "tool": decision.next_tool,
+                    "removed_fields": list(normalized.removed_fields),
+                    "remaining_arguments": dict(normalized.arguments),
+                }
         errors = validate_planner_decision(decision, self.catalog)
         if (decision.decision == Decision.call_tool and decision.next_tool
                 and not self.chat_mode):
@@ -243,6 +270,32 @@ class PlannerAgent:
         return decision
 
     @staticmethod
+    def _has_usable_official_evidence(state: ResearchState) -> bool:
+        return bool(state.official_rule_retrieved or any(
+            observation.ok and observation.tool_name in {
+                "get_ccq_articles", "get_cpc_articles"}
+            for observation in state.tool_history
+        ))
+
+    @staticmethod
+    def _safe_final_after_invalid_live_call(
+            state: ResearchState, decision: PlannerDecision) -> PlannerDecision:
+        return PlannerDecision(
+            request_type=decision.request_type,
+            jurisdiction=decision.jurisdiction,
+            decision=Decision.final_answer,
+            thinking_text=(
+                "L'appel d'outil proposé reste invalide après correction, mais "
+                "des sources officielles ont déjà été récupérées. Je réponds "
+                "prudemment à partir de ces seules sources."),
+            decision_trace=DecisionTrace(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                need="appel live invalide; preuves officielles conservées",
+                next_action="final_answer"),
+        )
+
+    @staticmethod
     def _attach_semantic_legal_terms(decision: PlannerDecision) -> None:
         """Recopie la qualification du plan dans l'appel de recherche.
 
@@ -264,8 +317,120 @@ class PlannerAgent:
             arguments["legal_terms"] = terms
             decision.arguments = arguments
 
+    def _semantic_candidates_for(self, state: ResearchState,
+                                 fetch_tool: str) -> list[int | float]:
+        """Candidats dans l'ordre réel du dernier classement sémantique."""
+        search_tool = {
+            "get_ccq_articles": "semantic_search_ccq",
+            "get_cpc_articles": "semantic_search_cpc",
+        }.get(fetch_tool)
+        if not search_tool:
+            return []
+        latest_search = next(
+            (observation for observation in reversed(state.tool_history)
+             if observation.tool_name == search_tool and observation.ok),
+            None,
+        )
+        if latest_search is None:
+            return []
+        numbers: list[int | float] = []
+        seen: set[float] = set()
+        for raw in ARTICLE_LABEL_RE.findall(
+                latest_search.normalized_response or ""):
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            numbers.append(int(value) if value.is_integer() else value)
+        return numbers
+
+    def _article_fetch_arguments(
+            self, state: ResearchState, fetch_tool: str,
+            *, batch_size: Optional[int] = None) -> Optional[dict]:
+        """Prochain lot non lu, sans changer l'ordre de classement RAG."""
+        if not self.chat_mode:
+            return self._legacy_article_fetch_arguments(state, fetch_tool)
+        candidates = self._semantic_candidates_for(state, fetch_tool)
+        if not candidates:
+            # Une demande précise peut légitimement mentionner un article
+            # avant toute recherche. Elle ne reçoit aucune complétion de la
+            # mémoire : seuls les numéros écrits dans la conversation servent.
+            query = "\n".join(message.content for message in state.messages
+                              if message.role.value == "user")
+            candidates = [
+                int(float(number)) if float(number).is_integer()
+                else float(number)
+                for number in ARTICLE_RE.findall(query)
+            ]
+        if not candidates:
+            return None
+        fetched = {
+            str(number)
+            for observation in state.tool_history
+            if observation.tool_name == fetch_tool and observation.ok
+            for number in numeros_demandes(
+                observation.tool_name, observation.arguments)
+        }
+        remaining = [
+            value for value in candidates if str(value) not in fetched
+        ]
+        remaining_capacity = self.max_articles_per_issue - len(fetched)
+        if remaining_capacity <= 0 or not remaining:
+            return None
+        width = (batch_size if batch_size is not None else
+                 (self.initial_article_fetch_k if not fetched
+                  else self.article_fetch_batch_size))
+        width = min(max(1, width), remaining_capacity,
+                    MAX_ARTICLES_PAR_APPEL)
+        return {"articles": remaining[:width]}
+
     @staticmethod
-    def _attach_retrieved_candidates(state: ResearchState,
+    def _legacy_article_fetch_arguments(
+            state: ResearchState, fetch_tool: str) -> Optional[dict]:
+        """Compatibilité des trajectoires dataset historiques (plage compacte)."""
+        search_tool = ("semantic_search_ccq" if fetch_tool ==
+                       "get_ccq_articles" else "semantic_search_cpc")
+        search_text = "\n".join(
+            observation.normalized_response for observation in state.tool_history
+            if observation.ok and observation.tool_name == search_tool)
+        candidates = ARTICLE_LABEL_RE.findall(search_text)
+        if not candidates:
+            candidates = ARTICLE_RE.findall("\n".join(
+                message.content for message in state.messages
+                if message.role.value == "user"))
+        already_fetched = {
+            str(number) for observation in state.tool_history
+            if observation.tool_name == fetch_tool and observation.ok
+            for number in numeros_demandes(
+                observation.tool_name, observation.arguments)
+        }
+        values = []
+        for candidate in candidates:
+            if candidate in already_fetched:
+                continue
+            try:
+                value = float(candidate)
+            except ValueError:
+                continue
+            if value not in values:
+                values.append(value)
+            if len(values) == 3:
+                break
+        if not values:
+            return None
+        primary = values[0]
+        nearby = [value for value in values if abs(value - primary) <= 5]
+        start, end = min(nearby), max(nearby)
+        as_json = lambda value: int(value) if value.is_integer() else value
+        arguments = {"start_article": as_json(start)}
+        if end != start:
+            arguments["end_article"] = as_json(end)
+        return arguments
+
+    def _attach_retrieved_candidates(self, state: ResearchState,
                                      decision: PlannerDecision) -> None:
         """Transforme des candidats sémantiques en textes à vérifier.
 
@@ -276,37 +441,12 @@ class PlannerAgent:
         réellement renvoyés par la dernière recherche vers ``get_*_articles``
         sans décider de leur pertinence juridique.
         """
-        fetch_to_search = {
-            "get_ccq_articles": "semantic_search_ccq",
-            "get_cpc_articles": "semantic_search_cpc",
-        }
-        search_tool = fetch_to_search.get(decision.next_tool or "")
-        if not search_tool:
+        if not self.chat_mode or decision.next_tool not in {
+                "get_ccq_articles", "get_cpc_articles"}:
             return
-        latest_search = next(
-            (observation for observation in reversed(state.tool_history)
-             if observation.tool_name == search_tool and observation.ok),
-            None,
-        )
-        if latest_search is None:
-            return
-        raw_numbers = ARTICLE_LABEL_RE.findall(
-            latest_search.normalized_response or "")
-        numbers: list[int | float] = []
-        seen: set[float] = set()
-        for raw in raw_numbers:
-            try:
-                value = float(raw)
-            except (TypeError, ValueError):
-                continue
-            if value in seen:
-                continue
-            seen.add(value)
-            numbers.append(int(value) if value.is_integer() else value)
-            if len(numbers) >= MAX_ARTICLES_PAR_APPEL:
-                break
-        if numbers:
-            decision.arguments = {"articles": numbers}
+        arguments = self._article_fetch_arguments(state, decision.next_tool)
+        if arguments:
+            decision.arguments = arguments
 
     def _guard_clarification(self, state: ResearchState,
                              decision: PlannerDecision) -> PlannerDecision:
@@ -555,12 +695,121 @@ class PlannerAgent:
                 next_action="final_answer"),
         )
 
+    def _guard_progressive_article_review(
+            self, state: ResearchState,
+            decision: PlannerDecision) -> PlannerDecision:
+        """Élargit la lecture si le premier lot ne soutient pas l'analyse.
+
+        Cette garde ne choisit aucun article par son numéro : elle avance dans
+        l'ordre produit par le RAG et s'arrête dès qu'une règle est revue comme
+        applicable. Une règle seulement conditionnelle justifie un lot
+        supplémentaire, car elle peut révéler une disposition plus directe.
+        """
+        if decision.decision not in {
+                Decision.final_answer, Decision.cannot_conclude}:
+            return decision
+        if state.scenario.request_type != "case_analysis":
+            return decision
+        if any(review.get("status") == "applicable"
+               for review in state.article_reviews.values()):
+            return self._guard_live_source_completeness(state, decision)
+        fetch_tool = next((tool for tool in (
+            "get_ccq_articles", "get_cpc_articles")
+            if self._semantic_candidates_for(state, tool)), None)
+        if fetch_tool:
+            arguments = self._article_fetch_arguments(
+                state, fetch_tool,
+                batch_size=self.article_fetch_batch_size)
+            if arguments:
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    decision=Decision.call_tool,
+                    next_tool=fetch_tool,
+                    arguments=arguments,
+                    thinking_text=(
+                        "Le premier lot de textes ne contient aucune règle "
+                        "revue comme directement applicable. Je lis le lot "
+                        "suivant du même classement avant de conclure."),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need="élargir la couverture des articles candidats",
+                        next_action=f"call_tool:{fetch_tool}"),
+                )
+        return self._guard_live_source_completeness(state, decision)
+
+    def _guard_live_source_completeness(
+            self, state: ResearchState,
+            decision: PlannerDecision) -> PlannerDecision:
+        """Cherche la jurisprudence après une règle revue et des faits utiles."""
+        if decision.decision not in {
+                Decision.final_answer, Decision.cannot_conclude}:
+            return decision
+        if state.scenario.request_type != "case_analysis":
+            return decision
+        has_case_search = any(
+            obs.tool_name == "search_quebec_jurisprudence"
+            for obs in state.tool_history)
+        has_case_content = any(
+            obs.tool_name == "get_quebec_regulation" and obs.ok
+            for obs in state.tool_history)
+        if has_case_content:
+            return decision
+        statuses = {review.get("status") for review in
+                    state.article_reviews.values()}
+        if not statuses & {"applicable", "conditionally_applicable"}:
+            return decision
+        if has_case_search:
+            arguments = self._arguments("get_quebec_regulation", state)
+            if arguments:
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    decision=Decision.call_tool,
+                    next_tool="get_quebec_regulation",
+                    arguments=arguments,
+                    thinking_text=(
+                        "La recherche a identifié une décision candidate. Je "
+                        "récupère son contenu intégral avant de la citer ou de "
+                        "l'utiliser comme preuve."),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need="contenu intégral d'une décision candidate",
+                        next_action="call_tool:get_quebec_regulation"),
+                )
+            return decision
+        factual_answers = [entry for entry in state.clarification_history
+                           if entry.get("category") == "fact"
+                           and entry.get("answered")]
+        if not factual_answers and "applicable" not in statuses:
+            return decision
+        arguments = self._arguments("search_quebec_jurisprudence", state)
+        if not arguments:
+            return decision
+        return PlannerDecision(
+            request_type=decision.request_type,
+            jurisdiction=decision.jurisdiction,
+            decision=Decision.call_tool,
+            next_tool="search_quebec_jurisprudence",
+            arguments=arguments,
+            thinking_text=(
+                "Une règle officielle a été revue et les faits disponibles "
+                "permettent une recherche ciblée de jurisprudence québécoise."),
+            decision_trace=DecisionTrace(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                need="jurisprudence ciblée par disposition et faits",
+                next_action="call_tool:search_quebec_jurisprudence"),
+        )
+
     def _guard_budget(self, state: ResearchState,
                       decision: PlannerDecision) -> PlannerDecision:
         """Budget d'outils épuisé : forcer la synthèse au lieu d'un appel."""
         if decision.decision != Decision.call_tool:
             return decision
-        if len(state.tool_history) < state.max_tool_calls:
+        if state.tool_calls_made() < state.max_tool_calls:
             return decision
         return PlannerDecision(
             request_type=decision.request_type,
@@ -771,7 +1020,7 @@ class PlannerAgent:
                 "truncated": o.truncated,
                 "error": o.error,
             } for o in state.tool_history],
-            "remaining_tool_calls": state.max_tool_calls - len(state.tool_history),
+            "remaining_tool_calls": state.max_tool_calls - state.tool_calls_made(),
         }
         system_content = planner_system_prompt(self.catalog)
         if self.chat_mode:
@@ -842,7 +1091,7 @@ class PlannerAgent:
                 decision_trace=DecisionTrace(request_type=request_type, jurisdiction=jurisdiction,
                                              need="aucune source juridique nécessaire",
                                              next_action="final_answer"))
-        if len(state.tool_history) >= state.max_tool_calls:
+        if state.tool_calls_made() >= state.max_tool_calls:
             return PlannerDecision(
                 request_type=request_type, jurisdiction=jurisdiction,
                 decision=Decision.cannot_conclude,
@@ -854,7 +1103,7 @@ class PlannerAgent:
                                              need="limite d'appels atteinte",
                                              next_action="cannot_conclude"))
         route = self._effective_route(state)
-        if len(state.tool_history) >= len(route):
+        if state.tool_calls_made() >= len(route):
             return PlannerDecision(
                 request_type=request_type, jurisdiction=jurisdiction,
                 decision=Decision.final_answer,
@@ -866,7 +1115,7 @@ class PlannerAgent:
                 decision_trace=DecisionTrace(request_type=request_type, jurisdiction=jurisdiction,
                                              need="sources prévues récupérées",
                                              next_action="final_answer"))
-        tool = route[len(state.tool_history)]
+        tool = route[state.tool_calls_made()]
         terms = self._offline_legal_terms(state)
         args = self._arguments(tool, state, legal_terms=terms)
         if args is None:
@@ -922,7 +1171,7 @@ class PlannerAgent:
         """Génère un thinking en langue naturelle pour le mode offline."""
         query = state.scenario.user_query
         request_type = state.scenario.request_type
-        step = len(state.tool_history)
+        step = state.tool_calls_made()
 
         if tool in {"get_ccq_articles", "get_cpc_articles"}:
             code = "Code civil du Québec" if "ccq" in tool else "Code de procédure civile"
@@ -1052,48 +1301,7 @@ class PlannerAgent:
             if message.role.value == "user"
         ) or state.scenario.user_query
         if tool in {"get_ccq_articles", "get_cpc_articles"}:
-            already_fetched: set[float] = set()
-            for obs in state.tool_history:
-                if obs.tool_name == tool and obs.ok:
-                    sa = obs.arguments.get("start_article")
-                    ea = obs.arguments.get("end_article", sa)
-                    if sa is not None:
-                        already_fetched.update(
-                            float(v) for v in range(int(sa), int(ea or sa) + 1)
-                        )
-            if state.tool_history:
-                search_tool = (
-                    "semantic_search_ccq"
-                    if tool == "get_ccq_articles"
-                    else "semantic_search_cpc"
-                )
-                search_text = "\n".join(
-                    observation.normalized_response
-                    for observation in state.tool_history
-                    if observation.ok and observation.tool_name == search_tool
-                )
-                candidates = ARTICLE_LABEL_RE.findall(search_text)
-                if not candidates:
-                    candidates = ARTICLE_RE.findall(query)
-            else:
-                candidates = ARTICLE_RE.findall(query)
-            candidates = [
-                c for c in candidates if float(c) not in already_fetched
-            ]
-            if not candidates:
-                return None
-            values = [float(value) for value in candidates[:3]]
-            primary = values[0]
-            nearby = [value for value in values if abs(value - primary) <= 5]
-            start, end = min(nearby), max(nearby)
-
-            def json_number(value: float):
-                return int(value) if value.is_integer() else value
-
-            arguments = {"start_article": json_number(start)}
-            if end != start:
-                arguments["end_article"] = json_number(end)
-            return arguments
+            return self._article_fetch_arguments(state, tool)
         if tool in {"semantic_search_ccq", "semantic_search_cpc"}:
             # La question part telle quelle, et sa traduction en vocabulaire
             # du Code part À CÔTÉ — jamais à sa place. Les deux recherches
@@ -1141,11 +1349,15 @@ class PlannerAgent:
             keyword = candidates[min(previous, len(candidates) - 1)]
             return {"keyword": keyword}
         if tool == "search_quebec_jurisprudence":
-            article_nums = self._extract_article_nums_from_history(state)
-            situation = self._compact_keyword(query)
+            article_nums = [
+                number for number, review in state.article_reviews.items()
+                if review.get("status") in {
+                    "applicable", "conditionally_applicable"}
+            ] or self._extract_article_nums_from_history(state)
+            situation = self._compact_keyword(state.case_description or query)
             if article_nums:
                 article_part = " ".join(
-                    f"article {n}" for n in article_nums[:2]
+                    f"article {n}" for n in article_nums[:4]
                 )
                 jurisprudence_query = f"{article_part} {situation}"
             else:
@@ -1160,7 +1372,10 @@ class PlannerAgent:
             if not urls:
                 url_re = re.compile(r"https?://[^\s\"',\]\)]+")
                 for obs in reversed(state.tool_history):
-                    if obs.tool_name == "search_quebec_regulations" and obs.ok:
+                    if (obs.tool_name in {
+                            "search_quebec_regulations",
+                            "search_quebec_jurisprudence"}
+                            and obs.ok):
                         urls = url_re.findall(obs.normalized_response or "")
                         if urls:
                             break
@@ -1427,9 +1642,7 @@ class PlannerAgent:
         seen: set[str] = set()
         for obs in state.tool_history:
             if obs.tool_name in {"get_ccq_articles", "get_cpc_articles"} and obs.ok:
-                sa = obs.arguments.get("start_article")
-                if sa is not None:
-                    n = str(int(sa)) if isinstance(sa, float) and sa == int(sa) else str(sa)
+                for n in numeros_demandes(obs.tool_name, obs.arguments):
                     if n not in seen:
                         nums.append(n)
                         seen.add(n)

@@ -100,9 +100,30 @@ def test_le_rang_du_json_suit_lordre_reellement_renvoye(tmp_path):
         "le champ rank doit décrire la liste renvoyée, pas l'ordre d'avant "
         "le reranker")
     reranked = [r["article_number"] for r in avec["results"]]
-    assert reranked[0] == numeros[0], "le noyau de rappel reste protégé"
-    assert reranked[1:] == list(reversed(numeros))[0:-1], (
-        "le reranker réordonne les candidats hors noyau")
+    assert reranked == list(reversed(numeros)), (
+        "le reranker peut réordonner tout le classement; la réserve de rappel "
+        "ne verrouille plus artificiellement la première position")
+
+
+def test_reranker_can_promote_candidate_ranked_seventeenth_to_first(tmp_path):
+    class RankSeventeen:
+        def complete_json(self, *_args, **_kwargs):
+            return {"primary": ["17"], "contextual": [], "rejected": []}
+
+    rag = object.__new__(LegalRAG)
+    rag.cfg = RAGConfig(index_dir=str(tmp_path), llm_rerank_enabled=True,
+                        llm_rerank_k=20, rerank_recall_reserve_k=2)
+    rag.reranker = RankSeventeen()
+    candidates = [
+        {"article_number": str(number), "excerpt": "texte", "score": 1.0}
+        for number in range(1, 21)
+    ]
+
+    ranked = rag._llm_rerank("faits", "CCQ", candidates)
+
+    assert ranked[0]["article_number"] == "17"
+    assert {item["article_number"] for item in ranked} == {
+        str(number) for number in range(1, 21)}
 
 
 def test_aucun_resultat_reste_lisible_comme_vide(tmp_path):

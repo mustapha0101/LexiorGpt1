@@ -24,3 +24,8 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+# Les scripts de nettoyage sous ``scripts/`` sont des exécutables de contrôle
+# et appellent sys.exit() à l'import. Les tests automatisés vivent ici.
+testpaths = ["tests"]

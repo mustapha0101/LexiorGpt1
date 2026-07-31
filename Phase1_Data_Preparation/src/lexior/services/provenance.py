@@ -64,6 +64,26 @@ def numeros_demandes(tool_name: str, arguments: Optional[dict]) -> tuple[str, ..
             numero = str(valeur).strip() if valeur is not None else ""
             if numero and numero not in numeros:
                 numeros.append(numero)
+    # Le catalogue accepte aussi la forme compacte ``start_article`` /
+    # ``end_article``. Elle désigne chaque article de l'intervalle, pas
+    # seulement sa borne inférieure : la provenance, le ciblage de
+    # jurisprudence et le contrôle de grounding doivent donc voir toute la
+    # demande. Les nombres décimaux restent atomiques, car un intervalle
+    # comme 1457.1–1457.3 n'a pas de succession numérique juridiquement
+    # définie.
+    start = (arguments or {}).get("start_article")
+    end = (arguments or {}).get("end_article")
+    try:
+        start_int = int(start)
+        end_int = int(end)
+    except (TypeError, ValueError):
+        start_int = end_int = None
+    if (start_int is not None and end_int is not None
+            and start_int <= end_int and end_int - start_int <= 50):
+        for value in range(start_int, end_int + 1):
+            numero = str(value)
+            if numero not in numeros:
+                numeros.append(numero)
     return tuple(numeros)
 
 

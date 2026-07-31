@@ -17,6 +17,8 @@ Conventions :
 
 from __future__ import annotations
 
+from copy import deepcopy
+import json
 from typing import Any, Optional
 
 try:
@@ -86,6 +88,15 @@ class LexiorState(TypedDict, total=False):
     missing_facts_before_application: list[str]
     missing_critical_facts: list[str]
 
+    # ── Dossier live persistant ────────────────────────────────────────
+    # Le tour courant reste isolé, mais le dossier conserve les seules
+    # preuves déjà vérifiées et les faits accumulés entre deux messages.
+    # Les résultats de recherche candidats n'y entrent jamais.
+    case_context: dict[str, Any]
+    prior_evidence: list[ToolObservation]
+    article_reviews: dict[str, dict[str, Any]]
+    clarification_history: list[dict[str, Any]]
+
     # ── Planification et exécution d'outils ──────────────────────────────
     latest_decision: Optional[dict]
     planner_feedback: str          # correctif transmis au prochain plan
@@ -97,6 +108,7 @@ class LexiorState(TypedDict, total=False):
     search_evaluations: list[SearchEvaluation]
 
     last_tool_call: Optional[dict]
+    last_tool_normalization: dict[str, Any]
     last_tool_result_status: str   # SearchResultStatus
     last_tool_assessment: Optional[dict]
     reformulation_count: int
@@ -215,6 +227,10 @@ def initial_state(
         "missing_facts_before_application": list(
             scenario.facts_required_before_application),
         "missing_critical_facts": list(scenario.facts_missing),
+        "case_context": {},
+        "prior_evidence": [],
+        "article_reviews": {},
+        "clarification_history": [],
         "latest_decision": None,
         "planner_feedback": "",
         "step": 0,
@@ -224,6 +240,7 @@ def initial_state(
         "usable_evidence": [],
         "search_evaluations": [],
         "last_tool_call": None,
+        "last_tool_normalization": {},
         "last_tool_result_status": "",
         "last_tool_assessment": None,
         "reformulation_count": 0,
@@ -272,19 +289,78 @@ def initial_state(
     }
 
 
+def visible_tool_history(state: LexiorState) -> list[ToolObservation]:
+    """Preuves accessibles au tour : dossier approuvé + appels courants.
+
+    ``tool_history`` reste volontairement limité au tour courant pour que le
+    budget d'appels ne soit jamais consommé par les recherches antérieures.
+    Cette fonction est l'unique projection utilisée quand une réponse ou une
+    validation doit voir les sources d'un dossier entier.
+    """
+    prior = state.get("prior_evidence") or (
+        (state.get("case_context") or {}).get("prior_evidence", []))
+    values = [*prior, *state.get("tool_history", [])]
+    merged: list[ToolObservation] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for raw in values:
+        try:
+            observation = (raw if isinstance(raw, ToolObservation)
+                           else ToolObservation.model_validate(raw))
+        except (TypeError, ValueError):
+            continue
+        signature = (
+            observation.tool_name,
+            observation.content_hash or "",
+            observation.normalized_response or "",
+            json.dumps(observation.arguments or {}, sort_keys=True,
+                       ensure_ascii=False, default=str),
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        merged.append(observation)
+    return merged
+
+
+def canonical_case_description(state: LexiorState) -> str:
+    """Description stable du dossier, distincte de la dernière question."""
+    context = state.get("case_context") or {}
+    issue = (state.get("active_issue") or context.get("active_issue")
+             or state.get("latest_user_message", "")).strip()
+    facts = dict(context.get("facts") or {})
+    statements = facts.get("user_statements") or []
+    additions = [str(value).strip() for value in statements
+                 if str(value).strip()]
+    parts = [issue] if issue else []
+    if additions:
+        parts.append("Faits additionnels : " + " | ".join(additions))
+    jurisdiction = (state.get("resolved_jurisdiction")
+                    or context.get("resolved_jurisdiction", ""))
+    if jurisdiction:
+        parts.append(f"Juridiction : {jurisdiction}")
+    return "\n".join(parts).strip()
+
+
 # ── Projections vers les schémas historiques ─────────────────────────────
 
 
 def to_research_state(state: LexiorState) -> ResearchState:
     """Projette l'état du graphe vers le ``ResearchState`` des services."""
     scenario = state["scenario"]
+    description = canonical_case_description(state)
+    # Le dossier enrichi sert au chat multi-tours. Les trajectoires dataset
+    # doivent conserver exactement la question synthétique du scénario pour
+    # leurs contrôles de cohérence et leur reproductibilité.
+    if (state.get("mode") == "live" and description
+            and description != scenario.user_query):
+        scenario = scenario.model_copy(update={"user_query": description})
     status = state.get("status", "planning")
     if status not in {s.value for s in StateStatus}:
         status = StateStatus.planning.value
     return ResearchState(
         scenario=scenario,
         messages=state.get("messages", []),
-        tool_history=state.get("tool_history", []),
+        tool_history=visible_tool_history(state),
         search_evaluations=state.get("search_evaluations", []),
         sources=state.get("sources", []),
         step=state.get("step", 0),
@@ -299,6 +375,10 @@ def to_research_state(state: LexiorState) -> ResearchState:
         case_law_search_status=state.get(
             "case_law_search_status", "not_required"),
         reformulation_count=state.get("reformulation_count", 0),
+        current_turn_tool_count=len(state.get("tool_history", [])),
+        article_reviews=deepcopy(state.get("article_reviews", {})),
+        clarification_history=deepcopy(state.get("clarification_history", [])),
+        case_description=description,
     )
 
 

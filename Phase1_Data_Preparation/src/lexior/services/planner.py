@@ -27,17 +27,24 @@ class PlannerService:
     """
 
     def __init__(self, catalog: ToolCatalog, client=None,
-                 offline: bool = False):
+                 offline: bool = False, *, initial_article_fetch_k: int = 6,
+                 article_fetch_batch_size: int = 6,
+                 max_articles_per_issue: int = 20):
         self.catalog = catalog
         self.client = client
         self.offline = offline
+        options = {
+            "initial_article_fetch_k": initial_article_fetch_k,
+            "article_fetch_batch_size": article_fetch_batch_size,
+            "max_articles_per_issue": max_articles_per_issue,
+        }
         # Même classe, même client, même catalogue — seule la présence
         # d'une route scriptée change (chat_mode).
         self._agents = {
             "dataset": PlannerAgent(catalog, client=client, offline=offline,
-                                    chat_mode=False),
+                                    chat_mode=False, **options),
             LIVE: PlannerAgent(catalog, client=client, offline=offline,
-                               chat_mode=True),
+                               chat_mode=True, **options),
         }
 
     @classmethod

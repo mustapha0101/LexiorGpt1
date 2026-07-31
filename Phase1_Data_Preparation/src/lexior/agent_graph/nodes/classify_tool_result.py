@@ -17,7 +17,7 @@ from lexior.services.provenance import (
 )
 
 from ..context import GraphContext
-from ..state import LexiorState
+from ..state import LexiorState, canonical_case_description, visible_tool_history
 
 NAME = "classify_tool_result"
 
@@ -38,7 +38,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # nécessairement réinjectés. Une demande comme « que disent ces deux
     # articles ? » s'appuie alors légitimement sur les numéros cités dans la
     # réponse précédente, qui fait partie de l'historique conversationnel.
-    reponses_precedentes = reponses_reussies(tool_history, avant=observation)
+    reponses_precedentes = reponses_reussies(
+        visible_tool_history(state), avant=observation)
     reponses_precedentes.extend(
         message.content for message in state.get("messages", [])
         if getattr(message.role, "value", message.role) == "assistant")
@@ -61,7 +62,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         # thématique » — l'article 1466, qui traite précisément des dommages
         # causés par un animal, est ressorti irrelevant sur une question de
         # morsure de chien. update_active_task conserve la question d'origine.
-        user_query=(state.get("active_issue")
+        user_query=(canonical_case_description(state)
+                    or state.get("active_issue")
                     or state.get("latest_user_message", "")),
         provenance_verifiee=provenance,
     )

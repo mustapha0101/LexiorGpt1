@@ -203,7 +203,11 @@ export function useChat(): UseChatReturn {
                     ...m,
                     toolCalls: [
                       ...(m.toolCalls ?? []),
-                      { tool: event.tool, args: event.args } as ToolCall,
+                       {
+                         tool: event.tool,
+                         args: event.args,
+                         schemaCorrection: event.schema_correction,
+                       } as ToolCall,
                     ],
                   }),
                   blankAssistant,

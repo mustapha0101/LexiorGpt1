@@ -513,9 +513,11 @@ def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
     for idx, m in enumerate(assistant_messages):
         tc_payload, _ = _parse_tool_call(m.content)
         has_tool_call = tc_payload is not None
-        has_substantial = len(m.content.replace(
-            TOOL_CALL_RE.sub("", m.content) if not has_tool_call
-            else "", "").strip()) > 100
+        # Lorsqu'un appel est bien formé, on mesure uniquement le texte qui
+        # l'entoure. L'ancienne branche remplaçait la chaîne vide et comptait
+        # donc le JSON de l'appel comme de la prose substantielle.
+        remaining = TOOL_CALL_RE.sub("", m.content) if has_tool_call else m.content
+        has_substantial = len(remaining.strip()) > 100
         if has_tool_call and has_substantial and idx < len(assistant_messages) - 1:
             warnings.append(tag(ErrorCode.TOOL_CALL_WITH_PROSE, f"appel d'outil et texte substantiel au message assistant {idx}"))
 

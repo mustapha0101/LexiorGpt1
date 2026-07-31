@@ -49,6 +49,15 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         resolution = service.resolve_live(
             state.get("messages", []), previous)
         updates = _updates(resolution)
+        context = dict(state.get("case_context") or {})
+        context.update({
+            "resolved_jurisdiction": resolution.value,
+            "jurisdiction_status": resolution.status,
+            "jurisdiction_basis": resolution.basis,
+            "jurisdiction_locked": resolution.locked,
+            "jurisdiction_verified": resolution.verified,
+        })
+        updates["case_context"] = context
         if resolution.basis == "explicit_user_statement":
             updates["work_location"] = resolution.value
         return updates

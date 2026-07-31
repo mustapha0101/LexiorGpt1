@@ -20,7 +20,12 @@ from lexior.services.assertion_grounding import (
 from lexior.services.modes import is_live
 
 from ..context import GraphContext
-from ..state import LexiorState, to_trajectory
+from ..state import (
+    LexiorState,
+    canonical_case_description,
+    to_trajectory,
+    visible_tool_history,
+)
 
 NAME = "validate_final"
 
@@ -136,13 +141,12 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # erreur : ne pas avoir pu vérifier n'est pas avoir vérifié.
     # Les faits sont nécessaires : les conditions temporelles, matérielles et
     # personnelles d'une règle doivent correspondre à la situation décrite.
-    textes = textes_recuperes(state.get("tool_history", []))
+    textes = textes_recuperes(visible_tool_history(state))
     reponse_finale = state.get("final_answer") or ""
     verdicts = ctx.services.assertion_grounding.verifier(
         reponse_finale,
         textes,
-        faits=(state.get("active_issue")
-               or state.get("latest_user_message", "")))
+        faits=canonical_case_description(state))
     contract = state.get("answer_contract") or {}
     if contract.get("filtre_articles_officiels"):
         retained = {str(numero) for numero in contract.get(

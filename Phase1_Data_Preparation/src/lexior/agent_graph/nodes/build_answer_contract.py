@@ -25,7 +25,7 @@ from lexior.services.assertion_grounding import (
 )
 
 from ..context import GraphContext
-from ..state import LexiorState
+from ..state import LexiorState, canonical_case_description, visible_tool_history
 
 NAME = "build_answer_contract"
 
@@ -40,7 +40,9 @@ _COVERAGE_LIMITATION_FR = (
 
 
 def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
-    tool_history = state.get("tool_history", [])
+    # Le contrat voit les preuves déjà validées du dossier entier. Le budget
+    # reste isolé au tour courant dans le planner.
+    tool_history = visible_tool_history(state)
     exempt = ctx.services.validation.compute_exempt_tools(tool_history)
     live = is_live(state.get("mode", ""))
 
@@ -79,12 +81,17 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         state.get("requested_output_type") == "article_text"
         or state["scenario"].request_type == "exact_text_retrieval"
     )
-    faits = state.get("active_issue") or state.get("latest_user_message", "")
+    faits = canonical_case_description(state)
     service_selection = ctx.services.assertion_grounding
+    # Le dossier live exige une revue explicite. Les trajectoires offline
+    # n'ont pas de relecteur LLM : elles conservent leur contrat historique,
+    # déjà couvert par les validations de route et de grounding.
+    reviews_stored = (dict(state.get("article_reviews", {})) if live else {})
     selection_disponible = (
         bool(textes_officiels)
         and not texte_exact_demande
         and service_selection.disponible()
+        and not reviews_stored
     )
     incompatibles_deterministes = (
         articles_incompatibles_deterministes(textes_officiels, faits=faits)
@@ -93,11 +100,21 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         service_selection.selectionner_articles(textes_officiels, faits=faits)
         if selection_disponible else {})
     filtre_articles_effectue = bool(
-        incompatibles_deterministes or selection_disponible)
+        incompatibles_deterministes or selection_disponible or reviews_stored)
     if texte_exact_demande:
         # A request for exact text reproduces the sources without drawing a
         # legal conclusion, so it does not need the applicability filter.
         articles_retenus = list(textes_officiels)
+    elif reviews_stored:
+        # La revue a eu lieu à la récupération. On consomme le même verdict
+        # à l'étape de rédaction afin d'éviter tout changement de règle entre
+        # recherche, jurisprudence et réponse finale.
+        articles_retenus = [
+            numero for numero in textes_officiels
+            if (numero not in incompatibles_deterministes
+                and reviews_stored.get(numero, {}).get("status") in {
+                    "applicable", "conditionally_applicable"})
+        ]
     elif selection_disponible:
         # Allowlist: no verdict means the batch could not be reviewed, not
         # that the article is applicable.
@@ -130,6 +147,21 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                     and tool_history[index].tool_name in {
                         "get_ccq_articles", "get_cpc_articles"})
         ]
+        usable_tools = [
+            tool_history[i].tool_name for i in usable_idx
+            if 0 <= i < len(tool_history)
+        ]
+    elif articles_retenus:
+        # Les indices historiques ne sont plus fiables après la projection
+        # ``preuves persistantes + tour courant``. On les reconstruit à partir
+        # des textes réellement présents dans chaque observation officielle.
+        official_indices = [
+            index for index, observation in enumerate(tool_history)
+            if (observation.tool_name in {"get_ccq_articles", "get_cpc_articles"}
+                and any(number in articles_retenus for number in
+                        textes_recuperes([observation])))
+        ]
+        usable_idx = list(dict.fromkeys([*usable_idx, *official_indices]))
         usable_tools = [
             tool_history[i].tool_name for i in usable_idx
             if 0 <= i < len(tool_history)
@@ -183,6 +215,23 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 "Les textes officiels récupérés sont incompatibles avec les "
                 "faits connus : n'en déduis aucune règle de fond.")
 
+    raisonnement_autorise = [
+        {
+            "article": numero,
+            "statut": reviews_stored.get(numero, {}).get(
+                "status", "applicable"),
+            "motif": reviews_stored.get(numero, {}).get("reason", ""),
+            "consigne": (
+                "Présente l'application comme conditionnelle; ne conclus pas "
+                "que les conditions sont remplies."
+                if reviews_stored.get(numero, {}).get("status")
+                == "conditionally_applicable"
+                else "Explique seulement ce que le texte officiel permet de dire."
+            ),
+        }
+        for numero in articles_retenus
+    ]
+
     # Coverage gap directives.
     for gap in coverage_gaps:
         desc = gap.get("requested_court_scope", "") or gap.get(
@@ -225,6 +274,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "preuves_inutilisables": unusable,
         "filtre_articles_officiels": filtre_articles_effectue,
         "articles_retenus": articles_retenus,
+        "raisonnement_autorise": raisonnement_autorise,
         "sources_alternatives": alternatives_for_contract,
         "lacunes_de_couverture": [g for g in coverage_gaps],
         "consignes": directives,

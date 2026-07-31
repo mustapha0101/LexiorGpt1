@@ -36,3 +36,17 @@ def test_live_schema_drift_is_detected(catalog):
     live["get_ccq_articles"]["properties"]["start_article"]["type"] = "string"
     problems = catalog.compare_with_live(live)
     assert any("type divergent" in problem for problem in problems)
+
+
+def test_live_normalization_removes_only_fields_absent_from_catalog(catalog):
+    normalized = catalog.normalize_live_call(
+        "search_quebec_jurisprudence",
+        {"query": "responsabilité civile", "legal_terms": "dommages"},
+    )
+    assert normalized.arguments == {"query": "responsabilité civile"}
+    assert normalized.removed_fields == ("legal_terms",)
+
+    invalid = catalog.normalize_live_call(
+        "search_quebec_jurisprudence", {"query": ""})
+    assert invalid.arguments == {"query": ""}
+    assert invalid.errors, "une valeur connue invalide ne doit pas être devinée"

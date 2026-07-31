@@ -86,6 +86,12 @@ export function ToolCallCard({ call }: Props) {
             </pre>
           </div>
 
+          {call.schemaCorrection && call.schemaCorrection.length > 0 && (
+            <p className="text-xs text-warning">
+              Champs ignorés car absents du schéma de l’outil : {call.schemaCorrection.join(", ")}
+            </p>
+          )}
+
           {/* Result */}
           {call.result !== undefined && (
             <div>

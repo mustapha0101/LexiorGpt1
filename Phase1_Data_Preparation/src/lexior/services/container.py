@@ -72,7 +72,11 @@ def build_services(
     return LexiorServices(
         config=config,
         catalog=catalog,
-        planner=PlannerService(catalog, client=teacher, offline=offline),
+        planner=PlannerService(
+            catalog, client=teacher, offline=offline,
+            initial_article_fetch_k=config.initial_article_fetch_k,
+            article_fetch_batch_size=config.article_fetch_batch_size,
+            max_articles_per_issue=config.max_articles_per_issue),
         tools=ToolExecutionService(executor),
         verification=ResultVerificationService(),
         research=LegalResearchService(),

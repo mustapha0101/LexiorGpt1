@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 
 from .critic_context import bounded_tool_history
@@ -56,7 +57,8 @@ class AgenticCritic:
                               ("semantic_search_cpc", "get_cpc_articles")]:
                 _searches = [o for o in state.tool_history if o.tool_name == _st]
                 if len(_searches) >= 2 and all(
-                    not o.ok or (o.normalized_response or "").strip() in ("", "[]", "{}")
+                    not o.ok or _is_empty_search_response(
+                        o.normalized_response)
                     for o in _searches
                 ):
                     _empty_exempt.add(_ft)
@@ -226,3 +228,17 @@ class AgenticCritic:
             "accepted": result.accepted if blockers else True,
             "score": result.score if blockers else max(result.score, 0.75),
         })
+
+
+def _is_empty_search_response(value: str) -> bool:
+    """Même notion fonctionnelle de vide que le routeur, sans faux positif.
+
+    Les adaptateurs MCP renvoient parfois ``[]`` et parfois une phrase locale
+    telle que « Aucun article trouvé ». Ces deux formes ne doivent pas rendre
+    obligatoire une récupération officielle inexistante.
+    """
+    text = (value or "").strip()
+    return (text in {"", "[]", "{}"}
+            or bool(re.search(
+                r"\b(?:aucun(?:e)?\s+(?:article|résultat|document|décision)|"
+                r"no\s+results?)\b", text, re.IGNORECASE)))

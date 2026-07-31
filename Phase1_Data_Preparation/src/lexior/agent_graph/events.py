@@ -14,6 +14,7 @@ l'interface web consomme depuis la première version :
 
 from __future__ import annotations
 
+import json
 from typing import Any, Iterator, Optional
 
 NODE_LABELS = {
@@ -65,6 +66,7 @@ class StreamTranslator:
     def __init__(self) -> None:
         self._tool_count = 0
         self._en_attente: list[dict[str, Any]] = []
+        self._normalizations: dict[tuple[str, str], list[str]] = {}
 
     def translate_chunk(
         self, chunk: dict[str, Any],
@@ -99,6 +101,16 @@ class StreamTranslator:
                             decision.get("jurisdiction", "")),
                     }
 
+            normalization = update.get("last_tool_normalization")
+            if isinstance(normalization, dict):
+                tool = str(normalization.get("tool") or "")
+                args = normalization.get("remaining_arguments")
+                fields = normalization.get("removed_fields")
+                if tool and isinstance(args, dict) and isinstance(fields, list):
+                    self._normalizations[(tool, json.dumps(
+                        args, sort_keys=True, ensure_ascii=False))] = [
+                            str(field) for field in fields]
+
             tool_history = update.get("tool_history")
             if isinstance(tool_history, list):
                 for rang, obs in enumerate(tool_history[self._tool_count:],
@@ -107,6 +119,10 @@ class StreamTranslator:
                         "type": "tool_call",
                         "tool": obs.tool_name,
                         "args": obs.arguments,
+                        "schema_correction": self._normalizations.pop(
+                            (obs.tool_name, json.dumps(
+                                obs.arguments, sort_keys=True,
+                                ensure_ascii=False)), []),
                     }
                     self._en_attente.append({
                         "type": "tool_result",
