@@ -18,6 +18,9 @@ from typing import Any
 
 from lexior.agentic.schemas import Decision, DecisionTrace, PlannerDecision
 from lexior.services.evidence import AcceptanceBlocker, CoverageGap
+from lexior.services.article_review import (
+    build_clarification, question_for_fact_keys,
+)
 from lexior.services.jurisdiction import (
     QC_ONLY_TOOLS,
     allows_quebec_tools,
@@ -112,6 +115,51 @@ def _forced_final(decision: PlannerDecision, jurisdiction: str,
                    Decision.final_answer)
 
 
+def _pending_clarification(state: LexiorState,
+                           decision: PlannerDecision) -> dict[str, Any]:
+    """Construit le contrat rendu à l'utilisateur avant l'interrupt()."""
+    question = (decision.clarification_question or "").strip()
+    if _RE_FAIT_JURIDICTION.search(question):
+        return {
+            "clarification_id": "jurisdiction-province",
+            "category": "jurisdiction",
+            "fact_keys": ["jurisdiction"],
+            "question": question or (
+                "Dans quelle province êtes-vous? La réponse dépend du droit applicable."),
+            "answer_type": "province_or_federal",
+            "source_articles": [],
+            "status": "pending",
+        }
+
+    context = state.get("case_context") or {}
+    facts = dict(context.get("facts") or state.get("facts") or {})
+    statements = facts.get("user_statements") or []
+    selected = build_clarification(
+        state.get("article_reviews") or {}, facts,
+        state.get("clarification_history") or [], statements)
+    if selected:
+        return selected
+
+    fact_keys = [str(value) for value in state.get(
+        "missing_critical_facts", []) if str(value).strip()]
+    if not fact_keys:
+        fact_keys = ["user_provided_fact"]
+    safe_question = question
+    if (not safe_question or "que pouvez-vous confirmer" in safe_question.casefold()
+            or "reason" in safe_question.casefold()
+            or "article" in safe_question.casefold()):
+        safe_question = question_for_fact_keys(fact_keys)
+    return {
+        "clarification_id": "fact-" + "-".join(fact_keys[:3]),
+        "category": "fact",
+        "fact_keys": fact_keys[:3],
+        "question": safe_question,
+        "answer_type": "yes_no_or_explanation",
+        "source_articles": [],
+        "status": "pending",
+    }
+
+
 def _is_federal_matter(state: LexiorState,
                        decision: PlannerDecision) -> bool:
     """Le droit applicable est-il fédéral, quelle que soit la province ?"""
@@ -128,10 +176,20 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     decision = PlannerDecision.model_validate(raw)
     live = is_live(state.get("mode", ""))
     step = state.get("step", 0)
-    max_steps = state.get("max_tool_calls", 4) + 2
+    max_steps = state.get("max_planner_decisions", 12)
+    resolved = state.get("resolved_jurisdiction", "")
 
     # 1. Borne de décisions du planner.
-    if step > max_steps:
+    if step >= max_steps:
+        if live:
+            final = _forced_final(
+                decision, resolved,
+                need="budget de décisions live épuisé",
+                thinking=("La limite de décisions live est atteinte. Je "
+                          "termine avec les preuves déjà retenues."))
+            return {"step": step, "latest_decision": final.model_dump(mode="json"),
+                    "status": "planning",
+                    "stop_reason": "planner_budget_exhausted"}
         return {
             "status": "rejected",
             "stop_reason": (
@@ -141,7 +199,6 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # 5a. Juridiction autoritaire : la valeur résolue écrase la
     # proposition; en dataset, la proposition du planner raffine la
     # valeur non verrouillée (comportement historique).
-    resolved = state.get("resolved_jurisdiction", "")
     locked = state.get("jurisdiction_locked", False)
     updates: dict[str, Any] = {"step": step}
     if locked and resolved:
@@ -200,7 +257,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     if (live and missing
             and decision.decision not in (Decision.ask_clarification,
                                           Decision.cannot_conclude)
-            and state.get("clarification_count", 0) < 2
+            and state.get("clarification_count", 0) < state.get(
+                "max_clarifications", 2)
             and not state.get("tool_history")):
         decision = _forced(
             decision, resolved,
@@ -210,36 +268,30 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                       "chercher, sinon la réponse porterait sur une "
                       "situation supposée."),
             action=Decision.ask_clarification,
-            question=(f"Pour répondre précisément, il me manque : "
-                      f"{', '.join(missing[:3])}. Pouvez-vous préciser?"))
+            question=question_for_fact_keys(missing[:3]))
 
     # Une règle conditionnellement compatible signale une lacune FACTUELLE,
     # distincte de la juridiction. La catégorie est enregistrée par
     # handle_clarification et empêche de répéter cette étape au tour suivant.
-    conditional_reviews = [
-        review for review in (state.get("article_reviews") or {}).values()
-        if review.get("status") == "conditionally_applicable"
-    ]
-    fact_already_answered = any(
-        entry.get("category") == "fact" and entry.get("answered")
-        for entry in state.get("clarification_history", []))
+    facts_context = dict((state.get("case_context") or {}).get(
+        "facts") or state.get("facts") or {})
+    user_statements = facts_context.get("user_statements") or []
+    structured_clarification = build_clarification(
+        state.get("article_reviews") or {}, facts_context,
+        state.get("clarification_history") or [], user_statements)
     if (live and state.get("request_type") == "case_analysis"
-            and conditional_reviews and not fact_already_answered
-            and state.get("clarification_count", 0) < 2
+            and structured_clarification
+            and state.get("clarification_count", 0) < state.get(
+                "max_clarifications", 2)
             and decision.decision not in (Decision.ask_clarification,
                                           Decision.cannot_conclude)):
-        reason = next((str(review.get("reason") or "").strip()
-                       for review in conditional_reviews
-                       if str(review.get("reason") or "").strip()),
-                      "un fait déterminant")
         decision = _forced(
             decision, resolved,
             need="fait matériel requis par la règle revue",
             thinking=("Un texte officiel est potentiellement pertinent, mais "
                       "sa revue indique qu'un fait nécessaire reste à établir."),
             action=Decision.ask_clarification,
-            question=("Pour appliquer les textes récupérés à votre situation, "
-                      f"il faut préciser : {reason}. Que pouvez-vous confirmer?"))
+            question=structured_clarification["question"])
 
     # 2. Clarification bornée.
     if decision.decision == Decision.ask_clarification:
@@ -250,7 +302,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 "stop_reason": ("clarification répétée après la réponse "
                                 "de l'utilisateur"),
             }
-        if live and count >= 2:
+        if live and count >= state.get("max_clarifications", 2):
             decision = _forced_final(
                 decision, resolved,
                 need="clarifications épuisées",
@@ -330,6 +382,23 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         updates.setdefault("stop_reason",
                            state.get("stop_reason") or
                            decision.decision.value)
+
+    if decision.decision == Decision.ask_clarification and live:
+        pending = _pending_clarification(state, decision)
+        updates["pending_clarification"] = pending
+        context = dict(state.get("case_context") or {})
+        context["pending_clarification"] = pending
+        updates["case_context"] = context
+
+    if (live and decision.decision == Decision.call_tool
+            and decision.next_tool == "search_quebec_jurisprudence"
+            and state.get("case_law_search_status") in {
+                "irrelevant", "empty", "failed", "tool_error",
+                "coverage_gap", "candidates_without_url"}
+            and state.get("reformulation_count", 0) < state.get(
+                "max_search_reformulations", 1)):
+        updates["reformulation_count"] = state.get(
+            "reformulation_count", 0) + 1
 
     _retirer_numeros_des_recherches(decision)
     updates["latest_decision"] = decision.model_dump(mode="json")

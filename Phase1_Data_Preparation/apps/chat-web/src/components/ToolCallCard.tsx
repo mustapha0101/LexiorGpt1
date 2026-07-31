@@ -92,6 +92,20 @@ export function ToolCallCard({ call }: Props) {
             </p>
           )}
 
+          {call.metadata && (
+            <div className="flex flex-wrap gap-2 text-xs text-text-muted">
+              {call.metadata.preview_truncated && (
+                <span className="text-warning">Aperçu tronqué</span>
+              )}
+              {typeof call.metadata.candidate_count === "number" && (
+                <span>{call.metadata.candidate_count} candidats trouvés</span>
+              )}
+              {typeof call.metadata.article_count === "number" && (
+                <span>{call.metadata.article_count} articles récupérés</span>
+              )}
+            </div>
+          )}
+
           {/* Result */}
           {call.result !== undefined && (
             <div>

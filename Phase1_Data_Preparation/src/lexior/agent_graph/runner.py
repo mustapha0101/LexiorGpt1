@@ -182,11 +182,19 @@ class GraphRunner:
         state = initial_state(
             scenario,
             mode="live",
-            max_tool_calls=self.context.config.max_tool_calls,
+            max_tool_calls=getattr(self.context.config, "max_tool_calls_live",
+                                   self.context.config.max_tool_calls),
             system_prompt=system_prompt or self.system_prompt(),
             thread_id=thread_id,
             max_reformulations=self.context.max_reformulations,
             max_repairs=self.context.max_repairs,
+            max_clarifications=getattr(
+                self.context.config, "max_clarifications_live", 2),
+            max_planner_decisions=getattr(
+                self.context.config, "max_planner_decisions_live", 12),
+            max_search_reformulations=getattr(
+                self.context.config, "max_search_reformulations_live",
+                self.context.max_reformulations),
         )
         if prior_case_context:
             context = deepcopy(prior_case_context)
@@ -217,6 +225,19 @@ class GraphRunner:
                     "usable_case_sources", [])),
                 "case_law_search_status": context.get(
                     "case_law_search_status", "not_required"),
+                "case_law_verified": list(context.get(
+                    "case_law_verified", [])),
+                "pending_clarification": dict(context.get(
+                    "pending_clarification", {})),
+                "legislative_sufficiency": dict(context.get(
+                    "legislative_sufficiency", {})),
+                "max_clarifications": getattr(
+                    self.context.config, "max_clarifications_live", 2),
+                "max_planner_decisions": getattr(
+                    self.context.config, "max_planner_decisions_live", 12),
+                "max_search_reformulations": getattr(
+                    self.context.config, "max_search_reformulations_live",
+                    self.context.max_reformulations),
                 "clarification_count": len(context.get(
                     "clarification_history", [])),
             })
@@ -245,6 +266,16 @@ class GraphRunner:
             # Checkpointer absent ou thread encore inexistant.
             return {}
 
+    def _checkpoint_tool_count(self, config: dict) -> int:
+        """Nombre d'observations déjà diffusées avant une reprise suspendue."""
+        try:
+            snapshot = self.graph.get_state(config)
+            values = getattr(snapshot, "values", {}) or {}
+            history = values.get("tool_history", [])
+            return len(history) if isinstance(history, list) else 0
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return 0
+
     def stream_live(self, query: str, *, thread_id: Optional[str] = None,
                     history: Optional[list[dict]] = None,
                     system_prompt: Optional[str] = None,
@@ -258,7 +289,10 @@ class GraphRunner:
         thread_id = thread_id or f"live-{uuid.uuid4().hex[:8]}"
         config = self._config(thread_id)
 
-        if self.has_pending_interrupt(thread_id):
+        pending_interrupt = self.has_pending_interrupt(thread_id)
+        prior_tool_count = self._checkpoint_tool_count(config) \
+            if pending_interrupt else 0
+        if pending_interrupt:
             payload: Any = Command(resume=query)
         else:
             payload = self.build_live_state(
@@ -266,7 +300,7 @@ class GraphRunner:
                 system_prompt=system_prompt,
                 prior_case_context=self._prior_case_context(config))
 
-        translator = StreamTranslator()
+        translator = StreamTranslator(initial_tool_count=prior_tool_count)
         final: dict[str, Any] = {}
         interrupted_question: Optional[str] = None
 

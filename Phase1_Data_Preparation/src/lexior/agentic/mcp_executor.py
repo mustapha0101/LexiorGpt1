@@ -38,7 +38,9 @@ def normalize_soquij_urls(text: str) -> str:
     """Rend résolvables les URLs SOQUIJ amputées de leur chemin."""
     return SOQUIJ_MALFORMED_RE.sub(r"\1/php/decision.php?ID=\2", text or "")
 SECRET_RE = re.compile(r"(?i)(?:bearer\s+|api[_-]?key[=:]\s*)[^\s,;]+")
-NORMALIZATION_VERSION = "mcp-normalize-1.2-strip-reader-directed"
+# Change la clé lorsque la politique de cache évolue. Les anciennes entrées
+# peuvent contenir des erreurs MCP persistées et ne doivent pas être relues.
+NORMALIZATION_VERSION = "mcp-normalize-1.3-no-failed-observations"
 
 
 class MCPExecutionError(Exception):
@@ -337,7 +339,9 @@ class MCPExecutor:
                                   normalized_response=normalized, source_urls=urls,
                                   citations=citations, truncated=truncated, ok=True,
                                   mock=self.is_mock, latency_ms=latency).finalize_hash()
-        if self.cache:
+        # Une panne d'infrastructure est transitoire : ne jamais la persister
+        # comme une observation réutilisable au prochain tour.
+        if self.cache and obs.ok:
             self.cache.put(cache_key, obs.model_dump(mode="json"))
         return obs
 

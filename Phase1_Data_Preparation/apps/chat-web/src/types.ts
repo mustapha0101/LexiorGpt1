@@ -22,6 +22,18 @@ export interface ToolResultEvent {
   classification?: string;
   /** Motif du classement, quand il y en a un. */
   reason?: string;
+  metadata?: ToolResultMetadata;
+  preview_truncated?: boolean;
+  preview_character_count?: number;
+}
+
+export interface ToolResultMetadata {
+  candidate_count?: number;
+  candidate_articles?: string[];
+  article_count?: number;
+  article_numbers?: string[];
+  preview_truncated?: boolean;
+  preview_character_count?: number;
 }
 
 export interface TokenEvent {
@@ -87,6 +99,7 @@ export interface ToolCall {
   classification?: string;
   reason?: string;
   schemaCorrection?: string[];
+  metadata?: ToolResultMetadata;
 }
 
 export interface ChatMessage {

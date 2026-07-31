@@ -228,6 +228,7 @@ export function useChat(): UseChatReturn {
                         ok: event.ok,
                         classification: event.classification,
                         reason: event.reason,
+                        metadata: event.metadata,
                       };
                       break;
                     }

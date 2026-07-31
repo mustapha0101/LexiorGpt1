@@ -15,6 +15,7 @@ l'interface web consomme depuis la première version :
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Iterator, Optional
 
 NODE_LABELS = {
@@ -54,6 +55,31 @@ _NOEUDS_TERMINAUX = frozenset({
     "handle_clarification", "export_dataset",
 })
 
+_ARTICLE_RE = re.compile(r"\bArticle\s+(\d{1,4}(?:\.\d+)?)", re.IGNORECASE)
+
+
+def result_metadata(tool: str, arguments: dict[str, Any], text: str) -> dict[str, Any]:
+    """Décrit l'aperçu SSE sans exposer tout le résultat."""
+    article_numbers = list(dict.fromkeys(_ARTICLE_RE.findall(text or "")))
+    metadata: dict[str, Any] = {
+        "preview_truncated": len(text or "") > _TOOL_RESULT_PREVIEW_CHARS,
+        "preview_character_count": min(len(text or ""), _TOOL_RESULT_PREVIEW_CHARS),
+    }
+    if tool in {"semantic_search_ccq", "semantic_search_cpc"}:
+        metadata.update({
+            "candidate_count": len(article_numbers),
+            "candidate_articles": article_numbers,
+        })
+    if tool in {"get_ccq_articles", "get_cpc_articles"}:
+        requested = arguments.get("articles") or []
+        if not isinstance(requested, list):
+            requested = [requested]
+        metadata.update({
+            "article_count": len(requested),
+            "article_numbers": [str(value) for value in requested],
+        })
+    return metadata
+
 
 class StreamTranslator:
     """Traducteur avec état minimal (déduplication des observations).
@@ -63,8 +89,8 @@ class StreamTranslator:
     dans le MÊME événement plutôt que dans un second.
     """
 
-    def __init__(self) -> None:
-        self._tool_count = 0
+    def __init__(self, initial_tool_count: int = 0) -> None:
+        self._tool_count = max(0, int(initial_tool_count))
         self._en_attente: list[dict[str, Any]] = []
         self._normalizations: dict[tuple[str, str], list[str]] = {}
 
@@ -115,6 +141,12 @@ class StreamTranslator:
             if isinstance(tool_history, list):
                 for rang, obs in enumerate(tool_history[self._tool_count:],
                                            start=self._tool_count):
+                    text = obs.normalized_response or ""
+                    metadata = dict(getattr(obs, "result_metadata", {}) or {})
+                    metadata = {
+                        **result_metadata(obs.tool_name, obs.arguments, text),
+                        **metadata,
+                    }
                     yield {
                         "type": "tool_call",
                         "tool": obs.tool_name,
@@ -128,11 +160,14 @@ class StreamTranslator:
                         "type": "tool_result",
                         "index": rang,
                         "tool": obs.tool_name,
-                        "result": (obs.normalized_response
-                                   or "")[:_TOOL_RESULT_PREVIEW_CHARS],
+                        "result": text[:_TOOL_RESULT_PREVIEW_CHARS],
                         "ok": obs.ok,
                         "classification": "",
                         "reason": "",
+                        "metadata": metadata,
+                        "preview_truncated": metadata["preview_truncated"],
+                        "preview_character_count": metadata[
+                            "preview_character_count"],
                     })
                 self._tool_count = max(self._tool_count, len(tool_history))
 

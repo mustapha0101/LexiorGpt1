@@ -29,6 +29,7 @@ _RE_ARTICLE_REF = re.compile(
 )
 
 _RESULT_SEPARATOR = re.compile(r"\n-{3,}\n|\n\d+\.\s")
+_URL_RE = re.compile(r"https?://[^\s\"',\]\)]+")
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +40,7 @@ def classify_case_result(
     result_text: str,
     target_articles: list[str],
     user_situation: str,
+    source_url: str = "",
     jurisdiction: str = "Québec",
 ) -> CaseRelevanceResult:
     """Classify a single jurisprudence search result for relevance.
@@ -132,6 +134,7 @@ def classify_case_result(
         court=court,
         date=date,
         target_provisions=target_provisions,
+        source_url=source_url,
         relevance_score=round(score, 2),
     )
 
@@ -144,6 +147,7 @@ def gate_search_results(
     results_text: str,
     target_articles: list[str],
     user_situation: str,
+    source_urls: list[str] | None = None,
 ) -> Tuple[List[CaseRelevanceResult], CaseLawSearchStatus]:
     """Split *results_text* into individual results and classify each one.
 
@@ -172,12 +176,17 @@ def gate_search_results(
         return [], CaseLawSearchStatus.empty
 
     classified: list[CaseRelevanceResult] = []
+    available_urls = list(source_urls or [])
     for chunk in chunks:
         chunk = chunk.strip()
         if not chunk:
             continue
+        urls = _URL_RE.findall(chunk)
+        url = urls[0] if urls else (
+            available_urls[0] if len(available_urls) == 1 else "")
         classified.append(
-            classify_case_result(chunk, target_articles, user_situation)
+            classify_case_result(chunk, target_articles, user_situation,
+                                 source_url=url)
         )
 
     if not classified:
@@ -224,3 +233,13 @@ def _extract_keywords(text: str, min_len: int = 4) -> list[str]:
 
     words = re.findall(r"[a-zA-ZÀ-ɏ]{2,}", text.lower())
     return [w for w in words if len(w) >= min_len]
+
+
+def is_verified_quebec_decision(text: str) -> bool:
+    """Vrai seulement si un texte contient une citation de décision québécoise."""
+    if not (text or "").strip() or not _RE_QC_CITATION.search(text):
+        return False
+    folded = text.casefold()
+    return len(text.strip()) >= 120 and not any(marker in folded for marker in (
+        "aucune décision", "no decision", "résultat de recherche", "search result",
+    ))

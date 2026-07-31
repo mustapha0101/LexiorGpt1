@@ -8,6 +8,7 @@ from agentic_generation.mcp_executor import (
     compact_legal_search_response,
 )
 from agentic_generation.schemas import ToolCall
+from agentic_generation.storage import JsonCache
 
 
 def test_mock_executor_marks_and_normalizes_fixture(catalog):
@@ -40,6 +41,27 @@ def test_error_is_structured_and_never_fabricated(catalog):
     assert not obs.ok
     assert obs.raw_response is None
     assert obs.error and "RuntimeError" in obs.error
+
+
+def test_failed_observation_is_not_reused_from_cache(catalog, tmp_path):
+    call = ToolCall(name="get_ccq_articles", arguments={"start_article": 1457})
+    first = MCPExecutor(
+        catalog,
+        MockMCPTransport({"get_ccq_articles": RuntimeError("panne")}),
+        cache=JsonCache(tmp_path),
+        max_retries=0,
+    )
+    assert not asyncio.run(first.aexecute(call)).ok
+
+    second = MCPExecutor(
+        catalog,
+        MockMCPTransport({"get_ccq_articles": "Article 1457\nTexte officiel."}),
+        cache=JsonCache(tmp_path),
+        max_retries=0,
+    )
+    recovered = asyncio.run(second.aexecute(call))
+    assert recovered.ok
+    assert recovered.normalized_response.startswith("Article 1457")
 
 
 def test_long_document_is_truncated_explicitly(catalog):

@@ -117,6 +117,7 @@ class LexiorState(TypedDict, total=False):
     official_rule_retrieved: bool
     official_rule_sources: list[str]
     usable_case_sources: list[CaseRelevanceResult]
+    case_law_verified: list[ToolObservation]
     case_law_search_status: str
     exempt_tools: list[str]
 
@@ -137,9 +138,16 @@ class LexiorState(TypedDict, total=False):
     substantive_law: str
 
     # ── Clarification ────────────────────────────────────────────────────
-    pending_clarification: str
+    # Représentation unique d'une clarification en attente. Le texte rendu
+    # est dans ``question``; les clés factuelles permettent d'interpréter
+    # « oui/non » au moment de la reprise.
+    pending_clarification: dict[str, Any]
     clarification_answer: str
     clarification_count: int
+    max_clarifications: int
+    max_planner_decisions: int
+    max_search_reformulations: int
+    legislative_sufficiency: dict[str, Any]
 
     # ── Rédaction ────────────────────────────────────────────────────────
     answer_contract: Optional[dict]
@@ -182,6 +190,9 @@ def initial_state(
     system_prompt: str = "",
     thread_id: str = "",
     max_reformulations: int = 1,
+    max_clarifications: int = 2,
+    max_planner_decisions: int = 12,
+    max_search_reformulations: int | None = None,
     max_repairs: int = 1,
 ) -> dict[str, Any]:
     """État initial complet d'un run (toutes les clés, valeurs neutres).
@@ -235,6 +246,11 @@ def initial_state(
         "planner_feedback": "",
         "step": 0,
         "max_tool_calls": max_tool_calls,
+        "max_clarifications": max_clarifications,
+        "max_planner_decisions": max_planner_decisions,
+        "max_search_reformulations": (
+            max_reformulations if max_search_reformulations is None
+            else max_search_reformulations),
         "tool_history": [],
         "sources": [],
         "usable_evidence": [],
@@ -248,11 +264,13 @@ def initial_state(
         "official_rule_retrieved": False,
         "official_rule_sources": [],
         "usable_case_sources": [],
+        "case_law_verified": [],
         "case_law_search_status": "not_required",
         "exempt_tools": [],
-        "pending_clarification": "",
+        "pending_clarification": {},
         "clarification_answer": "",
         "clarification_count": 0,
+        "legislative_sufficiency": {},
         "answer_contract": None,
         "final_answer": "",
         "final_reasoning_summary": "",
@@ -334,6 +352,13 @@ def canonical_case_description(state: LexiorState) -> str:
     parts = [issue] if issue else []
     if additions:
         parts.append("Faits additionnels : " + " | ".join(additions))
+    structured = [
+        f"{key}: {value}"
+        for key, value in sorted(facts.items())
+        if key != "user_statements" and value not in (None, "", [], {})
+    ]
+    if structured:
+        parts.append("Faits structurés : " + " | ".join(structured))
     jurisdiction = (state.get("resolved_jurisdiction")
                     or context.get("resolved_jurisdiction", ""))
     if jurisdiction:
@@ -379,6 +404,11 @@ def to_research_state(state: LexiorState) -> ResearchState:
         article_reviews=deepcopy(state.get("article_reviews", {})),
         clarification_history=deepcopy(state.get("clarification_history", [])),
         case_description=description,
+        case_facts=deepcopy(state.get("facts") or {}),
+        max_clarifications=state.get("max_clarifications", 2),
+        max_planner_decisions=state.get("max_planner_decisions", 12),
+        max_search_reformulations=state.get(
+            "max_search_reformulations", state.get("max_reformulations", 1)),
     )
 
 

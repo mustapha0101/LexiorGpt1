@@ -190,6 +190,12 @@ class AgenticConfig:
     target_accepted: int = 100
     max_scenarios: int = -1            # -1 = illimité (borné par target)
     max_tool_calls: int = 4
+    # Budgets live distincts : les reprises et clarifications ne consomment
+    # pas implicitement le même compteur que les appels MCP.
+    max_tool_calls_live: int = 6
+    max_clarifications_live: int = 2
+    max_search_reformulations_live: int = 1
+    max_planner_decisions_live: int = 12
     # Recherche d'articles en lots progressifs. Ces bornes sont des
     # paramètres de coût/qualité, jamais des correspondances de droit.
     initial_article_fetch_k: int = 6
@@ -274,6 +280,10 @@ class AgenticConfig:
             "target_accepted": self.target_accepted,
             "max_scenarios": self.max_scenarios,
             "max_tool_calls": self.max_tool_calls,
+            "max_tool_calls_live": self.max_tool_calls_live,
+            "max_clarifications_live": self.max_clarifications_live,
+            "max_search_reformulations_live": self.max_search_reformulations_live,
+            "max_planner_decisions_live": self.max_planner_decisions_live,
             "initial_article_fetch_k": self.initial_article_fetch_k,
             "article_fetch_batch_size": self.article_fetch_batch_size,
             "max_articles_per_issue": self.max_articles_per_issue,
@@ -320,6 +330,15 @@ def load_config(config_path: Optional[str] = None,
     cfg.language = gen.get("language", cfg.language)
     cfg.target_accepted = int(gen.get("target_accepted", cfg.target_accepted))
     cfg.max_tool_calls = int(gen.get("max_tool_calls", cfg.max_tool_calls))
+    cfg.max_tool_calls_live = int(gen.get(
+        "max_tool_calls_live", cfg.max_tool_calls_live))
+    cfg.max_clarifications_live = int(gen.get(
+        "max_clarifications_live", cfg.max_clarifications_live))
+    cfg.max_search_reformulations_live = int(gen.get(
+        "max_search_reformulations_live",
+        cfg.max_search_reformulations_live))
+    cfg.max_planner_decisions_live = int(gen.get(
+        "max_planner_decisions_live", cfg.max_planner_decisions_live))
     cfg.max_tool_response_chars = int(gen.get("max_tool_response_chars",
                                               cfg.max_tool_response_chars))
     cfg.near_duplicate_jaccard = float(gen.get("near_duplicate_jaccard",

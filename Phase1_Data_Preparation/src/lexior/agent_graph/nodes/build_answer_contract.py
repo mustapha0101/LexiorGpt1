@@ -112,6 +112,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         articles_retenus = [
             numero for numero in textes_officiels
             if (numero not in incompatibles_deterministes
+                and reviews_stored.get(numero, {}).get(
+                    "retrieval_group", "primary") == "primary"
                 and reviews_stored.get(numero, {}).get("status") in {
                     "applicable", "conditionally_applicable"})
         ]
@@ -147,6 +149,25 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                     and tool_history[index].tool_name in {
                         "get_ccq_articles", "get_cpc_articles"})
         ]
+        usable_tools = [
+            tool_history[i].tool_name for i in usable_idx
+            if 0 <= i < len(tool_history)
+        ]
+
+    # Les décisions vérifiées sont persistées par signature dans le dossier,
+    # pas par un index de l'ancien tour. On reconstruit donc leur index dans la
+    # vue visible courante avant de remettre la preuve au rédacteur.
+    if live and state.get("case_law_search_status") == "verified":
+        verified_hashes = {
+            getattr(item, "content_hash", "")
+            for item in state.get("case_law_verified", [])
+        }
+        usable_idx = list(dict.fromkeys(
+            [*usable_idx, *[
+                index for index, item in enumerate(tool_history)
+                if item.tool_name == "get_quebec_regulation"
+                and (not verified_hashes or item.content_hash in verified_hashes)
+            ]]))
         usable_tools = [
             tool_history[i].tool_name for i in usable_idx
             if 0 <= i < len(tool_history)

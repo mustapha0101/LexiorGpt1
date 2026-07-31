@@ -3,6 +3,11 @@ generation:
   language: fr
   target_accepted: 100
   max_tool_calls: 4
+  # Budgets spécifiques au chat live. Le budget dataset reste séparé.
+  max_tool_calls_live: 6
+  max_clarifications_live: 2
+  max_search_reformulations_live: 1
+  max_planner_decisions_live: 12
   # Les articles issus de la recherche sont lus en lots : on commence assez
   # large pour vérifier plusieurs hypothèses, puis on élargit seulement si la
   # revue ne trouve aucune règle utilisable. Aucun numéro d'article n'est

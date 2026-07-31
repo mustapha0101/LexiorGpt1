@@ -39,8 +39,14 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     )
     # Console Windows cp1252 : rester en ASCII pour ne jamais faire
     # échouer le nœud sur un simple log.
-    print(log_line.encode("ascii", "backslashreplace").decode("ascii"),
-          flush=True)
+    # Le backend peut être lancé sans console attachée (service Windows,
+    # processus détaché ou worker SSE). Une sortie standard invalide ne doit
+    # jamais transformer une décision valide en erreur du graphe.
+    try:
+        print(log_line.encode("ascii", "backslashreplace").decode("ascii"),
+              flush=True)
+    except (OSError, ValueError):
+        pass
 
     return {
         "latest_decision": decision.model_dump(mode="json"),

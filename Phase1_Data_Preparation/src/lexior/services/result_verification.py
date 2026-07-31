@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from lexior.agentic.citations import FEDERAL_CITATION_RE, QUEBEC_CITATION_RE
+from lexior.agentic.case_law_gate import is_verified_quebec_decision
 from lexior.agentic.planner_agent import FEDERAL_STATUTES
 from lexior.agentic.response_verifier import (
     contains_generated_summary,
@@ -196,6 +197,20 @@ class ResultVerificationService:
                      and not is_retrieval_only and not is_generated),
             relevant=True,
         )
+
+        if (observation.tool_name == "get_quebec_regulation"
+                and observation.ok
+                and not is_verified_quebec_decision(
+                    observation.normalized_response)):
+            assessment.evidence_level = EvidenceLevel.candidate.value
+            assessment.detailed_status = DetailedResultStatus.irrelevant.value
+            assessment.usable_as_evidence = False
+            assessment.citable = False
+            assessment.relevant = False
+            assessment.reason = (
+                "le contenu récupéré ne confirme pas une décision québécoise "
+                "complète")
+            return assessment
 
         if is_generated:
             # Candidate au mieux : identifie une piste, ne prouve rien.

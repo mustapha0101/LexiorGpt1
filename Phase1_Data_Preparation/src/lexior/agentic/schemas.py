@@ -296,6 +296,11 @@ class ToolObservation(BaseModel):
     ok: bool = True
     mock: bool = False
     latency_ms: Optional[float] = None
+    # Métadonnées de transparence : le texte affiché dans SSE est un aperçu,
+    # jamais une représentation complète implicite du résultat.
+    preview_truncated: bool = False
+    preview_character_count: int = 0
+    result_metadata: dict[str, Any] = Field(default_factory=dict)
 
     def finalize_hash(self) -> "ToolObservation":
         if not self.content_hash:
@@ -346,6 +351,9 @@ class CaseLawSearchStatus(str, Enum):
     irrelevant = "irrelevant"
     failed = "failed"
     not_required = "not_required"
+    candidates_pending_fetch = "candidates_pending_fetch"
+    candidates_without_url = "candidates_without_url"
+    verified = "verified"
 
 
 class CaseRelevanceResult(BaseModel):
@@ -395,6 +403,10 @@ class ResearchState(BaseModel):
     article_reviews: dict[str, dict[str, Any]] = Field(default_factory=dict)
     clarification_history: list[dict[str, Any]] = Field(default_factory=list)
     case_description: str = ""
+    case_facts: dict[str, Any] = Field(default_factory=dict)
+    max_clarifications: int = Field(default=2, ge=0)
+    max_planner_decisions: int = Field(default=12, ge=0)
+    max_search_reformulations: int = Field(default=1, ge=0)
 
     def tool_calls_made(self) -> int:
         return (self.current_turn_tool_count

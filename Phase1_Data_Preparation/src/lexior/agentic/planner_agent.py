@@ -16,6 +16,7 @@ from .taxonomy_conditions import (
 from lexior.services.provenance import (
     a_une_provenance, numero_demande, numeros_demandes, reponses_reussies,
 )
+from lexior.services.article_review import assess_legislative_sufficiency
 from .schemas import Decision, DecisionTrace, PlannerDecision, ResearchState
 from .tool_catalog import MAX_ARTICLES_PAR_APPEL, ToolCatalog
 from .validators import validate_next_action, validate_planner_decision
@@ -201,7 +202,6 @@ class PlannerAgent:
                     # reconstruction déterministe est calibrée pour les
                     # scénarios scriptés et détruit les requêtes libres.
                     decision = self._validate_arguments(state, decision)
-                decision = self._guard_duplicate_call(state, decision)
                 if not self.chat_mode:
                     decision = self._guard_tool_compatibility(state, decision)
                     decision = self._guard_required_tools(state, decision)
@@ -210,8 +210,14 @@ class PlannerAgent:
                         state, decision, retried=bool(feedback))
                     decision = self._guard_progressive_article_review(
                         state, decision)
+                    decision = self._guard_live_tool_chain_compatibility(
+                        state, decision)
+                # Toute comparaison de doublon porte sur les arguments finaux
+                # du contrat outil, après legal_terms, candidats et schéma.
+                decision = self._prepare_decision_arguments(state, decision)
+                decision = self._guard_duplicate_call(state, decision)
                 decision = self._guard_budget(state, decision)
-                decision = self._raise_if_invalid(state, decision)
+                decision = self._raise_if_invalid(state, decision, prepare=False)
                 return decision
             except ValueError as exc:
                 # ValidationError pydantic incluse (sous-classe de ValueError).
@@ -224,21 +230,13 @@ class PlannerAgent:
                 feedback = str(exc) or "décision invalide"
 
     def _raise_if_invalid(self, state: ResearchState,
-                          decision: PlannerDecision) -> PlannerDecision:
-        self._attach_semantic_legal_terms(decision)
-        self._attach_retrieved_candidates(state, decision)
-        self.last_live_normalization = {}
-        if (self.chat_mode and decision.decision == Decision.call_tool
-                and decision.next_tool):
-            normalized = self.catalog.normalize_live_call(
-                decision.next_tool, decision.arguments)
-            decision.arguments = normalized.arguments
-            if normalized.removed_fields:
-                self.last_live_normalization = {
-                    "tool": decision.next_tool,
-                    "removed_fields": list(normalized.removed_fields),
-                    "remaining_arguments": dict(normalized.arguments),
-                }
+                          decision: PlannerDecision,
+                          *, prepare: bool = True) -> PlannerDecision:
+        # Les appels directs historiques à ce helper attendent encore que les
+        # candidats soient attachés ici. Le flux planner principal passe
+        # ``prepare=False`` : il prépare une seule fois avant déduplication.
+        if prepare:
+            decision = self._prepare_decision_arguments(state, decision)
         errors = validate_planner_decision(decision, self.catalog)
         if (decision.decision == Decision.call_tool and decision.next_tool
                 and not self.chat_mode):
@@ -267,6 +265,26 @@ class PlannerAgent:
                         next_action="final_answer"),
                 )
             raise ValueError("décision Planner invalide : " + "; ".join(errors))
+        return decision
+
+    def _prepare_decision_arguments(
+            self, state: ResearchState,
+            decision: PlannerDecision) -> PlannerDecision:
+        """Prépare une décision exactement une fois avant les guards d'arguments."""
+        self._attach_semantic_legal_terms(decision)
+        self._attach_retrieved_candidates(state, decision)
+        self.last_live_normalization = {}
+        if (self.chat_mode and decision.decision == Decision.call_tool
+                and decision.next_tool):
+            normalized = self.catalog.normalize_live_call(
+                decision.next_tool, decision.arguments)
+            decision.arguments = normalized.arguments
+            if normalized.removed_fields:
+                self.last_live_normalization = {
+                    "tool": decision.next_tool,
+                    "removed_fields": list(normalized.removed_fields),
+                    "remaining_arguments": dict(normalized.arguments),
+                }
         return decision
 
     @staticmethod
@@ -710,8 +728,12 @@ class PlannerAgent:
             return decision
         if state.scenario.request_type != "case_analysis":
             return decision
-        if any(review.get("status") == "applicable"
-               for review in state.article_reviews.values()):
+        sufficiency = assess_legislative_sufficiency(
+            state.article_reviews, state.case_description, state.case_facts,
+            remaining_candidates=bool(
+                self._semantic_candidates_for(state, "get_ccq_articles")
+                or self._semantic_candidates_for(state, "get_cpc_articles")))
+        if sufficiency.sufficient:
             return self._guard_live_source_completeness(state, decision)
         fetch_tool = next((tool for tool in (
             "get_ccq_articles", "get_cpc_articles")
@@ -739,6 +761,88 @@ class PlannerAgent:
                 )
         return self._guard_live_source_completeness(state, decision)
 
+    def _guard_live_tool_chain_compatibility(
+            self, state: ResearchState,
+            decision: PlannerDecision) -> PlannerDecision:
+        """Applique la provenance du candidat également en mode live."""
+        if decision.decision != Decision.call_tool or not decision.next_tool:
+            return decision
+        has_qc_case_search = any(
+            obs.tool_name == "search_quebec_jurisprudence" and obs.ok
+            for obs in state.tool_history)
+        has_qc_regulation_search = any(
+            obs.tool_name == "search_quebec_regulations" and obs.ok
+            for obs in state.tool_history)
+        if decision.next_tool == "fetch_document" and has_qc_regulation_search:
+            args = self._arguments("get_quebec_regulation", state)
+            if args:
+                decision.next_tool = "get_quebec_regulation"
+                decision.arguments = args
+                return decision
+            return PlannerDecision(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                decision=Decision.final_answer,
+                thinking_text=(
+                    "La recherche réglementaire québécoise ne fournit pas "
+                    "d'URL acceptée pour un texte complet."),
+                decision_trace=DecisionTrace(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    need="URL réglementaire acceptée absente",
+                    next_action="final_answer"))
+        if decision.next_tool == "fetch_document" and has_qc_case_search:
+            accepted = [item for item in state.usable_case_sources
+                        if (item.get("source_url", "") if isinstance(item, dict)
+                            else getattr(item, "source_url", ""))]
+            if not accepted:
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    decision=Decision.final_answer,
+                    thinking_text=(
+                        "Aucune décision québécoise n'a été retenue par le "
+                        "gate; je ne récupère pas une URL du résultat rejeté."),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need="candidat jurisprudentiel non accepté",
+                        next_action="final_answer"))
+            return PlannerDecision(
+                request_type=decision.request_type,
+                jurisdiction=decision.jurisdiction,
+                decision=Decision.call_tool,
+                next_tool="get_quebec_regulation",
+                arguments={"url": str(
+                    accepted[0].get("source_url", "")
+                    if isinstance(accepted[0], dict)
+                    else accepted[0].source_url)},
+                thinking_text=(
+                    "Le candidat québécois accepté doit être récupéré par "
+                    "get_quebec_regulation avant toute utilisation."),
+                decision_trace=DecisionTrace(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    need="chaîne jurisprudentielle québécoise",
+                    next_action="call_tool:get_quebec_regulation"))
+        if decision.next_tool == "get_quebec_regulation":
+            args = self._arguments("get_quebec_regulation", state)
+            if not args:
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    decision=Decision.final_answer,
+                    thinking_text=(
+                        "Aucun document québécois accepté ne possède d'URL "
+                        "récupérable; je conserve les textes déjà retenus."),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need="URL de source acceptée absente",
+                        next_action="final_answer"))
+            decision.arguments = args
+        return decision
+
     def _guard_live_source_completeness(
             self, state: ResearchState,
             decision: PlannerDecision) -> PlannerDecision:
@@ -751,7 +855,7 @@ class PlannerAgent:
         has_case_search = any(
             obs.tool_name == "search_quebec_jurisprudence"
             for obs in state.tool_history)
-        has_case_content = any(
+        has_case_content = state.case_law_search_status == "verified" or any(
             obs.tool_name == "get_quebec_regulation" and obs.ok
             for obs in state.tool_history)
         if has_case_content:
@@ -760,7 +864,8 @@ class PlannerAgent:
                     state.article_reviews.values()}
         if not statuses & {"applicable", "conditionally_applicable"}:
             return decision
-        if has_case_search:
+        if (state.case_law_search_status == "candidates_pending_fetch"
+                and state.usable_case_sources):
             arguments = self._arguments("get_quebec_regulation", state)
             if arguments:
                 return PlannerDecision(
@@ -779,6 +884,54 @@ class PlannerAgent:
                         need="contenu intégral d'une décision candidate",
                         next_action="call_tool:get_quebec_regulation"),
                 )
+            return decision
+        # Compatibility for ResearchState objects created by integrations
+        # predating the explicit case-law gate status. This branch is limited
+        # to the default ``not_required`` state; a real gate result such as
+        # ``irrelevant`` or ``candidates_without_url`` can never use a raw URL.
+        if state.case_law_search_status == "not_required":
+            legacy_search = next(
+                (obs for obs in reversed(state.tool_history)
+                 if obs.tool_name == "search_quebec_jurisprudence"
+                 and obs.ok and obs.source_urls),
+                None,
+            )
+            if legacy_search:
+                return PlannerDecision(
+                    request_type=decision.request_type,
+                    jurisdiction=decision.jurisdiction,
+                    decision=Decision.call_tool,
+                    next_tool="get_quebec_regulation",
+                    arguments={"url": legacy_search.source_urls[0]},
+                    thinking_text=(
+                        "État legacy sans statut de gate : la source sera "
+                        "vérifiée avant toute utilisation."),
+                    decision_trace=DecisionTrace(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        need="compatibilité d'état sans statut de gate",
+                        next_action="call_tool:get_quebec_regulation"),
+                )
+        if (has_case_search and state.case_law_search_status in {
+                "irrelevant", "empty", "failed", "tool_error",
+                "coverage_gap", "candidates_without_url"}):
+            if state.reformulation_count < state.max_search_reformulations:
+                arguments = self._arguments("search_quebec_jurisprudence", state)
+                if arguments:
+                    return PlannerDecision(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        decision=Decision.call_tool,
+                        next_tool="search_quebec_jurisprudence",
+                        arguments=arguments,
+                        thinking_text=(
+                            "Le gate n'a pas retenu de décision. Je tente une "
+                            "seule reformulation avec le dossier complet."),
+                        decision_trace=DecisionTrace(
+                            request_type=decision.request_type,
+                            jurisdiction=decision.jurisdiction,
+                            need="reformulation jurisprudentielle bornée",
+                            next_action="call_tool:search_quebec_jurisprudence"))
             return decision
         factual_answers = [entry for entry in state.clarification_history
                            if entry.get("category") == "fact"
@@ -1293,6 +1446,37 @@ class PlannerAgent:
                 route = [t for t in route if t != fetch_tool]
         return route
 
+    def _build_quebec_case_law_query(self, state: ResearchState) -> str:
+        """Construit une requête stable à partir du dossier complet."""
+        reviews = [
+            (number, review) for number, review in state.article_reviews.items()
+            if review.get("retrieval_group") == "primary"
+            and review.get("status") in {"applicable", "conditionally_applicable"}
+        ]
+        reviews.sort(key=lambda item: (
+            int(item[1].get("rerank_rank", 10_000)), str(item[0])))
+        role_terms: list[str] = []
+        for _number, review in reviews:
+            role_terms.extend(str(role).replace("_", " ")
+                              for role in review.get("rule_roles", []))
+        facts = state.case_facts or {}
+        fact_terms = [
+            f"{key.replace('_', ' ')} {value}"
+            for key, value in sorted(facts.items())
+            if key != "user_statements" and value not in (None, "", [], {})
+        ]
+        segments = [
+            state.case_description.strip(),
+            "faits : " + " | ".join(fact_terms),
+            "operations : " + " ".join(dict.fromkeys(role_terms)),
+            "articles : " + " ".join(
+                f"article {number}" for number, _review in reviews[:6]),
+        ]
+        query = " ".join(segment for segment in segments if segment.strip())
+        if state.reformulation_count:
+            query += " application jurisprudentielle comparable"
+        return query[:500]
+
     def _arguments(self, tool: str, state: ResearchState,
                    thinking: str = "",
                    legal_terms: str = "") -> Optional[dict]:
@@ -1349,37 +1533,29 @@ class PlannerAgent:
             keyword = candidates[min(previous, len(candidates) - 1)]
             return {"keyword": keyword}
         if tool == "search_quebec_jurisprudence":
-            article_nums = [
-                number for number, review in state.article_reviews.items()
-                if review.get("status") in {
-                    "applicable", "conditionally_applicable"}
-            ] or self._extract_article_nums_from_history(state)
-            situation = self._compact_keyword(state.case_description or query)
-            if article_nums:
-                article_part = " ".join(
-                    f"article {n}" for n in article_nums[:4]
-                )
-                jurisprudence_query = f"{article_part} {situation}"
-            else:
-                intent = self._extract_search_intent(thinking)
-                if intent.keywords:
-                    jurisprudence_query = " ".join(intent.keywords[:4])
-                else:
-                    jurisprudence_query = situation
-            return {"query": jurisprudence_query[:200]}
+            return {"query": self._build_quebec_case_law_query(state)}
         if tool == "get_quebec_regulation":
-            urls = [u for o in state.tool_history for u in o.source_urls]
-            if not urls:
-                url_re = re.compile(r"https?://[^\s\"',\]\)]+")
-                for obs in reversed(state.tool_history):
-                    if (obs.tool_name in {
-                            "search_quebec_regulations",
-                            "search_quebec_jurisprudence"}
-                            and obs.ok):
-                        urls = url_re.findall(obs.normalized_response or "")
-                        if urls:
-                            break
-            return {"url": urls[0]} if urls else None
+            accepted = [item for item in state.usable_case_sources
+                        if (item.get("source_url", "") if isinstance(item, dict)
+                            else getattr(item, "source_url", ""))]
+            if accepted and state.case_law_search_status == "candidates_pending_fetch":
+                url = (accepted[0].get("source_url", "")
+                       if isinstance(accepted[0], dict)
+                       else accepted[0].source_url)
+                return {"url": str(url)}
+            # Les règlements québécois ont leur propre chaîne de provenance;
+            # une URL est permise seulement depuis un résultat réussi de cet
+            # outil, jamais depuis une recherche jurisprudentielle rejetée.
+            for obs in reversed(state.tool_history):
+                if obs.tool_name != "search_quebec_regulations" or not obs.ok:
+                    continue
+                if obs.source_urls:
+                    return {"url": obs.source_urls[0]}
+                embedded = re.search(r"https?://[^\s\"'<>]+",
+                                     obs.normalized_response or "")
+                if embedded:
+                    return {"url": embedded.group(0).rstrip(".,;)")}
+            return None
         if tool == "get_quebec_legal_info":
             return {"type": "eevlois"}
         if tool == "coverage":

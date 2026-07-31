@@ -16,7 +16,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from lexior.agentic.case_law_gate import gate_search_results
+from lexior.agentic.case_law_gate import (
+    gate_search_results, is_verified_quebec_decision,
+)
+from lexior.services.article_review import (
+    assess_legislative_sufficiency, enrich_article_review,
+)
 from lexior.services.assertion_grounding import (
     articles_incompatibles_deterministes,
     textes_recuperes,
@@ -46,16 +51,21 @@ def _review_status(verdict: Any) -> str:
 
 
 def _append_once(values: list[Any], value: Any) -> list[Any]:
+    def field(item: Any, name: str) -> Any:
+        if isinstance(item, dict):
+            return item.get(name, "")
+        return getattr(item, name, "")
+
     signature = (
-        getattr(value, "tool_name", ""),
-        getattr(value, "content_hash", ""),
-        getattr(value, "normalized_response", ""),
+        field(value, "tool_name"),
+        field(value, "content_hash"),
+        field(value, "normalized_response"),
     )
     for item in values:
         if signature == (
-                getattr(item, "tool_name", ""),
-                getattr(item, "content_hash", ""),
-                getattr(item, "normalized_response", "")):
+                field(item, "tool_name"),
+                field(item, "content_hash"),
+                field(item, "normalized_response")):
             return values
     return [*values, value]
 
@@ -78,16 +88,24 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         selection = ctx.services.assertion_grounding.selectionner_articles(
             official_texts, faits=case_description)
         reviews = dict(state.get("article_reviews", {}))
-        for number, text in official_texts.items():
+        for rank, (number, text) in enumerate(official_texts.items(), start=1):
             verdict = deterministic.get(number) or selection.get(number)
             status = (_review_status(verdict) if verdict else "unreviewed")
-            reviews[number] = {
-                "status": status,
-                "reason": str(getattr(verdict, "motif", "") or "")[:300],
-                "source": observation.tool_name,
-                "reviewed": bool(verdict),
-                "text_available": bool(text.strip()),
-            }
+            reviews[number] = enrich_article_review(
+                article_number=number,
+                status=status,
+                reason=str(getattr(verdict, "motif", "") or ""),
+                text=text,
+                facts=case_description,
+                rank=rank,
+                source=observation.tool_name,
+            )
+
+        sufficiency = assess_legislative_sufficiency(
+            reviews, case_description, state.get("facts") or {},
+            remaining_candidates=any(
+                item.tool_name in {"semantic_search_ccq", "semantic_search_cpc"}
+                and item.ok for item in visible_history))
 
         # Une récupération officiellement réussie devient une preuve durable
         # uniquement si son texte a été effectivement parsé. Les résultats
@@ -103,12 +121,14 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 "official_rule_sources": sources,
                 "prior_evidence": prior_evidence,
                 "article_reviews": reviews,
+                "legislative_sufficiency": sufficiency.to_dict(),
             })
             context.update({
                 "prior_evidence": prior_evidence,
                 "article_reviews": reviews,
                 "official_rule_retrieved": True,
                 "official_rule_sources": sources,
+                "legislative_sufficiency": sufficiency.to_dict(),
             })
 
     if (observation.tool_name == "search_quebec_jurisprudence"
@@ -127,19 +147,49 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 if item.tool_name in _OFFICIAL_RULE_TOOLS and item.ok
                 for number in numeros_demandes(item.tool_name, item.arguments)
             ))
-        usable, status = gate_search_results(
+        classified, status = gate_search_results(
             observation.normalized_response,
             article_nums,
             case_description,
+            source_urls=list(observation.source_urls),
         )
+        accepted = [item for item in classified
+                    if item.usable and item.source_url]
         existing_cases = list(state.get("usable_case_sources", []))
-        updates["usable_case_sources"] = existing_cases + list(usable)
+        signatures = {(item.citation, item.source_url)
+                      for item in existing_cases}
+        for item in accepted:
+            if (item.citation, item.source_url) not in signatures:
+                existing_cases.append(item)
+                signatures.add((item.citation, item.source_url))
+        updates["usable_case_sources"] = existing_cases
         updates["case_law_search_status"] = (
-            "candidates_pending_fetch" if usable else
-            (status.value if hasattr(status, "value") else str(status)))
+            "candidates_pending_fetch" if accepted else
+            ("candidates_without_url" if any(item.usable for item in classified)
+             else (status.value if hasattr(status, "value") else str(status))))
         context.update({
             "usable_case_sources": updates["usable_case_sources"],
             "case_law_search_status": updates["case_law_search_status"],
+        })
+
+    if (observation.tool_name == "get_quebec_regulation"
+            and observation.ok
+            and is_verified_quebec_decision(observation.normalized_response)
+            and (state.get("last_tool_assessment") or {}).get(
+                "usable_as_evidence", False)):
+        verified = _append_once(
+            list(state.get("case_law_verified", [])), observation)
+        prior_evidence = _append_once(
+            list(state.get("prior_evidence", [])), observation)
+        updates.update({
+            "case_law_verified": verified,
+            "prior_evidence": prior_evidence,
+            "case_law_search_status": "verified",
+        })
+        context.update({
+            "case_law_verified": verified,
+            "prior_evidence": prior_evidence,
+            "case_law_search_status": "verified",
         })
 
     if context:

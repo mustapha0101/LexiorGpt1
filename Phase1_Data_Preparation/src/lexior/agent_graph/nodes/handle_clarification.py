@@ -30,20 +30,77 @@ def _clarification_category(question: str, missing_facts: list[str]) -> str:
 
 
 def _history_entry(question: str, missing_facts: list[str], answer: str,
-                   category: str) -> dict[str, Any]:
+                   category: str, clarification: dict[str, Any] | None = None,
+                   interpretation: str = "") -> dict[str, Any]:
     return {
+        "clarification_id": (clarification or {}).get("clarification_id", ""),
         "category": category,
         "question": question,
+        "fact_keys": list((clarification or {}).get(
+            "fact_keys", missing_facts)),
         "missing_facts": list(missing_facts),
         "answer": answer,
         "answered": bool(answer),
+        "answer_interpretation": interpretation,
+        "status": "answered" if answer else "unanswered",
     }
+
+
+def _interpret_answer(answer: str) -> str:
+    folded = " ".join((answer or "").casefold().split())
+    if folded in {"oui", "yes", "je pense que oui", "probablement",
+                  "je crois que oui", "certainement"}:
+        return "affirmative"
+    if folded in {"non", "no", "je ne pense pas", "certainement pas"}:
+        return "negative"
+    if folded in {"je ne sais pas", "ne sais pas", "incertain", "incertaine",
+                  "je ne suis pas certain", "je ne suis pas certaine"}:
+        return "unresolved"
+    return "explanation"
+
+
+def _apply_fact_answer(facts: dict[str, Any], clarification: dict[str, Any],
+                       answer: str) -> tuple[dict[str, Any], str]:
+    interpretation = _interpret_answer(answer)
+    keys = [str(key) for key in clarification.get("fact_keys", [])]
+    if clarification.get("category") != "fact":
+        return facts, interpretation
+    for key in keys:
+        value: Any
+        if interpretation == "affirmative":
+            value = True
+        elif interpretation == "negative":
+            value = False
+        elif interpretation == "unresolved":
+            value = None
+        else:
+            value = {"answer": answer, "interpretation": interpretation}
+        facts[key] = {
+            "value": value,
+            "source": "user_clarification",
+            "confidence": "asserted_by_user",
+            "status": interpretation,
+        }
+    return facts, interpretation
 
 
 def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     decision = PlannerDecision.model_validate(state["latest_decision"])
-    question = ctx.services.clarification.build_question(
-        decision, state.get("missing_critical_facts", []))
+    pending = dict(state.get("pending_clarification") or {})
+    question = str(pending.get("question") or "").strip()
+    if not question:
+        question = ctx.services.clarification.build_question(
+            decision, state.get("missing_critical_facts", []))
+        pending = {
+            "clarification_id": "fact-runtime",
+            "category": _clarification_category(
+                question, state.get("missing_critical_facts", [])),
+            "fact_keys": list(state.get("missing_critical_facts", [])),
+            "question": question,
+            "answer_type": "yes_no_or_explanation",
+            "source_articles": [],
+            "status": "pending",
+        }
 
     messages = list(state.get("messages", []))
     messages.append(Message(role=Role.assistant, content=question))
@@ -57,33 +114,35 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         # rejoue depuis le début (la construction ci-dessus est pure).
         answer = interrupt({
             "question": question,
-            "missing_facts": list(state.get("missing_critical_facts", [])),
+            "missing_facts": list(pending.get(
+                "fact_keys", state.get("missing_critical_facts", []))),
+            "clarification": pending,
         })
         answer_text = str(answer or "").strip()
         messages.append(Message(role=Role.user, content=answer_text))
         history = list(state.get("clarification_history", []))
-        history.append(_history_entry(
-            question, missing_facts, answer_text, category))
         context = dict(state.get("case_context") or {})
         facts = dict(context.get("facts") or state.get("facts") or {})
-        statements = list(facts.get("user_statements") or [])
-        if answer_text and answer_text not in statements:
-            statements.append(answer_text)
-        facts["user_statements"] = statements
+        facts, interpretation = _apply_fact_answer(
+            facts, pending, answer_text)
+        history.append(_history_entry(
+            question, missing_facts, answer_text, category, pending,
+            interpretation))
         context.update({
             "facts": facts,
             "clarification_history": history,
+            "pending_clarification": {},
         })
         return {
             "messages": messages,
             "clarification_count": count,
-            "pending_clarification": "",
             "clarification_answer": answer_text,
             "latest_user_message": answer_text,
             "latest_user_intent": answer_text,
             "facts": facts,
             "clarification_history": history,
             "case_context": context,
+            "pending_clarification": {},
             "status": "planning",
         }
 
@@ -92,13 +151,15 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     if synthetic:
         messages.append(Message(role=Role.user, content=synthetic))
         history = list(state.get("clarification_history", []))
-        history.append(_history_entry(question, missing_facts, synthetic, category))
+        history.append(_history_entry(
+            question, missing_facts, synthetic, category, pending,
+            _interpret_answer(synthetic)))
         return {
             "messages": messages,
             "clarification_count": count,
-            "pending_clarification": "",
             "clarification_answer": synthetic,
             "clarification_history": history,
+            "pending_clarification": {},
             "status": "planning",
         }
 
@@ -107,7 +168,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     return {
         "messages": messages,
         "clarification_count": count,
-        "pending_clarification": question,
+        "pending_clarification": pending,
         "final_answer": question,
         "status": "answering",
         "stop_reason": "clarification_required",
