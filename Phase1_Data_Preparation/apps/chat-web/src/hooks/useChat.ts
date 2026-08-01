@@ -7,6 +7,7 @@ import type {
   SSEEvent,
   ToolCall,
 } from "../types";
+import type { EvaluationChatContext } from "./useHumanEvaluation";
 
 let nextId = 0;
 function uid(): string {
@@ -31,6 +32,11 @@ export interface UseChatReturn {
   sendMessage: (query: string) => Promise<void>;
   cancelStream: () => void;
   clearMessages: () => void;
+  beginThread: (threadId: string) => void;
+  setEvaluationContext: (context: EvaluationChatContext | null) => void;
+  lastDone: boolean;
+  lastDonePendingClarification: boolean;
+  lastAccepted: boolean | null;
 }
 
 const RAW_EVENTS_MAX = 500;
@@ -53,6 +59,10 @@ export function useChat(): UseChatReturn {
   const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
   const [rawEvents, setRawEvents] = useState<RawSSELine[]>([]);
   const [model, setModelState] = useState<ChatModelId>(loadSavedModel);
+  const [evaluationContext, setEvaluationContextState] = useState<EvaluationChatContext | null>(null);
+  const [lastDone, setLastDone] = useState(false);
+  const [lastDonePendingClarification, setLastDonePendingClarification] = useState(false);
+  const [lastAccepted, setLastAccepted] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const queryRef = useRef("");
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -118,6 +128,9 @@ export function useChat(): UseChatReturn {
 
       setMessages((prev) => [...prev, userMsg, blankAssistant()]);
       setStreaming(true);
+      setLastDone(false);
+      setLastDonePendingClarification(false);
+      setLastAccepted(null);
       setCurrentNode(null);
       setVisitedNodes([]);
 
@@ -130,10 +143,12 @@ export function useChat(): UseChatReturn {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             query,
-            mode: "live",
+            mode: evaluationContext?.mode ?? "live",
             thread_id: threadIdRef.current,
             history,
             model: modelRef.current,
+            evaluation_run_id: evaluationContext?.runId,
+            evaluation_scenario_id: evaluationContext?.scenarioId,
           }),
           signal: controller.signal,
         });
@@ -306,6 +321,9 @@ export function useChat(): UseChatReturn {
 
               case "done":
                 setCurrentNode(null);
+                setLastDone(true);
+                setLastDonePendingClarification(Boolean(event.pending_clarification));
+                setLastAccepted(event.accepted);
                 upsertAssistant(
                   (m) => ({ ...m, statusLabel: undefined }),
                   blankAssistant,
@@ -336,7 +354,7 @@ export function useChat(): UseChatReturn {
         abortRef.current = null;
       }
     },
-    [upsertAssistant],
+    [evaluationContext, upsertAssistant],
   );
 
   const cancelStream = useCallback(() => {
@@ -350,6 +368,26 @@ export function useChat(): UseChatReturn {
     setVisitedNodes([]);
     setRawEvents([]);
     threadIdRef.current = newThreadId();
+    setLastDone(false);
+    setLastDonePendingClarification(false);
+    setLastAccepted(null);
+  }, []);
+
+  const beginThread = useCallback((threadId: string) => {
+    abortRef.current?.abort();
+    setMessages([]);
+    setCurrentNode(null);
+    setVisitedNodes([]);
+    setRawEvents([]);
+    setLastDone(false);
+    setLastDonePendingClarification(false);
+    setLastAccepted(null);
+    threadIdRef.current = threadId;
+  }, []);
+
+  const setEvaluationContext = useCallback((context: EvaluationChatContext | null) => {
+    setEvaluationContextState(context);
+    if (context) threadIdRef.current = context.threadId;
   }, []);
 
   return {
@@ -364,5 +402,10 @@ export function useChat(): UseChatReturn {
     sendMessage,
     cancelStream,
     clearMessages,
+    beginThread,
+    setEvaluationContext,
+    lastDone,
+    lastDonePendingClarification,
+    lastAccepted,
   };
 }

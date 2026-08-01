@@ -15,7 +15,10 @@ l'interface web consomme depuis la première version :
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import re
+from datetime import datetime, timezone
 from typing import Any, Iterator, Optional
 
 NODE_LABELS = {
@@ -25,6 +28,9 @@ NODE_LABELS = {
     "update_active_task": "Updating active task",
     "resolve_jurisdiction": "Resolving jurisdiction",
     "analyze_facts": "Analyzing facts",
+    "select_primary_authorities": "Selecting primary authorities",
+    "extract_rule_contract": "Building rule contract",
+    "derive_rule_specific_facts": "Checking decisive facts",
     "plan": "Planning next step",
     "validate_plan": "Validating plan",
     "handle_clarification": "Asking for clarification",
@@ -47,6 +53,8 @@ NODE_LABELS = {
 }
 
 _TOOL_RESULT_PREVIEW_CHARS = 500
+_TOOL_RESULT_INLINE_MAX = max(1000, int(os.environ.get(
+    "HUMAN_EVAL_MAX_INLINE_TOOL_RESULT_CHARS", "20000")))
 
 # Nœuds après lesquels un résultat d'outil encore non classé doit être émis
 # quand même : mieux vaut l'afficher sans classification que le perdre.
@@ -107,11 +115,43 @@ class StreamTranslator:
             if not isinstance(update, dict):
                 continue
 
-            yield {
+            status_event = {
                 "type": "status",
                 "node": node_name,
                 "label": NODE_LABELS.get(node_name, node_name),
             }
+            if node_name in {"validate_final", "compute_acceptance"}:
+                status_event.update({
+                    "validation_issues": update.get("validation_issues", []),
+                    "grounding_failures": update.get("grounding_failures", []),
+                    "accepted": update.get("accepted"),
+                })
+            yield status_event
+
+            if node_name in {
+                "update_active_task", "select_primary_authorities",
+                "extract_rule_contract", "derive_rule_specific_facts",
+                "build_answer_contract", "validate_final",
+            }:
+                selection = update.get("primary_authority_selection") or {}
+                if hasattr(selection, "model_dump"):
+                    selection = selection.model_dump(mode="json")
+                yield {
+                    "type": "observability",
+                    "event": {
+                        "active_task_reset": "active_task_reset" if update.get("active_task_reset") else "",
+                        "node": node_name,
+                        "task_id": update.get("task_id", ""),
+                        "thread_id": update.get("thread_id", ""),
+                        "source_ids": [
+                            *selection.get("primary_sources", []),
+                            *selection.get("secondary_sources", []),
+                        ] if isinstance(selection, dict) else [],
+                        "reason": str(update.get("stop_reason", "") or update.get("reason", "")),
+                        "status": str(update.get("status", "")),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
 
             if node_name == "validate_plan":
                 decision = update.get("latest_decision")
@@ -168,6 +208,12 @@ class StreamTranslator:
                         "preview_truncated": metadata["preview_truncated"],
                         "preview_character_count": metadata[
                             "preview_character_count"],
+                        "original_character_count": len(text),
+                        "result_sha256": hashlib.sha256(
+                            text.encode("utf-8")).hexdigest(),
+                        "result_truncated": len(text) > _TOOL_RESULT_INLINE_MAX,
+                        **({"result_full": text}
+                           if len(text) <= _TOOL_RESULT_INLINE_MAX else {}),
                     })
                 self._tool_count = max(self._tool_count, len(tool_history))
 

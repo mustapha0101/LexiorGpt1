@@ -102,6 +102,7 @@ class GraphRunner:
             max_reformulations=self.context.max_reformulations,
             max_repairs=self.context.max_repairs,
         )
+        state["evidence_first_maximum_article_batches"] = self.context.config.evidence_first_maximum_article_batches
 
         notify = progress or (lambda _message: None)
         final: dict[str, Any] = {}
@@ -196,6 +197,7 @@ class GraphRunner:
                 self.context.config, "max_search_reformulations_live",
                 self.context.max_reformulations),
         )
+        state["evidence_first_maximum_article_batches"] = self.context.config.evidence_first_maximum_article_batches
         if prior_case_context:
             context = deepcopy(prior_case_context)
             state.update({
@@ -231,6 +233,13 @@ class GraphRunner:
                     "pending_clarification", {})),
                 "legislative_sufficiency": dict(context.get(
                     "legislative_sufficiency", {})),
+                "primary_authority_selection": dict(context.get(
+                    "primary_authority_selection", {})),
+                "rule_contract": dict(context.get("rule_contract", {})),
+                "source_sufficiency_decision": dict(context.get(
+                    "source_sufficiency_decision", {})),
+                "normative_references": list(context.get(
+                    "normative_references", [])),
                 "max_clarifications": getattr(
                     self.context.config, "max_clarifications_live", 2),
                 "max_planner_decisions": getattr(

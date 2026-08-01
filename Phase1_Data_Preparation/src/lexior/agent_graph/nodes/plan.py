@@ -54,4 +54,5 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "missing_critical_facts": decision.missing_critical_facts,
         "planner_feedback": "",  # correctif consommé
         "last_tool_normalization": normalization,
+        "information_gap": decision.decision_trace.need,
     }

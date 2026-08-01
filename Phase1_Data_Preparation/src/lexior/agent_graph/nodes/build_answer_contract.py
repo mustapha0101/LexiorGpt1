@@ -23,6 +23,7 @@ from lexior.services.assertion_grounding import (
     articles_incompatibles_deterministes,
     textes_recuperes,
 )
+from lexior.services.article_review import build_conditional_reasoning_contract
 
 from ..context import GraphContext
 from ..state import LexiorState, canonical_case_description, visible_tool_history
@@ -154,6 +155,28 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             if 0 <= i < len(tool_history)
         ]
 
+    # Evidence-first allowlist: top-k candidates and retrieved articles are
+    # not automatically equivalent legal authorities. The writer receives
+    # only selected primary/secondary article numbers.
+    authority_selection = state.get("primary_authority_selection")
+    if isinstance(authority_selection, dict):
+        selected_source_ids = [
+            *authority_selection.get("primary_sources", []),
+            *authority_selection.get("secondary_sources", []),
+        ]
+    else:
+        selected_source_ids = [
+            *getattr(authority_selection, "primary_sources", []),
+            *getattr(authority_selection, "secondary_sources", []),
+        ]
+    selected_numbers = {
+        str(source_id).rsplit(":", 1)[-1]
+        for source_id in selected_source_ids if ":" in str(source_id)
+    }
+    if selected_numbers and articles_retenus:
+        articles_retenus = [str(number) for number in articles_retenus
+                            if str(number) in selected_numbers]
+
     # Les décisions vérifiées sont persistées par signature dans le dossier,
     # pas par un index de l'ancien tour. On reconstruit donc leur index dans la
     # vue visible courante avant de remettre la preuve au rédacteur.
@@ -252,6 +275,13 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         }
         for numero in articles_retenus
     ]
+    conditional_reasoning_contract = build_conditional_reasoning_contract(
+        reviews_stored, textes_officiels, state.get("facts") or {})
+    if conditional_reasoning_contract:
+        directives.append(
+            "Utilise le contrat de raisonnement conditionnel : distingue les "
+            "faits affirmes par l'utilisateur des faits verifies et n'affirme "
+            "jamais une responsabilite automatique.")
 
     # Coverage gap directives.
     for gap in coverage_gaps:
@@ -295,7 +325,27 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "preuves_inutilisables": unusable,
         "filtre_articles_officiels": filtre_articles_effectue,
         "articles_retenus": articles_retenus,
+        "primary_rule_source_ids": list(
+            authority_selection.get("primary_sources", [])
+            if isinstance(authority_selection, dict)
+            else getattr(authority_selection, "primary_sources", [])),
+        "secondary_rule_source_ids": list(
+            authority_selection.get("secondary_sources", [])
+            if isinstance(authority_selection, dict)
+            else getattr(authority_selection, "secondary_sources", [])),
+        "primary_authority_selection": (
+            authority_selection.model_dump(mode="json")
+            if hasattr(authority_selection, "model_dump") else authority_selection),
+        "rule_contract": (
+            state.get("rule_contract").model_dump(mode="json")
+            if hasattr(state.get("rule_contract"), "model_dump")
+            else state.get("rule_contract", {})),
+        "source_sufficiency_decision": (
+            state.get("source_sufficiency_decision").model_dump(mode="json")
+            if hasattr(state.get("source_sufficiency_decision"), "model_dump")
+            else state.get("source_sufficiency_decision", {})),
         "raisonnement_autorise": raisonnement_autorise,
+        "conditional_reasoning_contract": conditional_reasoning_contract,
         "sources_alternatives": alternatives_for_contract,
         "lacunes_de_couverture": [g for g in coverage_gaps],
         "consignes": directives,

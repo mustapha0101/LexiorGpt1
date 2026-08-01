@@ -5,6 +5,13 @@ export interface ThinkingEvent {
   content: string;
 }
 
+export interface RequestStartedEvent {
+  type: "request_started";
+  model: string;
+  provider_model: string;
+  thread_id: string;
+}
+
 export interface ToolCallEvent {
   type: "tool_call";
   tool: string;
@@ -76,16 +83,37 @@ export interface ErrorEvent {
   message: string;
 }
 
+export interface ObservabilityEvent {
+  type: "observability";
+  event: {
+    node: string;
+    task_id: string;
+    thread_id: string;
+    source_ids: string[];
+    reason: string;
+    status: string;
+    timestamp: string;
+  };
+}
+
+export interface EvaluationSaveErrorEvent {
+  type: "evaluation_save_error";
+  message: string;
+}
+
 export type SSEEvent =
+  | RequestStartedEvent
   | ThinkingEvent
   | ToolCallEvent
   | ToolResultEvent
   | TokenEvent
   | ClarificationEvent
   | StatusEvent
+  | ObservabilityEvent
   | DecisionEvent
   | DoneEvent
-  | ErrorEvent;
+  | ErrorEvent
+  | EvaluationSaveErrorEvent;
 
 /* ── Chat message model ── */
 
@@ -167,6 +195,52 @@ export type AppView = "chat" | "dashboard";
 /* ── Chat model selection ── */
 
 export type ChatModelId = "gpt-4o" | "gpt-4o-mini" | "qwen-local";
+
+export type HumanEvaluationMode = "normal" | "human_40";
+
+export interface HumanScenario {
+  scenario_id: number;
+  category: number;
+  category_label: string;
+  scenario_description: string;
+  planned_order: number;
+  actual_order: number | null;
+  status: "not_started" | "in_progress" | "completed" | "interrupted";
+  started_at: string | null;
+  completed_at: string | null;
+  duration_ms: number | null;
+  thread_id: string | null;
+  start_count: number;
+  resume_count: number;
+  human_query: string | null;
+  expected_answer_note: string | null;
+  human_evaluation: {
+    overall_rating?: string;
+    route_quality?: string;
+    response_quality?: string[];
+    notes?: string;
+    observed_category?: string;
+  } | null;
+  final_result: { content?: string; accepted?: boolean; stop_reason?: string | null } | null;
+  conversation: Array<Record<string, unknown>>;
+  tool_calls: Array<Record<string, unknown>>;
+  validation_events: Array<Record<string, unknown>>;
+  timing: Record<string, unknown>;
+}
+
+export interface HumanEvaluationRun {
+  schema_version: string;
+  run: {
+    run_id: string;
+    started_at: string;
+    completed_at: string | null;
+    status: string;
+    current_scenario_id: number | null;
+    total_scenarios: number;
+  };
+  scenarios: HumanScenario[];
+  run_summary: Record<string, unknown> | null;
+}
 
 export const CHAT_MODEL_OPTIONS: { id: ChatModelId; label: string }[] = [
   { id: "gpt-4o", label: "GPT-4o" },

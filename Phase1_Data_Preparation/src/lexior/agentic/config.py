@@ -244,6 +244,18 @@ class AgenticConfig:
     max_search_reformulations: int = 1
     max_thinking_words: int = 45
 
+    # --- evidence-first (migration progressive) ------------------------
+    evidence_first_enabled: bool = True
+    evidence_first_initial_candidate_count: int = 5
+    evidence_first_initial_fetch_count: int = 3
+    evidence_first_maximum_primary_sources: int = 3
+    evidence_first_maximum_secondary_sources: int = 3
+    evidence_first_maximum_article_batches: int = 2
+    evidence_first_maximum_clarifications: int = 2
+    evidence_first_maximum_targeted_retrieval_repairs: int = 1
+    evidence_first_jurisprudence_requires_justification: bool = True
+    evidence_first_follow_normative_references: bool = True
+
     # --- legacy / mélange / split (depuis le YAML) ----------------------
     taxonomy_proportions: dict[str, float] = field(default_factory=dict)
     split: dict[str, Any] = field(default_factory=dict)
@@ -307,6 +319,16 @@ class AgenticConfig:
             "failure_injection_rate": self.failure_injection_rate,
             "max_search_reformulations": self.max_search_reformulations,
             "max_thinking_words": self.max_thinking_words,
+            "evidence_first_enabled": self.evidence_first_enabled,
+            "evidence_first_initial_candidate_count": self.evidence_first_initial_candidate_count,
+            "evidence_first_initial_fetch_count": self.evidence_first_initial_fetch_count,
+            "evidence_first_maximum_primary_sources": self.evidence_first_maximum_primary_sources,
+            "evidence_first_maximum_secondary_sources": self.evidence_first_maximum_secondary_sources,
+            "evidence_first_maximum_article_batches": self.evidence_first_maximum_article_batches,
+            "evidence_first_maximum_clarifications": self.evidence_first_maximum_clarifications,
+            "evidence_first_maximum_targeted_retrieval_repairs": self.evidence_first_maximum_targeted_retrieval_repairs,
+            "evidence_first_jurisprudence_requires_justification": self.evidence_first_jurisprudence_requires_justification,
+            "evidence_first_follow_normative_references": self.evidence_first_follow_normative_references,
             "split": self.split,
             "hf_dataset_repo_id": self.hf_dataset_repo_id,
         }
@@ -476,6 +498,28 @@ def load_config(config_path: Optional[str] = None,
         "max_articles_per_issue", cfg.max_articles_per_issue))
     cfg.max_thinking_words = int(
         gen.get("max_thinking_words", cfg.max_thinking_words))
+
+    evidence_first = raw.get("evidence_first", {}) or {}
+    cfg.evidence_first_enabled = _env_bool(
+        "LEXIOR_EVIDENCE_FIRST", bool(evidence_first.get("enabled", cfg.evidence_first_enabled)))
+    cfg.evidence_first_initial_candidate_count = int(evidence_first.get(
+        "initial_candidate_count", cfg.evidence_first_initial_candidate_count))
+    cfg.evidence_first_initial_fetch_count = int(evidence_first.get(
+        "initial_fetch_count", cfg.evidence_first_initial_fetch_count))
+    cfg.evidence_first_maximum_primary_sources = int(evidence_first.get(
+        "maximum_primary_sources", cfg.evidence_first_maximum_primary_sources))
+    cfg.evidence_first_maximum_secondary_sources = int(evidence_first.get(
+        "maximum_secondary_sources", cfg.evidence_first_maximum_secondary_sources))
+    cfg.evidence_first_maximum_article_batches = int(evidence_first.get(
+        "maximum_article_batches", cfg.evidence_first_maximum_article_batches))
+    cfg.evidence_first_maximum_clarifications = int(evidence_first.get(
+        "maximum_clarifications", cfg.evidence_first_maximum_clarifications))
+    cfg.evidence_first_maximum_targeted_retrieval_repairs = int(evidence_first.get(
+        "maximum_targeted_retrieval_repairs", cfg.evidence_first_maximum_targeted_retrieval_repairs))
+    cfg.evidence_first_jurisprudence_requires_justification = bool(evidence_first.get(
+        "jurisprudence_requires_justification", cfg.evidence_first_jurisprudence_requires_justification))
+    cfg.evidence_first_follow_normative_references = bool(evidence_first.get(
+        "follow_normative_references", cfg.evidence_first_follow_normative_references))
 
     cfg.taxonomy_proportions = dict(raw.get("taxonomy", {}).get("proportions", {}))
     cfg.split = dict(raw.get("split", {}))

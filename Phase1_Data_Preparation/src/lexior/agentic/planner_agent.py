@@ -16,7 +16,11 @@ from .taxonomy_conditions import (
 from lexior.services.provenance import (
     a_une_provenance, numero_demande, numeros_demandes, reponses_reussies,
 )
-from lexior.services.article_review import assess_legislative_sufficiency
+from lexior.services.article_review import (
+    assess_legislative_sufficiency,
+    format_facts_for_query,
+)
+from lexior.services.evidence_first import normalize_and_repair_tool_args
 from .schemas import Decision, DecisionTrace, PlannerDecision, ResearchState
 from .tool_catalog import MAX_ARTICLES_PAR_APPEL, ToolCatalog
 from .validators import validate_next_action, validate_planner_decision
@@ -274,16 +278,20 @@ class PlannerAgent:
         self._attach_semantic_legal_terms(decision)
         self._attach_retrieved_candidates(state, decision)
         self.last_live_normalization = {}
-        if (self.chat_mode and decision.decision == Decision.call_tool
-                and decision.next_tool):
-            normalized = self.catalog.normalize_live_call(
-                decision.next_tool, decision.arguments)
-            decision.arguments = normalized.arguments
-            if normalized.removed_fields:
+        if (decision.decision == Decision.call_tool and decision.next_tool):
+            normalized_args, audit, _errors = normalize_and_repair_tool_args(
+                self.catalog, decision.next_tool, decision.arguments,
+                active_task={"normalized_query": state.case_description,
+                             "summary": state.case_description},
+                latest_user_message=state.scenario.user_query,
+            )
+            decision.arguments = normalized_args
+            if audit.get("removed_fields") or audit.get("repaired_fields"):
                 self.last_live_normalization = {
                     "tool": decision.next_tool,
-                    "removed_fields": list(normalized.removed_fields),
-                    "remaining_arguments": dict(normalized.arguments),
+                    "removed_fields": list(audit.get("removed_fields", [])),
+                    "repaired_fields": list(audit.get("repaired_fields", [])),
+                    "remaining_arguments": dict(normalized_args),
                 }
         return decision
 
@@ -864,7 +872,8 @@ class PlannerAgent:
                     state.article_reviews.values()}
         if not statuses & {"applicable", "conditionally_applicable"}:
             return decision
-        if (state.case_law_search_status == "candidates_pending_fetch"
+        if (state.case_law_search_status in {
+                "candidates_pending_fetch", "candidate_pending_fetch"}
                 and state.usable_case_sources):
             arguments = self._arguments("get_quebec_regulation", state)
             if arguments:
@@ -1459,23 +1468,32 @@ class PlannerAgent:
         for _number, review in reviews:
             role_terms.extend(str(role).replace("_", " ")
                               for role in review.get("rule_roles", []))
-        facts = state.case_facts or {}
-        fact_terms = [
-            f"{key.replace('_', ' ')} {value}"
-            for key, value in sorted(facts.items())
-            if key != "user_statements" and value not in (None, "", [], {})
-        ]
+        fact_terms = format_facts_for_query(state.case_facts or {})
+        article_segment = "articles : " + " ".join(
+            f"article {number}" for number, _review in reviews[:6])
+        operation_segment = "operations : " + " ".join(
+            dict.fromkeys(role_terms))
         segments = [
-            state.case_description.strip(),
-            "faits : " + " | ".join(fact_terms),
-            "operations : " + " ".join(dict.fromkeys(role_terms)),
-            "articles : " + " ".join(
-                f"article {number}" for number, _review in reviews[:6]),
+            article_segment,
+            operation_segment,
+            "evenement : " + state.case_description.strip(),
+            "dommages : " + (state.case_description.strip() or "dommages decrits"),
+            "faits confirmes : " + " | ".join(fact_terms),
+            "juridiction : Quebec",
         ]
-        query = " ".join(segment for segment in segments if segment.strip())
         if state.reformulation_count:
-            query += " application jurisprudentielle comparable"
-        return query[:500]
+            segments.append("operation jurisprudentielle comparable")
+        query = " ".join(segment for segment in segments if segment.strip())
+        if len(query) <= 500:
+            return query
+        # Preserve articles and operations; drop lower-priority tail segments
+        # instead of cutting a sentence at an arbitrary character.
+        preserved = [article_segment, operation_segment]
+        for segment in segments[2:]:
+            candidate = " ".join([*preserved, segment])
+            if len(candidate) <= 500:
+                preserved.append(segment)
+        return " ".join(preserved)
 
     def _arguments(self, tool: str, state: ResearchState,
                    thinking: str = "",
@@ -1538,7 +1556,8 @@ class PlannerAgent:
             accepted = [item for item in state.usable_case_sources
                         if (item.get("source_url", "") if isinstance(item, dict)
                             else getattr(item, "source_url", ""))]
-            if accepted and state.case_law_search_status == "candidates_pending_fetch":
+            if accepted and state.case_law_search_status in {
+                    "candidates_pending_fetch", "candidate_pending_fetch"}:
                 url = (accepted[0].get("source_url", "")
                        if isinstance(accepted[0], dict)
                        else accepted[0].source_url)

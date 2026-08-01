@@ -29,6 +29,10 @@ from lexior.services.jurisdiction import (
 )
 from lexior.services.modes import is_live
 from lexior.services.tool_coverage import get_coverage, has_equivalent_coverage
+from lexior.services.evidence_first import (
+    authorize_planner_action,
+    normalize_and_repair_tool_args,
+)
 from lexior.services.validation import ProposalVerdict
 
 from ..context import GraphContext
@@ -140,6 +144,27 @@ def _pending_clarification(state: LexiorState,
     if selected:
         return selected
 
+    rule_contract = state.get("rule_contract") or {}
+    if hasattr(rule_contract, "model_dump"):
+        rule_contract = rule_contract.model_dump(mode="json")
+    decisive = [str(item) for item in rule_contract.get(
+        "decisive_facts_needed", []) if str(item).strip()]
+    facts = state.get("facts") or {}
+    missing_rule_facts = [item for item in decisive if facts.get(item) in (None, "", [], {})]
+    if missing_rule_facts:
+        source_ids = list(rule_contract.get("primary_source_ids", []))
+        return {
+            "clarification_id": "rule-element-" + missing_rule_facts[0],
+            "category": "rule_element",
+            "fact_keys": [missing_rule_facts[0]],
+            "missing_rule_element_id": missing_rule_facts[0],
+            "question": question_for_fact_keys([missing_rule_facts[0]]),
+            "answer_type": "yes_no_or_explanation",
+            "source_ids": source_ids,
+            "source_articles": [sid.rsplit(":", 1)[-1] for sid in source_ids],
+            "status": "pending",
+        }
+
     fact_keys = [str(value) for value in state.get(
         "missing_critical_facts", []) if str(value).strip()]
     if not fact_keys:
@@ -201,6 +226,59 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # valeur non verrouillée (comportement historique).
     locked = state.get("jurisdiction_locked", False)
     updates: dict[str, Any] = {"step": step}
+
+    # One deterministic argument boundary for both modes. In particular, a
+    # missing semantic-search query is reconstructable from the active task;
+    # only fields that cannot be reconstructed remain blocking errors.
+    if decision.decision == Decision.call_tool and decision.next_tool:
+        repaired_args, audit, arg_errors = normalize_and_repair_tool_args(
+            ctx.catalog, decision.next_tool, decision.arguments,
+            active_task=state.get("case_context") or {},
+            latest_user_message=state.get("latest_user_message", ""),
+        )
+        decision.arguments = repaired_args
+        if audit.get("removed_fields") or audit.get("repaired_fields"):
+            updates["last_tool_normalization"] = audit
+        if arg_errors:
+            return {
+                **updates,
+                "status": "rejected",
+                "stop_reason": "; ".join(arg_errors),
+                "deterministic_blockers": list(arg_errors),
+            }
+        if ctx.config.evidence_first_enabled:
+            decision = authorize_planner_action(
+                {**state, "information_gap": decision.decision_trace.need},
+                decision)
+
+    sufficiency = state.get("source_sufficiency_decision") or {}
+    if hasattr(sufficiency, "model_dump"):
+        sufficiency = sufficiency.model_dump(mode="json")
+    if (decision.decision == Decision.call_tool
+            and decision.next_tool == "search_quebec_jurisprudence"
+            and ctx.config.evidence_first_jurisprudence_requires_justification
+            and state.get("request_type") != "case_law_research"
+            and sufficiency.get("legislation_status") == "sufficient"
+            and sufficiency.get("jurisprudence_status") == "not_needed"):
+        decision = _forced_final(
+            decision, resolved,
+            need="sources officielles suffisantes; jurisprudence non demandée",
+            thinking=("Les sources officielles récupérées couvrent la première "
+                      "réponse. Je n'ajoute pas une recherche jurisprudentielle "
+                      "sans lacune juridique explicite."))
+
+    unresolved_refs = state.get("normative_references", [])
+    if (decision.decision == Decision.call_tool
+            and decision.next_tool == "search_quebec_jurisprudence"
+            and unresolved_refs
+            and ctx.config.evidence_first_follow_normative_references
+            and "search_quebec_regulations" in ctx.catalog.tools):
+        decision.next_tool = "search_quebec_regulations"
+        decision.arguments = {"query": str(
+            unresolved_refs[0].get("reference_text", ""))}
+        decision.decision_trace.need = (
+            "renvoi normatif explicite non résolu; combler ce gap avant la jurisprudence")
+        decision.decision_trace.next_action = "call_tool:search_quebec_regulations"
     if locked and resolved:
         decision.jurisdiction = resolved
     elif decision.jurisdiction and not live:
@@ -257,8 +335,9 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     if (live and missing
             and decision.decision not in (Decision.ask_clarification,
                                           Decision.cannot_conclude)
-            and state.get("clarification_count", 0) < state.get(
-                "max_clarifications", 2)
+            and state.get("clarification_count", 0) < min(
+                state.get("max_clarifications", 2),
+                ctx.config.evidence_first_maximum_clarifications)
             and not state.get("tool_history")):
         decision = _forced(
             decision, resolved,
@@ -279,10 +358,27 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     structured_clarification = build_clarification(
         state.get("article_reviews") or {}, facts_context,
         state.get("clarification_history") or [], user_statements)
+    if structured_clarification is None:
+        contract = state.get("rule_contract") or {}
+        if hasattr(contract, "model_dump"):
+            contract = contract.model_dump(mode="json")
+        missing_rule_facts = [str(item) for item in contract.get(
+            "decisive_facts_needed", []) if str(item).strip()
+            and (state.get("facts") or {}).get(str(item)) in (None, "", [], {})]
+        if missing_rule_facts:
+            structured_clarification = {
+                "clarification_id": "rule-element-" + missing_rule_facts[0],
+                "category": "rule_element",
+                "fact_keys": [missing_rule_facts[0]],
+                "missing_rule_element_id": missing_rule_facts[0],
+                "question": question_for_fact_keys([missing_rule_facts[0]]),
+                "source_ids": list(contract.get("primary_source_ids", [])),
+            }
     if (live and state.get("request_type") == "case_analysis"
             and structured_clarification
-            and state.get("clarification_count", 0) < state.get(
-                "max_clarifications", 2)
+            and state.get("clarification_count", 0) < min(
+                state.get("max_clarifications", 2),
+                ctx.config.evidence_first_maximum_clarifications)
             and decision.decision not in (Decision.ask_clarification,
                                           Decision.cannot_conclude)):
         decision = _forced(
@@ -302,7 +398,9 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 "stop_reason": ("clarification répétée après la réponse "
                                 "de l'utilisateur"),
             }
-        if live and count >= state.get("max_clarifications", 2):
+        if live and count >= min(
+                state.get("max_clarifications", 2),
+                ctx.config.evidence_first_maximum_clarifications):
             decision = _forced_final(
                 decision, resolved,
                 need="clarifications épuisées",

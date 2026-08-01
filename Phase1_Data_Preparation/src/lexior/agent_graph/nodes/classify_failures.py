@@ -15,6 +15,7 @@ from dataclasses import asdict
 from typing import Any
 
 from lexior.services.critics import CriticsOutcome
+from lexior.services.evidence_first import merge_failures
 
 from ..context import GraphContext
 from ..state import LexiorState
@@ -37,6 +38,12 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         validation_issues=state.get("preflight_grounding_issues", []))
     updates: dict[str, Any] = {
         "failure_reports": [asdict(r) for r in reports],
+        "failure_history": merge_failures(
+            state.get("failure_history", []),
+            [{"failure_type": report.category,
+              "reason": "; ".join(report.instructions),
+              "status": "open"} for report in reports],
+            node=NAME),
     }
 
     primary = ctx.services.repair.primary(reports)
@@ -48,6 +55,10 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         return updates
 
     target = primary.target_node
+    if (primary.category in {"retrieval", "tool_execution"}
+            and repair_count >= ctx.config.evidence_first_maximum_targeted_retrieval_repairs):
+        updates["repair_from_node"] = "validate_final"
+        return updates
     live = state.get("mode") in ("live", "chat")
     clarification_cap = 2 if live else 1
     if (target == "handle_clarification"

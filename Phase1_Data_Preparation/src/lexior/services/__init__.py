@@ -61,6 +61,16 @@ _EXPORTS = {
     "has_equivalent_coverage": ".tool_coverage",
     "tools_covering_court_scope": ".tool_coverage",
     "QUEBEC_COURT_SCOPES": ".tool_coverage",
+    # evidence-first policies
+    "select_primary_authorities": ".evidence_first",
+    "build_rule_contract": ".evidence_first",
+    "validate_rule_contract": ".evidence_first",
+    "authorize_planner_action": ".evidence_first",
+    "decide_source_sufficiency": ".evidence_first",
+    "normative_references": ".evidence_first",
+    "build_claim_ledger": ".evidence_first",
+    "merge_failures": ".evidence_first",
+    "normalize_and_repair_tool_args": ".evidence_first",
 }
 
 __all__ = list(_EXPORTS)

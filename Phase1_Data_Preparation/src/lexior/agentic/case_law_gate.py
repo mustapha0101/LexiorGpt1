@@ -32,6 +32,23 @@ _RESULT_SEPARATOR = re.compile(r"\n-{3,}\n|\n\d+\.\s")
 _URL_RE = re.compile(r"https?://[^\s\"',\]\)]+")
 
 
+def _is_fetchable_quebec_url(url: str) -> bool:
+    folded = (url or "").casefold()
+    return ("soquij.qc.ca" in folded or "soquij" in folded
+            or "canlii.org" in folded and any(token in folded for token in (
+                "/qccq/", "/qcca/", "/qccs/", "/qc/", "qccq", "qcca", "qccs")))
+
+
+def _is_candidate_chunk(chunk: str, url: str) -> bool:
+    folded = chunk.casefold()
+    if not _is_fetchable_quebec_url(url):
+        return False
+    return not any(marker in folded for marker in (
+        "aucun resultat", "aucun résultat", "no result", "federal court",
+        "cour supreme des etats-unis", "unrelated",
+    ))
+
+
 # ---------------------------------------------------------------------------
 # Single-result classifier
 # ---------------------------------------------------------------------------
@@ -193,7 +210,16 @@ def gate_search_results(
         return [], CaseLawSearchStatus.empty
 
     has_usable = any(r.usable for r in classified)
-    status = CaseLawSearchStatus.usable if has_usable else CaseLawSearchStatus.irrelevant
+    has_fetchable_candidate = any(
+        (not result.usable) and _is_candidate_chunk(
+            chunk, result.source_url)
+        for chunk, result in zip(chunks, classified))
+    if has_usable:
+        status = CaseLawSearchStatus.usable
+    elif has_fetchable_candidate:
+        status = CaseLawSearchStatus.candidate_pending_fetch
+    else:
+        status = CaseLawSearchStatus.irrelevant
 
     return classified, status
 

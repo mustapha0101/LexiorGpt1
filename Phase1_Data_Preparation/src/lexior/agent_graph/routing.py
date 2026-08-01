@@ -91,7 +91,10 @@ def route_after_classification(state: LexiorState) -> str:
         return "reject"
     status = state.get("last_tool_result_status", "")
     reformulations = state.get("reformulation_count", 0)
-    max_reformulations = state.get("max_reformulations", 1)
+    max_reformulations = min(
+        state.get("max_reformulations", 1),
+        max(0, int(state.get("evidence_first_maximum_article_batches", 2)) - 1),
+    )
     if (status in _REFORMULATE_STATUSES
             and reformulations < max_reformulations):
         return "reformulate_search"

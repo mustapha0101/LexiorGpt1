@@ -1,15 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Service de clarification — même logique, deux livraisons.
-
-La QUESTION est construite de la même façon dans les deux modes. Seule
-la LIVRAISON diffère (différence de mode assumée, spec §3) :
-
-    dataset — la réponse synthétique du scénario est consommée; sans
-              réponse synthétique, la trajectoire se termine sur la
-              question (exemple d'entraînement « clarification »).
-    live    — le graphe s'interrompt (``interrupt()``); la vraie réponse
-              arrive au tour suivant via ``Command(resume=...)``.
-"""
+"""Generic clarification service shared by dataset and live modes."""
 
 from __future__ import annotations
 
@@ -17,7 +7,7 @@ from typing import Optional
 
 from lexior.agentic.schemas import PlannerDecision, ScenarioSpec
 
-DEFAULT_QUESTION = "Pouvez-vous préciser?"
+DEFAULT_QUESTION = "Pouvez-vous preciser?"
 
 
 class ClarificationService:
@@ -27,9 +17,8 @@ class ClarificationService:
         if decision.clarification_question:
             return decision.clarification_question
         if missing_facts:
-            facts = ", ".join(missing_facts[:3])
-            return (f"Pouvez-vous préciser : {facts}? Ces éléments "
-                    "déterminent la règle applicable.")
+            return ("Pouvez-vous preciser le fait pertinent pour l'evenement "
+                    "decrit? Cet element peut determiner la regle applicable.")
         return DEFAULT_QUESTION
 
     @staticmethod

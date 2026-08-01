@@ -32,16 +32,20 @@ from lexior.agentic.schemas import (
     CriticResult,
     GenerationMetadata,
     GroundingEntry,
+    ClaimLedger,
     Message,
+    PrimaryAuthoritySelection,
     QualityReport,
     RejectionDetail,
     RepairReport,
+    RuleContract,
     ResearchState,
     Role,
     ScenarioSpec,
     SearchEvaluation,
     StateStatus,
     ToolObservation,
+    SourceSufficiencyDecision,
     TrainingTrajectory,
 )
 
@@ -52,6 +56,9 @@ class LexiorState(TypedDict, total=False):
     # ── Contrôle ─────────────────────────────────────────────────────────
     mode: str                      # "dataset" | "live"
     thread_id: str
+    task_id: str
+    previous_task_id: str
+    active_task_reset: bool
     status: str                    # StateStatus + "clarification"
     stop_reason: str
 
@@ -87,6 +94,7 @@ class LexiorState(TypedDict, total=False):
     missing_facts_before_search: list[str]
     missing_facts_before_application: list[str]
     missing_critical_facts: list[str]
+    fact_analysis: dict[str, Any]
 
     # ── Dossier live persistant ────────────────────────────────────────
     # Le tour courant reste isolé, mais le dossier conserve les seules
@@ -100,6 +108,7 @@ class LexiorState(TypedDict, total=False):
     # ── Planification et exécution d'outils ──────────────────────────────
     latest_decision: Optional[dict]
     planner_feedback: str          # correctif transmis au prochain plan
+    information_gap: str
     step: int
     max_tool_calls: int
     tool_history: list[ToolObservation]
@@ -147,7 +156,12 @@ class LexiorState(TypedDict, total=False):
     max_clarifications: int
     max_planner_decisions: int
     max_search_reformulations: int
+    evidence_first_maximum_article_batches: int
     legislative_sufficiency: dict[str, Any]
+    primary_authority_selection: PrimaryAuthoritySelection
+    rule_contract: RuleContract
+    source_sufficiency_decision: SourceSufficiencyDecision
+    normative_references: list[dict[str, Any]]
 
     # ── Rédaction ────────────────────────────────────────────────────────
     answer_contract: Optional[dict]
@@ -158,6 +172,7 @@ class LexiorState(TypedDict, total=False):
     critic_results: dict[str, Optional[CriticResult]]  # {"legal","agentic"}
     failure_reports: list[dict]
     validation_issues: list[str]
+    grounding_failures: list[dict]
     deterministic_blockers: list[str]
     deterministic_validation: bool
     validation_result: Optional[Any]
@@ -174,6 +189,11 @@ class LexiorState(TypedDict, total=False):
 
     # ── Sortie ───────────────────────────────────────────────────────────
     grounding: list[GroundingEntry]
+    claim_ledger: ClaimLedger
+    failure_history: list[dict[str, Any]]
+    delivered_to_user: bool
+    trajectory_accepted: bool
+    quality_accepted: bool
     generation_metadata: GenerationMetadata
     trajectory: Optional[dict]
     export_result: Optional[dict]
@@ -209,6 +229,9 @@ def initial_state(
     return {
         "mode": mode,
         "thread_id": thread_id,
+        "task_id": f"task-{thread_id or 'run'}",
+        "previous_task_id": "",
+        "active_task_reset": False,
         "status": StateStatus.planning.value,
         "stop_reason": "",
         "scenario": scenario,
@@ -238,12 +261,21 @@ def initial_state(
         "missing_facts_before_application": list(
             scenario.facts_required_before_application),
         "missing_critical_facts": list(scenario.facts_missing),
+        "fact_analysis": {
+            "jurisdiction": "",
+            "user_goal": scenario.user_query,
+            "asserted_material_facts": [],
+            "uncertain_material_facts": [],
+            "raw_clarification_answers": [],
+            "legal_elements": [],
+        },
         "case_context": {},
         "prior_evidence": [],
         "article_reviews": {},
         "clarification_history": [],
         "latest_decision": None,
         "planner_feedback": "",
+        "information_gap": "",
         "step": 0,
         "max_tool_calls": max_tool_calls,
         "max_clarifications": max_clarifications,
@@ -261,6 +293,7 @@ def initial_state(
         "last_tool_assessment": None,
         "reformulation_count": 0,
         "max_reformulations": max_reformulations,
+        "evidence_first_maximum_article_batches": 2,
         "official_rule_retrieved": False,
         "official_rule_sources": [],
         "usable_case_sources": [],
@@ -271,6 +304,12 @@ def initial_state(
         "clarification_answer": "",
         "clarification_count": 0,
         "legislative_sufficiency": {},
+        "primary_authority_selection": PrimaryAuthoritySelection(
+            task_id=f"task-{thread_id or 'run'}"),
+        "rule_contract": RuleContract(task_id=f"task-{thread_id or 'run'}"),
+        "source_sufficiency_decision": SourceSufficiencyDecision(
+            task_id=f"task-{thread_id or 'run'}"),
+        "normative_references": [],
         "answer_contract": None,
         "final_answer": "",
         "final_reasoning_summary": "",
@@ -301,6 +340,11 @@ def initial_state(
         "returned_court_scope": "",
         "substantive_law": "",
         "grounding": [],
+        "claim_ledger": ClaimLedger(task_id=f"task-{thread_id or 'run'}"),
+        "failure_history": [],
+        "delivered_to_user": False,
+        "trajectory_accepted": False,
+        "quality_accepted": False,
         "generation_metadata": GenerationMetadata(),
         "trajectory": None,
         "export_result": None,

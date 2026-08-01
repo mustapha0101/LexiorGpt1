@@ -23,6 +23,8 @@ from lexior.agentic.schemas import (
 from lexior.services.evidence import AcceptanceBlocker
 from lexior.services.modes import is_live
 from lexior.services.result_verification import ResultVerificationService
+from lexior.services.evidence_first import merge_failures
+from lexior.agentic.schemas import ClaimLedger
 
 from ..context import GraphContext
 from ..state import LexiorState, to_research_state, to_trajectory
@@ -96,8 +98,26 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             acceptance.blocking_errors = ["réponse finale vide"]
         elif blockers:
             acceptance.blocking_errors = blockers
+        ledger = state.get("claim_ledger")
+        if isinstance(ledger, dict):
+            ledger = ClaimLedger.model_validate(ledger)
+        claim_blockers = [
+            "unsupported_legal_claim" for claim in getattr(ledger, "claims", [])
+            if claim.verification_status == "failed"
+        ]
+        if claim_blockers:
+            acceptance.accepted = False
+            acceptance.blocking_errors = list(dict.fromkeys(
+                [*acceptance.blocking_errors, *claim_blockers]))
         return {"acceptance_result": acceptance,
-                "acceptance_blockers": blockers}
+                "acceptance_blockers": list(dict.fromkeys(
+                    [*blockers, *claim_blockers])),
+                "failure_history": merge_failures(
+                    state.get("failure_history", []),
+                    [{"failure_type": item, "reason": item}
+                     for item in claim_blockers], node=NAME),
+                "quality_accepted": acceptance.accepted,
+                "trajectory_accepted": acceptance.accepted}
 
     critics = state.get("critic_results", {}) or {}
     trajectory = to_trajectory(state)
@@ -143,6 +163,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "grounding": grounding,
         "first_invalid_step": first_invalid,
         "acceptance_blockers": all_blockers,
+        "quality_accepted": acceptance.accepted,
+        "trajectory_accepted": acceptance.accepted,
     }
 
     if not acceptance.accepted:

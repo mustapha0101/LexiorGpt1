@@ -48,14 +48,17 @@ def _history_entry(question: str, missing_facts: list[str], answer: str,
 
 def _interpret_answer(answer: str) -> str:
     folded = " ".join((answer or "").casefold().split())
-    if folded in {"oui", "yes", "je pense que oui", "probablement",
-                  "je crois que oui", "certainement"}:
+    if folded in {"oui", "yes", "certainement", "absolument"}:
         return "affirmative"
-    if folded in {"non", "no", "je ne pense pas", "certainement pas"}:
+    if folded in {"non", "no", "je ne pense pas", "certainement pas",
+                  "pas vraiment"}:
         return "negative"
     if folded in {"je ne sais pas", "ne sais pas", "incertain", "incertaine",
-                  "je ne suis pas certain", "je ne suis pas certaine"}:
-        return "unresolved"
+                  "je ne suis pas certain", "je ne suis pas certaine",
+                  "probablement", "je pense que oui", "je crois que oui"}:
+        return "uncertain"
+    if not folded:
+        return "unanswered"
     return "explanation"
 
 
@@ -71,7 +74,7 @@ def _apply_fact_answer(facts: dict[str, Any], clarification: dict[str, Any],
             value = True
         elif interpretation == "negative":
             value = False
-        elif interpretation == "unresolved":
+        elif interpretation in {"uncertain", "unanswered"}:
             value = None
         else:
             value = {"answer": answer, "interpretation": interpretation}
@@ -89,13 +92,14 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     pending = dict(state.get("pending_clarification") or {})
     question = str(pending.get("question") or "").strip()
     if not question:
+        fallback_keys = list(state.get("missing_critical_facts", []))[:1]
         question = ctx.services.clarification.build_question(
-            decision, state.get("missing_critical_facts", []))
+            decision, fallback_keys)
         pending = {
             "clarification_id": "fact-runtime",
             "category": _clarification_category(
                 question, state.get("missing_critical_facts", [])),
-            "fact_keys": list(state.get("missing_critical_facts", [])),
+            "fact_keys": fallback_keys,
             "question": question,
             "answer_type": "yes_no_or_explanation",
             "source_articles": [],
@@ -105,7 +109,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     messages = list(state.get("messages", []))
     messages.append(Message(role=Role.assistant, content=question))
     count = state.get("clarification_count", 0) + 1
-    missing_facts = list(state.get("missing_critical_facts", []))
+    missing_facts = list(pending.get(
+        "fact_keys", state.get("missing_critical_facts", [])))
     category = _clarification_category(question, missing_facts)
 
     if is_live(state.get("mode", "")):

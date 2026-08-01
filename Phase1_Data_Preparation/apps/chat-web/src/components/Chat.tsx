@@ -1,20 +1,26 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UseChatReturn } from "../hooks/useChat";
-import { CHAT_MODEL_OPTIONS, type ChatModelId } from "../types";
+import type { HumanEvaluationReturn } from "../hooks/useHumanEvaluation";
+import { CHAT_MODEL_OPTIONS, type ChatMessage, type ChatModelId } from "../types";
 import { AgentProgress } from "./AgentProgress";
 import { MessageBubble } from "./MessageBubble";
 import { InputBar } from "./InputBar";
+import { HumanEvaluationPanel } from "./HumanEvaluationPanel";
 
 interface Props {
   chat: UseChatReturn;
+  evaluation: HumanEvaluationReturn;
+  onStartScenario: (scenarioId: number) => Promise<void>;
+  onEvaluationLoaded: (run: HumanEvaluationReturn["run"]) => void;
 }
 
-export function Chat({ chat }: Props) {
+export function Chat({ chat, evaluation, onStartScenario, onEvaluationLoaded }: Props) {
   const {
     messages,
     streaming,
     currentNode,
     visitedNodes,
+    rawEvents,
     model,
     setModel,
     sendMessage,
@@ -22,13 +28,36 @@ export function Chat({ chat }: Props) {
     clearMessages,
   } = chat;
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState<"conversation" | "raw" | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, currentNode]);
 
+  async function copyText(kind: "conversation" | "raw") {
+    const text = kind === "conversation"
+      ? formatConversation(messages)
+      : rawEvents.map((event) => event.line).join("\n");
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    setCopied(kind);
+    window.setTimeout(() => setCopied((current) => current === kind ? null : current), 1600);
+  }
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       {/* Header */}
       <header className="flex items-center justify-between h-16 px-6 border-b border-border bg-surface shrink-0">
         <div>
@@ -40,6 +69,22 @@ export function Chat({ chat }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={evaluation.mode}
+            onChange={(event) => {
+              const next = event.target.value as "normal" | "human_40";
+              evaluation.setMode(next);
+              if (next === "normal") {
+                chat.setEvaluationContext(null);
+                chat.clearMessages();
+              }
+            }}
+            title="Mode de conversation"
+            className="text-xs bg-surface-raised border border-border rounded-lg px-2.5 py-1.5 text-text-secondary cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+          >
+            <option value="normal">Mode normal</option>
+            <option value="human_40">Mode évaluation — 40 situations</option>
+          </select>
           <select
             value={model}
             onChange={(e) => setModel(e.target.value as ChatModelId)}
@@ -64,41 +109,90 @@ export function Chat({ chat }: Props) {
               Clear chat
             </button>
           )}
+          <button
+            onClick={() => copyText("conversation")}
+            disabled={messages.length === 0}
+            title="Copier la conversation avec le thinking public, les outils et la réponse"
+            className="text-xs text-text-muted hover:text-text-secondary transition-colors cursor-pointer px-2.5 py-1.5 rounded-lg hover:bg-surface-raised disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {copied === "conversation" ? "Copié" : "Copier conversation"}
+          </button>
+          <button
+            onClick={() => copyText("raw")}
+            disabled={rawEvents.length === 0}
+            title="Copier les lignes raw exactes reçues du log SSE"
+            className="text-xs text-text-muted hover:text-text-secondary transition-colors cursor-pointer px-2.5 py-1.5 rounded-lg hover:bg-surface-raised disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {copied === "raw" ? "Copié" : "Copier raw"}
+          </button>
         </div>
       </header>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        {messages.length === 0 ? (
-          <EmptyState onSuggestion={sendMessage} />
-        ) : (
-          <div className="max-w-3xl mx-auto space-y-4">
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
+      <div className="flex-1 min-h-0 flex flex-col">
+        {/* Messages stay above the evaluation form so the final answer remains visible. */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6">
+          {messages.length === 0 ? (
+            <EmptyState onSuggestion={sendMessage} />
+          ) : (
+            <div className="max-w-3xl mx-auto space-y-4">
+              {messages.map((msg) => (
+                <MessageBubble key={msg.id} message={msg} />
+              ))}
 
-            {/* Agent progress stepper */}
-            {(streaming || visitedNodes.length > 0) && (
-              <AgentProgress
-                currentNode={currentNode}
-                visitedNodes={visitedNodes}
-              />
-            )}
+              {/* Agent progress stepper */}
+              {(streaming || visitedNodes.length > 0) && (
+                <AgentProgress
+                  currentNode={currentNode}
+                  visitedNodes={visitedNodes}
+                />
+              )}
 
-            <div ref={bottomRef} />
-          </div>
+              <div ref={bottomRef} />
+            </div>
+          )}
+        </div>
+
+        {evaluation.mode === "human_40" && (
+          <HumanEvaluationPanel
+            evaluation={evaluation}
+            canReview={chat.lastDone && !chat.lastDonePendingClarification && !streaming}
+            onStartScenario={onStartScenario}
+            onEvaluationLoaded={onEvaluationLoaded}
+          />
         )}
       </div>
 
       {/* Input */}
       <InputBar
         onSend={sendMessage}
-        disabled={false}
+        disabled={evaluation.mode === "human_40" && !evaluation.currentScenario}
         streaming={streaming}
         onCancel={cancelStream}
       />
     </div>
   );
+}
+
+function formatConversation(messages: ChatMessage[]): string {
+  return messages.map((message) => {
+    const sections: string[] = [
+      `===== ${message.role.toUpperCase()} =====`,
+    ];
+    if (message.thinking?.trim()) {
+      sections.push(`[thinking public]\n${message.thinking.trim()}`);
+    }
+    if (message.toolCalls?.length) {
+      sections.push(message.toolCalls.map((tool, index) => [
+        `[outil ${index + 1}] ${tool.tool}`,
+        `arguments: ${JSON.stringify(tool.args)}`,
+        tool.result !== undefined ? `résultat: ${tool.result}` : "",
+        tool.classification ? `classification: ${tool.classification}` : "",
+      ].filter(Boolean).join("\n")).join("\n\n"));
+    }
+    if (message.content.trim()) sections.push(message.content.trim());
+    if (message.statusLabel) sections.push(`[statut] ${message.statusLabel}`);
+    return sections.join("\n\n");
+  }).join("\n\n");
 }
 
 /* ── Empty state with suggested queries ── */

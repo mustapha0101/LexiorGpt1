@@ -19,7 +19,9 @@ from lexior.agent_graph.events import StreamTranslator, result_metadata
 from lexior.services.article_review import (
     assess_legislative_sufficiency,
     build_clarification,
+    build_conditional_reasoning_contract,
     enrich_article_review,
+    question_for_fact_keys,
 )
 from lexior.agent_graph.nodes.handle_clarification import (
     _apply_fact_answer,
@@ -110,20 +112,49 @@ def test_known_fact_is_not_asked_again_and_no_exclusion_question_is_created():
 def test_short_answers_bind_to_pending_clarification():
     pending = {
         "category": "fact",
-        "fact_keys": ["prior_knowledge", "failure_to_take_reasonable_action"],
+        "fact_keys": ["prior_knowledge"],
     }
     facts, interpretation = _apply_fact_answer({}, pending, "oui")
     assert interpretation == "affirmative"
     assert facts["prior_knowledge"]["value"] is True
-    assert facts["failure_to_take_reasonable_action"]["value"] is True
+    assert "failure_to_take_reasonable_action" not in facts
     facts, interpretation = _apply_fact_answer({}, pending, "non")
     assert interpretation == "negative"
     assert facts["prior_knowledge"]["value"] is False
     facts, interpretation = _apply_fact_answer({}, pending, "je ne sais pas")
-    assert interpretation == "unresolved"
+    assert interpretation == "uncertain"
     assert facts["prior_knowledge"]["value"] is None
     facts, interpretation = _apply_fact_answer({}, {}, "oui")
     assert facts == {}
+
+
+def test_two_fact_question_requires_explicit_two_key_binding():
+    pending = {
+        "category": "fact",
+        "fact_keys": ["prior_knowledge", "failure_to_take_reasonable_action"],
+    }
+    facts, _ = _apply_fact_answer({}, pending, "oui")
+    assert set(facts) == {"prior_knowledge", "failure_to_take_reasonable_action"}
+
+
+def test_uncertain_short_answers_never_become_true():
+    for answer in ("je pense que oui", "probablement", "je ne sais pas", "pas vraiment"):
+        facts, interpretation = _apply_fact_answer(
+            {}, {"category": "fact", "fact_keys": ["prior_knowledge"]}, answer)
+        assert facts["prior_knowledge"]["value"] is not True
+        assert interpretation in {"uncertain", "negative"}
+
+
+def test_clarification_question_is_generic_and_entity_aware():
+    generic = question_for_fact_keys(["prior_knowledge"])
+    assert "arbre" not in generic.casefold()
+    assert "voisin" not in generic.casefold()
+    contextual = question_for_fact_keys(
+        ["causal_connection"],
+        {"event": "l'incident", "damaged_object": "le bien endommage"},
+    )
+    assert "incident" in contextual
+    assert "bien endommage" in contextual
 
 
 def test_sufficiency_requires_roles_and_does_not_count_contextual_text():
@@ -141,6 +172,7 @@ def test_sufficiency_requires_roles_and_does_not_count_contextual_text():
         status="applicable",
         rank=2,
     )
+    general["retrieval_group"] = "contextual"
     result = assess_legislative_sufficiency(
         {"general": general, "contextual": contextual}, TREE,
         remaining_candidates=True,
@@ -208,7 +240,9 @@ def test_case_law_query_uses_full_dossier_and_only_primary_articles(catalog):
     )
     query = PlannerAgent(catalog, chat_mode=True)._build_quebec_case_law_query(state)
     assert "garage" in query
-    assert "prior knowledge" in query
+    assert "connaissance anterieure du risque" in query
+    assert "prior_knowledge" not in query
+    assert "{'value'" not in query
     assert "article primary" in query
     assert "article contextual" not in query
 
@@ -303,3 +337,28 @@ def test_gate_rejected_url_is_not_an_accepted_case_candidate():
     )
     assert not any(item.usable for item in results)
     assert status.value == "irrelevant"
+
+
+def test_url_only_soquij_candidate_requires_fetch_before_evidence():
+    results, status = gate_search_results(
+        "https://soquij.qc.ca/decision/abc123", ["1457"], TREE)
+    assert status.value == "candidate_pending_fetch"
+    assert len(results) == 1
+    assert results[0].usable is False
+    assert results[0].source_url.startswith("https://soquij")
+
+
+def test_conditional_contract_records_asserted_facts_and_unresolved_conditions():
+    review = _review(
+        "1457",
+        "Toute personne doit respecter les regles de conduite et reparer le prejudice cause par sa faute.",
+        status="conditionally_applicable",
+    )
+    contract = build_conditional_reasoning_contract(
+        {"1457": review},
+        {"1457": "Toute personne doit respecter les regles de conduite."},
+        {"prior_knowledge": {"value": True}},
+    )
+    assert contract[0]["article"] == "1457"
+    assert contract[0]["user_asserted_facts"][0]["status"] == "asserted_not_verified"
+    assert any("automatique" in item for item in contract[0]["prohibited_claims"])

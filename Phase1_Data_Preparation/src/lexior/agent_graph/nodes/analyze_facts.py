@@ -80,7 +80,37 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 continue
             missing_before_search.append(fact)
 
+    # This first pass is intentionally descriptive. Legal elements are left
+    # empty until the retrieved primary authority has produced a RuleContract.
+    statements = [str(value).strip() for value in facts.get(
+        "user_statements", []) if str(value).strip()]
+    asserted: list[dict[str, Any]] = []
+    uncertain: list[dict[str, Any]] = []
+    for key, value in facts.items():
+        if key in {"juridiction", "question_courante", "user_statements"}:
+            continue
+        if isinstance(value, dict) and value.get("value") is None:
+            uncertain.append({"fact_id": str(key), **value})
+        elif value not in (None, "", [], {}):
+            asserted.append({"fact_id": str(key), "value": value,
+                             "certainty": "asserted"})
+    for index, statement in enumerate(statements):
+        asserted.append({"fact_id": f"statement_{index}", "value": statement,
+                         "certainty": "asserted"})
+    fact_analysis = {
+        "jurisdiction": resolved,
+        "user_goal": state.get("latest_user_intent") or state.get(
+            "latest_user_message", ""),
+        "asserted_material_facts": asserted,
+        "uncertain_material_facts": uncertain,
+        "raw_clarification_answers": [
+            entry.get("answer", "") for entry in state.get(
+                "clarification_history", []) if entry.get("answer")
+        ],
+        "legal_elements": [],
+    }
     return {
         "facts": facts,
         "missing_facts_before_search": missing_before_search,
+        "fact_analysis": fact_analysis,
     }

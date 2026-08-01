@@ -24,6 +24,18 @@ generation:
   max_thinking_words: 45
   failure_injection_rate: 0.07
 
+evidence_first:
+  enabled: true
+  initial_candidate_count: 5
+  initial_fetch_count: 3
+  maximum_primary_sources: 3
+  maximum_secondary_sources: 3
+  maximum_article_batches: 2
+  maximum_clarifications: 2
+  maximum_targeted_retrieval_repairs: 1
+  jurisprudence_requires_justification: true
+  follow_normative_references: true
+
   request_type_weights:
     case_analysis: 0.25
     procedure_guidance: 0.18

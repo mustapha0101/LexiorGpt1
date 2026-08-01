@@ -30,8 +30,9 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import dataclasses
 
@@ -43,6 +44,7 @@ from lexior.agent_graph import GraphRunner, build_context
 from lexior.agent_graph.checkpointing import create_memory_checkpointer
 from lexior.services import build_real_executor, build_services
 from lexior.services.tool_coverage import get_coverage
+from lexior.evaluation.human_40_recorder import Human40Recorder
 
 # ── Resolve paths and build shared objects once at import time ───────────
 # src/lexior/api/app.py -> api -> lexior -> src -> Phase1_Data_Preparation.
@@ -99,6 +101,16 @@ _LOCAL_BASE_URL = os.environ.get(
     "LOCAL_MODEL_BASE_URL", "http://localhost:11434/v1")
 _LOCAL_MODEL_NAME = os.environ.get("LOCAL_MODEL_NAME", "qwen2.5:7b-16k")
 
+
+def _effective_chat_model(model_id: Optional[str]) -> str:
+    if model_id in ("gpt-4o", "gpt-4o-mini", "qwen-local"):
+        return model_id
+    return _DEFAULT_CHAT_MODEL
+
+
+def _provider_model(model_id: str) -> str:
+    return _LOCAL_MODEL_NAME if model_id == "qwen-local" else model_id
+
 _SYSTEM_PROMPT = (
     "Tu es Lexior, un assistant juridique canadien couvrant le "
     "droit québécois (CCQ, CPC, règlements) et le droit fédéral "
@@ -149,9 +161,7 @@ def _chat_client(model_id: str) -> TeacherClient:
 
 
 def _runner_for(model_id: Optional[str]) -> GraphRunner:
-    key = (model_id
-           if model_id in ("gpt-4o", "gpt-4o-mini", "qwen-local")
-           else _DEFAULT_CHAT_MODEL)
+    key = _effective_chat_model(model_id)
     with _RUNNERS_LOCK:
         if key not in _RUNNERS:
             executor = build_real_executor(
@@ -183,6 +193,8 @@ app.add_middleware(
 )
 
 _DATA_ROOT = Path("data/runs")
+_HUMAN_40 = Human40Recorder(
+    _PHASE1 / "data" / "evaluations" / "human_40", _PHASE1)
 
 
 class ChatTurn(BaseModel):
@@ -198,6 +210,8 @@ class ChatRequest(BaseModel):
     jurisdiction: str = ""
     history: list[ChatTurn] = []
     model: Optional[str] = None  # "gpt-4o" | "gpt-4o-mini" | "qwen-local"
+    evaluation_run_id: Optional[str] = None
+    evaluation_scenario_id: Optional[int] = None
 
     @property
     def text(self) -> str:
@@ -209,11 +223,67 @@ class DatasetGenerateRequest(BaseModel):
     count: int = 10
 
 
+class HumanRunCreateRequest(BaseModel):
+    run_id: Optional[str] = None
+
+
+class HumanScenarioStartRequest(BaseModel):
+    thread_id: Optional[str] = None
+
+
+class HumanReviewPatch(BaseModel):
+    expected_answer_note: Optional[str] = None
+    overall_rating: Optional[str] = None
+    route_quality: Optional[str] = None
+    response_quality: Optional[list[str]] = None
+    notes: Optional[str] = None
+    observed_category: Optional[str] = None
+
+
+class HumanEventRequest(BaseModel):
+    event_type: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class HumanRunPatch(BaseModel):
+    action: str
+    scenario_id: Optional[int] = None
+
+
 # ── SSE helpers ──────────────────────────────────────────────────────────
 
 
 def _sse(event: dict[str, Any]) -> str:
     return json.dumps(event, ensure_ascii=False)
+
+
+def _evaluation_scenario(run_id: str, scenario_id: int) -> dict[str, Any]:
+    try:
+        run = _HUMAN_40.load_run(run_id)
+        scenario = next(item for item in run["scenarios"]
+                        if item["scenario_id"] == scenario_id)
+    except (ValueError, FileNotFoundError, StopIteration) as exc:
+        raise HTTPException(status_code=404, detail="evaluation scenario not found") from exc
+    if scenario["status"] not in {"in_progress", "interrupted"}:
+        raise HTTPException(status_code=409, detail="evaluation scenario is not active")
+    return scenario
+
+
+def _evaluation_context(request: ChatRequest) -> tuple[str, int, dict[str, Any]] | None:
+    if request.mode != "human_40":
+        return None
+    if not request.evaluation_run_id or request.evaluation_scenario_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="human_40 chat requires evaluation_run_id and evaluation_scenario_id",
+        )
+    if not request.thread_id:
+        raise HTTPException(status_code=422, detail="human_40 chat requires thread_id")
+    scenario = _evaluation_scenario(
+        request.evaluation_run_id, request.evaluation_scenario_id)
+    if scenario.get("thread_id") != request.thread_id:
+        raise HTTPException(status_code=409, detail="thread does not belong to this scenario")
+    return request.evaluation_run_id, request.evaluation_scenario_id, scenario
 
 
 # ── Chat endpoint ────────────────────────────────────────────────────────
@@ -223,6 +293,7 @@ def _sse(event: dict[str, Any]) -> str:
 async def chat(request: ChatRequest):
     from sse_starlette.sse import EventSourceResponse
 
+    evaluation = _evaluation_context(request)
     runner = _runner_for(request.model)
     thread_id = request.thread_id or f"live-{uuid.uuid4().hex[:8]}"
     history = [
@@ -230,13 +301,49 @@ async def chat(request: ChatRequest):
         for turn in request.history
     ]
     # Un 7B local peut mettre plusieurs minutes par décision.
-    queue_timeout = 900 if request.model == "qwen-local" else 120
+    selected_model = _effective_chat_model(request.model)
+    queue_timeout = 900 if selected_model == "qwen-local" else 120
+    recording_error: str | None = None
+    if evaluation:
+        run_id, scenario_id, scenario_snapshot = evaluation
+        previous = scenario_snapshot.get("conversation", [])
+        previous_clarification = bool(
+            previous and previous[-1].get("role") == "assistant"
+            and previous[-1].get("message_type") == "clarification")
+        try:
+            _HUMAN_40.append_message(
+                run_id, scenario_id=scenario_id, role="user",
+                content=request.text,
+                message_type=("clarification_answer" if previous_clarification
+                              else "initial_query"),
+                turn_index=len(previous) + 1,
+            )
+        except Exception as exc:
+            recording_error = f"{type(exc).__name__}: {exc}"
 
     async def _stream():
+        nonlocal recording_error
+        # Public metadata for the raw log. This identifies the selected UI
+        # model and the concrete provider model without exposing prompt data.
+        request_started = {
+            "type": "request_started",
+            "model": selected_model,
+            "provider_model": _provider_model(selected_model),
+            "thread_id": thread_id,
+        }
+        if evaluation:
+            try:
+                _HUMAN_40.append_backend_event(
+                    run_id, scenario_id=scenario_id, event=request_started)
+            except Exception as exc:
+                recording_error = f"{type(exc).__name__}: {exc}"
+        yield _sse(request_started)
         yield _sse({"type": "thinking",
                     "content": "Analyse de la question..."})
 
         events: queue.Queue = queue.Queue()
+        assistant_tokens: list[str] = []
+        pending_clarification = False
 
         def _run_graph():
             try:
@@ -263,19 +370,157 @@ async def chat(request: ChatRequest):
                 break
 
             if kind == "error":
+                if evaluation:
+                    try:
+                        _HUMAN_40.append_backend_event(
+                            run_id, scenario_id=scenario_id,
+                            event={"type": "error", "message": str(data)},
+                        )
+                        _HUMAN_40.append_message(
+                            run_id, scenario_id=scenario_id, role="assistant",
+                            content=str(data), message_type="technical_error",
+                        )
+                    except Exception as exc:
+                        recording_error = f"{type(exc).__name__}: {exc}"
                 yield _sse({"type": "error", "message": str(data)})
                 break
             if kind == "end":
                 break
 
+            if evaluation:
+                try:
+                    event_type = str(data.get("type", ""))
+                    if event_type == "token":
+                        assistant_tokens.append(str(data.get("content", "")))
+                    elif event_type == "clarification":
+                        pending_clarification = True
+                        _HUMAN_40.append_message(
+                            run_id, scenario_id=scenario_id, role="assistant",
+                            content=str(data.get("question", "")),
+                            message_type="clarification", accepted=True,
+                        )
+                    elif event_type == "done":
+                        if assistant_tokens and not pending_clarification:
+                            _HUMAN_40.append_final_answer(
+                                run_id, scenario_id=scenario_id,
+                                content="".join(assistant_tokens),
+                                accepted=data.get("accepted"),
+                            )
+                        _HUMAN_40.append_backend_event(
+                            run_id, scenario_id=scenario_id,
+                            event={"type": "return_live_answer", **data},
+                        )
+                    else:
+                        _HUMAN_40.append_backend_event(
+                            run_id, scenario_id=scenario_id, event=data)
+                except Exception as exc:
+                    recording_error = f"{type(exc).__name__}: {exc}"
             yield _sse(data)
             if data.get("type") == "token":
                 await asyncio.sleep(0.01)
+
+        if recording_error:
+            yield _sse({"type": "evaluation_save_error",
+                        "message": "Evaluation log could not be saved completely."})
 
     return EventSourceResponse(_stream())
 
 
 # ── Dataset endpoints ────────────────────────────────────────────────────
+
+
+@app.post("/api/evaluations/human-40/runs")
+async def human_40_create_run(request: HumanRunCreateRequest):
+    try:
+        return _HUMAN_40.create_run(request.run_id)
+    except (ValueError, FileExistsError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/evaluations/human-40/runs/{run_id}")
+async def human_40_get_run(run_id: str):
+    try:
+        return _HUMAN_40.load_run(run_id)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="evaluation run not found") from exc
+
+
+@app.get("/api/evaluations/human-40/runs/{run_id}/file")
+async def human_40_file(run_id: str):
+    try:
+        path = _HUMAN_40._path(run_id)
+        if not path.exists():
+            raise FileNotFoundError
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="evaluation run not found") from exc
+    return FileResponse(path, media_type="application/json", filename=path.name)
+
+
+@app.post("/api/evaluations/human-40/runs/{run_id}/scenarios/{scenario_id}/start")
+async def human_40_start_scenario(run_id: str, scenario_id: int,
+                                  request: HumanScenarioStartRequest):
+    try:
+        return _HUMAN_40.start_scenario(run_id, scenario_id, request.thread_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, FileExistsError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.patch("/api/evaluations/human-40/runs/{run_id}/scenarios/{scenario_id}")
+async def human_40_update_scenario(run_id: str, scenario_id: int,
+                                   request: HumanReviewPatch):
+    try:
+        return _HUMAN_40.update_human_review(
+            run_id, scenario_id, **request.model_dump(exclude_none=True))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/evaluations/human-40/runs/{run_id}/scenarios/{scenario_id}/events")
+async def human_40_event(run_id: str, scenario_id: int,
+                         request: HumanEventRequest):
+    try:
+        return _HUMAN_40.append_manual_event(
+            run_id, scenario_id, request.event_type, request.payload)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.patch("/api/evaluations/human-40/runs/{run_id}")
+async def human_40_patch_run(run_id: str, request: HumanRunPatch):
+    if request.action != "interrupt_scenario" or request.scenario_id is None:
+        raise HTTPException(status_code=422, detail="only interrupt_scenario is supported")
+    try:
+        return _HUMAN_40.interrupt_scenario(run_id, request.scenario_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/evaluations/human-40/runs/{run_id}/scenarios/{scenario_id}/complete")
+async def human_40_complete_scenario(run_id: str, scenario_id: int):
+    try:
+        return _HUMAN_40.complete_scenario(run_id, scenario_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/evaluations/human-40/runs/{run_id}/complete")
+async def human_40_complete_run(run_id: str):
+    try:
+        return _HUMAN_40.complete_run(run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/api/dataset/generate")

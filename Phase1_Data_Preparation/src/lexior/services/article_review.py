@@ -1,11 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Structures déterministes pour relire les articles récupérés.
-
-Le reviewer peut qualifier un texte, mais son motif narratif n'est pas une
-question utilisateur. Ce module transforme cette qualification en contrat
-stable : rôle de récupération, opération juridique, rôles couverts et faits
-manquants. Aucun numéro d'article n'est utilisé pour choisir un rôle.
-"""
+"""Deterministic review structures for Phase 1 legal retrieval."""
 
 from __future__ import annotations
 
@@ -47,9 +41,7 @@ _PROPERTY_TERMS = (
 _REMEDY_TERMS = (
     "dommages-interets", "tenu de reparer", "reparation", "prejudice",
 )
-_DAMAGE_TERMS = (
-    "dommage", "dommages", "garage", "materiel", "prejudice",
-)
+_DAMAGE_TERMS = ("dommage", "dommages", "garage", "materiel", "prejudice")
 _EVENT_TERMS = (
     "est tombe", "s'est tombe", "tombe sur", "accident", "deja realise",
     "deja produit", "apres la chute",
@@ -67,6 +59,12 @@ class LegislativeSufficiency:
     contextual_articles: tuple[str, ...]
     should_fetch_next_batch: bool
     reason: str
+    sufficient_for_conditional_answer: bool | None = None
+    required_roles_covered: tuple[str, ...] = ()
+    supporting_rule_roles: tuple[str, ...] = ()
+    supporting_roles_covered: tuple[str, ...] = ()
+    optional_rule_roles: tuple[str, ...] = ()
+    optional_roles_missing: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,11 +77,19 @@ class LegislativeSufficiency:
             "contextual_articles": list(self.contextual_articles),
             "should_fetch_next_batch": self.should_fetch_next_batch,
             "reason": self.reason,
+            "sufficient_for_conditional_answer": (
+                self.sufficient if self.sufficient_for_conditional_answer is None
+                else self.sufficient_for_conditional_answer),
+            "required_roles_covered": list(self.required_roles_covered),
+            "supporting_rule_roles": list(self.supporting_rule_roles),
+            "supporting_roles_covered": list(self.supporting_roles_covered),
+            "optional_rule_roles": list(self.optional_rule_roles),
+            "optional_roles_missing": list(self.optional_roles_missing),
         }
 
 
 def infer_article_profile(text: str, facts: str = "") -> dict[str, Any]:
-    """Infère le rôle fonctionnel d'un texte sans connaître son numéro."""
+    """Infer a functional role from a text without using its article number."""
     corpus = _fold(text)
     fact_text = _fold(facts)
 
@@ -138,13 +144,13 @@ def infer_article_profile(text: str, facts: str = "") -> dict[str, Any]:
         missing.append("prior_knowledge")
     if "fault" in roles and not _contains(
             fact_text, ("a rien fait", "n'a rien fait", "aucune mesure",
-                         "sans mesure", "n'a pas pris", "mesures prises")):
+                        "sans mesure", "n'a pas pris", "mesures prises")):
         missing.append("failure_to_take_reasonable_action")
     if "causation" in roles and not _contains(
-            fact_text, ("a cause", "causé", "causes", "sur mon garage", "dommage")):
+            fact_text, ("a cause", "cause", "sur mon garage", "dommage")):
         missing.append("causal_connection")
     if "remedy_or_practical_consequence" in roles and not _contains(
-            fact_text, ("reparation", "réparation", "indemn", "rembourse")):
+            fact_text, ("reparation", "indemn", "rembourse")):
         missing.append("damage_assessment")
 
     return {
@@ -158,10 +164,9 @@ def infer_article_profile(text: str, facts: str = "") -> dict[str, Any]:
 
 def enrich_article_review(
         *, article_number: str, status: str, reason: str, text: str,
-        facts: str, rank: int | None = None,
-        source: str = "") -> dict[str, Any]:
+        facts: str, rank: int | None = None, source: str = "") -> dict[str, Any]:
     profile = infer_article_profile(text, facts)
-    review = {
+    return {
         "article_number": str(article_number),
         "status": status,
         "reason": reason[:300],
@@ -171,22 +176,22 @@ def enrich_article_review(
         "rerank_rank": rank if rank is not None else 10_000,
         **profile,
     }
-    return review
 
 
 def known_fact_keys(facts: dict[str, Any], clarification_history: list[dict[str, Any]],
                     user_statements: Iterable[str] = ()) -> set[str]:
-    """Retourne les clés déjà établies ou explicitement traitées."""
+    """Return keys established or explicitly answered by the user."""
     known: set[str] = set()
     for key, value in (facts or {}).items():
-        if key == "user_statements":
+        if key in {"user_statements", "entities", "case_entities"}:
             continue
         if isinstance(value, dict) and "value" in value:
             if value.get("value") is not None:
                 known.add(str(key))
         elif value not in (None, "", False, []):
             known.add(str(key))
-    corpus = _fold(" ".join([*map(str, user_statements), *(str(x) for x in facts.values())]))
+    corpus = _fold(" ".join([
+        *map(str, user_statements), *(str(x) for x in facts.values())]))
     if _contains(corpus, ("savait", "connaissait", "au courant", "informe", "averti")):
         known.add("prior_knowledge")
     if _contains(corpus, ("n'a rien fait", "aucune mesure", "n'a pas pris")):
@@ -194,30 +199,53 @@ def known_fact_keys(facts: dict[str, Any], clarification_history: list[dict[str,
     if _contains(corpus, ("sur mon garage", "dommage", "prejudice")):
         known.add("causal_connection")
     for entry in clarification_history or []:
-        if entry.get("answered"):
-            known.update(str(key) for key in entry.get("fact_keys", entry.get("missing_facts", [])))
+        if (entry.get("answered") and entry.get("answer_interpretation")
+                not in {"uncertain", "unanswered"}):
+            known.update(str(key) for key in entry.get(
+                "fact_keys", entry.get("missing_facts", [])))
     return known
 
 
 _FACT_QUESTIONS = {
-    "prior_knowledge": "Votre voisin savait-il que l'arbre était en mauvais état ou risquait de tomber avant l'accident?",
-    "failure_to_take_reasonable_action": "Avait-il eu la possibilité de prendre des mesures pour réduire ce risque avant l'accident?",
-    "causal_connection": "Les dommages au garage sont-ils directement liés à la chute de l'arbre?",
-    "damage_assessment": "Avez-vous déjà une estimation ou une évaluation des dommages au garage?",
+    "prior_knowledge": "La personne concernee connaissait-elle le risque avant l'evenement?",
+    "failure_to_take_reasonable_action": "La personne concernee pouvait-elle prendre des mesures raisonnables avant l'evenement?",
+    "causal_connection": "Les dommages decrits sont-ils directement lies a l'evenement?",
+    "damage_assessment": "Disposez-vous d'une estimation ou d'une evaluation des dommages?",
 }
 
 
-def question_for_fact_keys(fact_keys: Iterable[str]) -> str:
-    """Formule une question utilisateur depuis des clés, jamais un motif interne."""
+def _entity_value(entities: dict[str, Any] | None, key: str) -> str:
+    value = (entities or {}).get(key, "")
+    if isinstance(value, dict):
+        value = value.get("value", "")
+    return str(value or "").strip()
+
+
+def question_for_fact_keys(
+        fact_keys: Iterable[str], entities: dict[str, Any] | None = None) -> str:
+    """Build a user-facing question from keys, without internal motifs."""
     keys = list(dict.fromkeys(str(key) for key in fact_keys if str(key).strip()))
-    known = ["prior_knowledge", "failure_to_take_reasonable_action"]
-    if all(key in keys for key in known):
-        return (_FACT_QUESTIONS[known[0]] + " " +
-                _FACT_QUESTIONS[known[1]])
     if keys and keys[0] in _FACT_QUESTIONS:
-        return _FACT_QUESTIONS[keys[0]]
+        question = _FACT_QUESTIONS[keys[0]]
+        actor = _entity_value(entities, "actor") or "La personne concernee"
+        object_name = _entity_value(entities, "object")
+        event_name = _entity_value(entities, "event")
+        damaged_object = _entity_value(entities, "damaged_object")
+        event_stage = _entity_value(entities, "event_stage") or "avant l'evenement"
+        if keys[0] == "prior_knowledge" and object_name:
+            question = (f"{actor} connaissait-il ou connaissait-elle le risque lie a "
+                        f"{object_name} {event_stage}?")
+        elif keys[0] == "failure_to_take_reasonable_action":
+            risk = _entity_value(entities, "risk_condition") or "ce risque"
+            question = (f"{actor} pouvait-il ou pouvait-elle prendre des mesures "
+                        f"raisonnables pour reduire {risk} {event_stage}?")
+        elif keys[0] == "causal_connection":
+            event = event_name or "l'evenement"
+            target = damaged_object or "le dommage decrit"
+            question = f"Le dommage concernant {target} est-il directement lie a {event}?"
+        return question
     labels = {key.replace("_", " ") for key in keys[:2]}
-    return ("Pouvez-vous préciser le fait suivant : " +
+    return ("Pouvez-vous preciser le fait suivant : " +
             " et ".join(sorted(labels)) + "?")
 
 
@@ -225,9 +253,10 @@ def build_clarification(
         reviews: dict[str, dict[str, Any]], facts: dict[str, Any],
         clarification_history: list[dict[str, Any]],
         user_statements: Iterable[str] = ()) -> dict[str, Any] | None:
-    """Sélectionne la meilleure règle principale et produit une question factuelle."""
+    """Select one primary missing fact and bind only that fact to the question."""
     known = known_fact_keys(facts, clarification_history, user_statements)
     candidates: list[dict[str, Any]] = []
+    entities = (facts or {}).get("entities") or (facts or {}).get("case_entities")
     for number, review in (reviews or {}).items():
         if review.get("retrieval_group") != "primary":
             continue
@@ -236,30 +265,25 @@ def build_clarification(
         missing = [key for key in review.get("missing_fact_keys", []) if key not in known]
         if not missing:
             continue
-        question = _FACT_QUESTIONS.get(missing[0])
-        if not question:
-            continue
+        selected_key = str(missing[0])
+        question = question_for_fact_keys([selected_key], entities)
         candidates.append({
-            "article_number": str(number),
-            "review": review,
-            "missing": missing,
-            "question": question,
+            "article_number": str(number), "review": review, "missing": missing,
+            "question_fact_keys": [selected_key], "question": question,
         })
     if not candidates:
         return None
     candidates.sort(key=lambda item: (
         -int(item["review"].get("clarification_priority", 0)),
         int(item["review"].get("rerank_rank", 10_000)),
-        str(item["article_number"]),
-    ))
+        str(item["article_number"])))
     selected = candidates[0]
-    missing = selected["missing"]
-    question = selected["question"]
+    question_fact_keys = selected["question_fact_keys"]
     return {
-        "clarification_id": "fact-" + "-".join(missing),
+        "clarification_id": "fact-" + "-".join(question_fact_keys),
         "category": "fact",
-        "fact_keys": missing,
-        "question": question,
+        "fact_keys": question_fact_keys,
+        "question": selected["question"],
         "answer_type": "yes_no_or_explanation",
         "source_articles": [selected["article_number"]],
         "status": "pending",
@@ -268,14 +292,8 @@ def build_clarification(
 
 
 def required_rule_roles(case_description: str, facts: dict[str, Any] | None = None) -> tuple[str, ...]:
-    """Déduit les rôles nécessaires de la situation, sans articles codés."""
-    corpus = _fold(" ".join([case_description, *(str(v) for v in (facts or {}).values())]))
-    roles = ["general_liability_basis", "fault", "causation"]
-    if _contains(corpus, _DAMAGE_TERMS) or _contains(corpus, ("garage", "bien")):
-        roles.append("remedy_or_practical_consequence")
-    if _contains(corpus, ("arbre", "bien", "proprietaire", "immeuble", "objet")):
-        roles.append("special_property_regime")
-    return tuple(dict.fromkeys(roles))
+    """Return roles strictly required for a conditional answer."""
+    return ("general_liability_basis",)
 
 
 def assess_legislative_sufficiency(
@@ -283,6 +301,9 @@ def assess_legislative_sufficiency(
         facts: dict[str, Any] | None = None,
         remaining_candidates: bool = False) -> LegislativeSufficiency:
     required = required_rule_roles(case_description, facts)
+    supporting = ("fault", "causation", "custody_of_property", "maintenance")
+    optional = ("special_property_regime", "remedy_or_practical_consequence",
+                "preventive_measure", "exclusion_or_limitation")
     covered: set[str] = set()
     primary: list[str] = []
     conditional: list[str] = []
@@ -297,22 +318,94 @@ def assess_legislative_sufficiency(
         elif group == "contextual":
             contextual.append(str(number))
     missing = tuple(role for role in required if role not in covered)
+    required_covered = tuple(role for role in required if role in covered)
+    supporting_covered = tuple(role for role in supporting if role in covered)
+    optional_missing = tuple(role for role in optional if role not in covered)
     sufficient = not missing and bool(primary or conditional)
     fetch_next = bool(remaining_candidates and not sufficient)
     if sufficient:
-        reason = "Les rôles essentiels sont couverts par des règles principales retenues."
+        reason = ("La base principale est couverte; les autres roles restent "
+                  "des precisions conditionnelles ou de soutien.")
     elif missing:
-        reason = "Des rôles juridiques essentiels restent non couverts : " + ", ".join(missing) + "."
+        reason = ("Des roles juridiques essentiels restent non couverts : "
+                  + ", ".join(missing) + ".")
     else:
-        reason = "Aucune règle principale applicable ou conditionnelle n'est encore retenue."
+        reason = "Aucune regle principale applicable ou conditionnelle n'est retenue."
     return LegislativeSufficiency(
-        sufficient=sufficient,
-        required_rule_roles=required,
-        covered_rule_roles=tuple(sorted(covered)),
-        missing_rule_roles=missing,
-        primary_articles=tuple(primary),
-        conditional_articles=tuple(conditional),
-        contextual_articles=tuple(contextual),
-        should_fetch_next_batch=fetch_next,
-        reason=reason,
+        sufficient=sufficient, required_rule_roles=required,
+        covered_rule_roles=tuple(sorted(covered)), missing_rule_roles=missing,
+        primary_articles=tuple(primary), conditional_articles=tuple(conditional),
+        contextual_articles=tuple(contextual), should_fetch_next_batch=fetch_next,
+        reason=reason, sufficient_for_conditional_answer=sufficient,
+        required_roles_covered=required_covered, supporting_rule_roles=supporting,
+        supporting_roles_covered=supporting_covered,
+        optional_rule_roles=optional, optional_roles_missing=optional_missing,
     )
+
+
+_FACT_LABELS = {
+    "prior_knowledge": "connaissance anterieure du risque",
+    "failure_to_take_reasonable_action": "mesures raisonnables non prises",
+    "causal_connection": "lien causal entre l'evenement et les dommages",
+    "damage_assessment": "evaluation des dommages",
+}
+
+
+def fact_value(value: Any) -> Any:
+    if isinstance(value, dict) and "value" in value:
+        return value.get("value")
+    return value
+
+
+def format_facts_for_query(facts: dict[str, Any] | None) -> list[str]:
+    """Format only asserted facts; never expose internal keys or dict repr."""
+    formatted: list[str] = []
+    for key, raw in sorted((facts or {}).items()):
+        if key in {"user_statements", "entities", "case_entities"}:
+            continue
+        value = fact_value(raw)
+        if value is True:
+            formatted.append(_FACT_LABELS.get(key, key.replace("_", " ")))
+        elif isinstance(value, str) and value.strip():
+            formatted.append(value.strip())
+    return formatted
+
+
+def _first_sentences(text: str, limit: int = 2) -> str:
+    parts = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    return " ".join(part.strip() for part in parts[:limit] if part.strip())[:500]
+
+
+def build_conditional_reasoning_contract(
+        reviews: dict[str, dict[str, Any]], texts: dict[str, str],
+        facts: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Create a source-bounded contract for conditional reasoning."""
+    result: list[dict[str, Any]] = []
+    asserted = format_facts_for_query(facts)
+    known = set(known_fact_keys(facts or {}, [], []))
+    for number, review in (reviews or {}).items():
+        if review.get("retrieval_group") != "primary":
+            continue
+        if review.get("status") not in {"applicable", "conditionally_applicable"}:
+            continue
+        text = texts.get(str(number), "")
+        missing = [str(key) for key in review.get("missing_fact_keys", []) if key not in known]
+        result.append({
+            "article": str(number),
+            "status": review.get("status", "conditionally_applicable"),
+            "source_propositions": [_first_sentences(text)] if text else [],
+            "user_asserted_facts": [
+                {"fact": fact, "status": "asserted_not_verified"}
+                for fact in asserted],
+            "unresolved_conditions": [
+                _FACT_LABELS.get(key, key.replace("_", " ")) for key in missing],
+            "permitted_claims": [
+                "le texte peut être pertinent si ses conditions sont réunies",
+                "le fait déclaré peut appuyer l'analyse sans établir à lui seul la responsabilité",
+            ],
+            "prohibited_claims": [
+                "responsabilité automatique",
+                "condition juridique présentée comme établie sans preuve",
+            ],
+        })
+    return result

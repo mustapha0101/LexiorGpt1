@@ -17,6 +17,12 @@ from lexior.services.assertion_grounding import (
     VerdictAffirmation,
     textes_recuperes,
 )
+from lexior.services.evidence_first import (
+    build_claim_ledger,
+    merge_failures,
+    retrieved_articles,
+)
+from lexior.agentic.schemas import PrimaryAuthoritySelection
 from lexior.services.modes import is_live
 
 from ..context import GraphContext
@@ -66,6 +72,45 @@ def _source_bounded_fallback(textes: dict[str, str],
         + "\n\nConservez les \u00e9l\u00e9ments factuels et les communications utiles; "
           "un professionnel peut ensuite appliquer ces textes \u00e0 votre situation."
     )
+
+
+def _conditional_evidence_fallback(
+        textes: dict[str, str], contract: dict[str, Any]) -> str:
+    """Return a source-bounded conditional answer before the generic fallback."""
+    entries = contract.get("conditional_reasoning_contract") or []
+    retained = {str(number) for number in contract.get("articles_retenus", [])}
+    entries = [entry for entry in entries
+               if str(entry.get("article", "")) in retained
+               and str(entry.get("article", "")) in textes]
+    if not entries:
+        return ""
+    paragraphs = [
+        "Les textes officiels retenus peuvent être pertinents pour analyser la situation, mais ils ne permettent pas à eux seuls de conclure à une responsabilité.",
+    ]
+    asserted: list[str] = []
+    unresolved: list[str] = []
+    for entry in entries:
+        for item in entry.get("user_asserted_facts", []):
+            fact = str(item.get("fact", "")).strip()
+            if fact and fact not in asserted:
+                asserted.append(fact)
+        for condition in entry.get("unresolved_conditions", []):
+            condition = str(condition).strip()
+            if condition and condition not in unresolved:
+                unresolved.append(condition)
+        article = str(entry.get("article", ""))
+        proposition = (entry.get("source_propositions") or [])
+        proposition = str(proposition[0]).strip() if proposition else textes[article].strip()
+        if proposition:
+            paragraphs.append(f"Article {article} : le texte officiel énonce notamment : {proposition}")
+    if asserted:
+        paragraphs.append("Vous avez affirmé, sans vérification indépendante : "
+                          + "; ".join(asserted) + ".")
+    if unresolved:
+        paragraphs.append("Il reste notamment à établir : " + "; ".join(unresolved) + ".")
+    paragraphs.append(
+        "La responsabilité n'est donc pas automatique : l'application dépend des faits à établir et du lien avec le préjudice. Conservez les photos, les échanges, la date et les estimations utiles.")
+    return "\n\n".join(paragraphs)
 
 
 def _safe_unresolved_fallback() -> str:
@@ -160,11 +205,40 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                     motif="l'article est exclu du contrat d'applicabilité",
                 ))
     grounding_blockers: list[str] = []
+    grounding_failures: list[dict[str, str]] = []
     for verdict in verdicts:
         if not verdict.soutenue:
             problem = tag(ErrorCode.UNGROUNDED_ARTICLE, verdict.probleme())
             validation.errors.append(problem)
             grounding_blockers.append(problem)
+            grounding_failures.append({
+                "claim": str(verdict.affirmation or ""),
+                "failure_type": "ungrounded_article",
+                "source_article": str(verdict.article or ""),
+                "reason": str(verdict.motif or ""),
+            })
+
+    selection = state.get("primary_authority_selection")
+    if isinstance(selection, dict):
+        selection = PrimaryAuthoritySelection.model_validate(selection)
+    elif selection is None:
+        selection = PrimaryAuthoritySelection(task_id=state.get("task_id", ""))
+    ledger = build_claim_ledger(
+        reponse_finale, selection,
+        {sid: item[0] for sid, item in retrieved_articles(visible_tool_history(state)).items()},
+        task_id=state.get("task_id", ""),
+    )
+    ledger_failures = [
+        {
+            "claim": claim.text,
+            "failure_type": "ungrounded_claim",
+            "reason": claim.failure_reason or "affirmation juridique non vérifiée",
+        }
+        for claim in ledger.claims if claim.verification_status == "failed"
+    ]
+    grounding_failures = merge_failures(
+        state.get("grounding_failures", []),
+        [*grounding_failures, *ledger_failures], node=NAME)
 
     # A failed free-form paraphrase or a rule from memory must not become a
     # technical error shown to the user. In live mode, replace it with an
@@ -187,7 +261,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 str(number) for number in contract.get("articles_retenus", [])
                 if str(number) in textes
             ]
-        fallback = (_source_bounded_fallback(textes, cited_numbers)
+        fallback = (_conditional_evidence_fallback(textes, contract)
+                    or _source_bounded_fallback(textes, cited_numbers)
                     or _safe_unresolved_fallback())
         validation.errors = [error for error in validation.errors
                              if error not in safety_blockers]
@@ -200,6 +275,10 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "validation_result": validation,
         "validation_issues": list(validation.errors)
         + list(validation.warnings),
+        "grounding_failures": grounding_failures,
+        "claim_ledger": ledger,
+        "failure_history": merge_failures(
+            state.get("failure_history", []), grounding_failures, node=NAME),
         # Le dataset reste strict sur tous les validateurs. En live, seuls
         # les échecs de grounding d'une affirmation juridique bloquent : une
         # erreur de route historique ne doit pas transformer une réponse

@@ -153,8 +153,10 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             case_description,
             source_urls=list(observation.source_urls),
         )
+        candidate_status = getattr(status, "value", str(status))
         accepted = [item for item in classified
-                    if item.usable and item.source_url]
+                    if item.source_url and (
+                        item.usable or candidate_status == "candidate_pending_fetch")][:2]
         existing_cases = list(state.get("usable_case_sources", []))
         signatures = {(item.citation, item.source_url)
                       for item in existing_cases}
@@ -164,6 +166,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 signatures.add((item.citation, item.source_url))
         updates["usable_case_sources"] = existing_cases
         updates["case_law_search_status"] = (
+            "candidate_pending_fetch" if accepted and not any(item.usable for item in accepted) else
             "candidates_pending_fetch" if accepted else
             ("candidates_without_url" if any(item.usable for item in classified)
              else (status.value if hasattr(status, "value") else str(status))))

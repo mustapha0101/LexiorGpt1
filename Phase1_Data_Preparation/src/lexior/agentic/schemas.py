@@ -13,7 +13,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -334,6 +334,74 @@ class FinalClaim(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Evidence-first contracts (shared by live and dataset graph)
+# ---------------------------------------------------------------------------
+
+class SourceRejection(BaseModel):
+    source_id: str
+    reason: str
+
+
+class PrimaryAuthoritySelection(BaseModel):
+    """Allowlist of retrieved sources that may reach the writer."""
+
+    task_id: str = ""
+    primary_sources: list[str] = Field(default_factory=list, max_length=3)
+    secondary_sources: list[str] = Field(default_factory=list, max_length=3)
+    rejected_sources: list[SourceRejection] = Field(default_factory=list)
+    selection_reason: str = ""
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class RuleElement(BaseModel):
+    id: str
+    description: str
+    support_source_ids: list[str] = Field(default_factory=list)
+    status: Literal["present", "missing", "uncertain", "not_applicable"] = "uncertain"
+
+
+class RuleContract(BaseModel):
+    """Source-bounded representation of the operative rule."""
+
+    task_id: str = ""
+    rule_type: str = ""
+    rule_summary: str = ""
+    primary_source_ids: list[str] = Field(default_factory=list)
+    elements: list[RuleElement] = Field(default_factory=list)
+    supported_exceptions: list[RuleElement] = Field(default_factory=list)
+    decisive_facts_needed: list[str] = Field(default_factory=list)
+    facts_not_required: list[str] = Field(default_factory=list)
+    application_limits: list[str] = Field(default_factory=list)
+
+
+class SourceSufficiencyDecision(BaseModel):
+    task_id: str = ""
+    sufficient_for_initial_answer: bool = False
+    legislation_status: Literal["required", "sufficient", "missing", "not_needed"] = "missing"
+    regulation_status: Literal["required", "conditionally_required", "sufficient", "missing", "not_needed"] = "not_needed"
+    jurisprudence_status: Literal["required", "conditionally_required", "sufficient", "missing", "not_needed"] = "not_needed"
+    doctrine_status: Literal["conditionally_required", "sufficient", "missing", "not_needed"] = "not_needed"
+    missing_questions: list[str] = Field(default_factory=list)
+    explicit_normative_references: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+class LegalClaim(BaseModel):
+    claim_id: str
+    text: str
+    source_ids: list[str] = Field(default_factory=list)
+    support_type: Literal["direct", "reasonable_inference", "unsupported"] = "unsupported"
+    verification_status: Literal["pending", "verified", "failed", "removed", "repaired"] = "pending"
+    failure_reason: Optional[str] = None
+    task_id: str = ""
+
+
+class ClaimLedger(BaseModel):
+    task_id: str = ""
+    claims: list[LegalClaim] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # État de recherche (machine à états de l'orchestrateur)
 # ---------------------------------------------------------------------------
 
@@ -352,6 +420,7 @@ class CaseLawSearchStatus(str, Enum):
     failed = "failed"
     not_required = "not_required"
     candidates_pending_fetch = "candidates_pending_fetch"
+    candidate_pending_fetch = "candidate_pending_fetch"
     candidates_without_url = "candidates_without_url"
     verified = "verified"
 

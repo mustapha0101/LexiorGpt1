@@ -56,7 +56,10 @@ _LINEAR_PREFIX = (
 # Arêtes fixes (sans condition).
 _STATIC_EDGES = (
     ("verify_tool_result", "classify_tool_result"),
-    ("update_research_state", "plan"),
+    ("update_research_state", "select_primary_authorities"),
+    ("select_primary_authorities", "extract_rule_contract"),
+    ("extract_rule_contract", "derive_rule_specific_facts"),
+    ("derive_rule_specific_facts", "plan"),
     ("reformulate_search", "plan"),
     ("repair_trajectory", "plan"),
     ("build_answer_contract", "generate_answer"),
