@@ -185,6 +185,11 @@ class StreamTranslator:
                         event_names.append("clarification_evaluated")
                 if node_name == "build_answer_contract":
                     event_names.append("answer_contract_built")
+                    event_names.extend(
+                        item.get("event_name", "")
+                        for item in update.get("remedy_events", [])
+                        if item.get("event_name")
+                    )
                 if node_name == "validate_final":
                     event_names.append("claim_verification_started")
                     event_names.append("claim_ledger_built")
@@ -246,6 +251,19 @@ class StreamTranslator:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
                 }
+                for remedy_event in update.get("remedy_events", []):
+                    yield {
+                        "type": "observability",
+                        "event": {
+                            **remedy_event,
+                            "event_names": [remedy_event.get("event_name", "")],
+                            "node": node_name,
+                            "task_id": update.get("task_id", ""),
+                            "thread_id": update.get("thread_id", "")
+                            or self._thread_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    }
 
             if node_name == "validate_plan":
                 decision = update.get("latest_decision")

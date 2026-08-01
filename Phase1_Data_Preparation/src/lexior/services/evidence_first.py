@@ -23,6 +23,7 @@ from lexior.agentic.schemas import (
     RuleContract,
     RuleElement,
     RuleFact,
+    RemedyIntent,
     SourceRejection,
     SourceSufficiencyDecision,
     ToolObservation,
@@ -38,7 +39,8 @@ _ARTICLE_RE = re.compile(r"\b(?:article|art\.)\s+(\d{1,4}(?:\.\d+)?)", re.I)
 _LEGAL_MARKER_RE = re.compile(
     r"\b(?:article|articles|code civil|loi|règlement|reglement|doit|peut|"
     r"est tenu|a droit|prescription|délai|delai|responsabil|préjudice|"
-    r"préjudice|dommage|réparer|reparer)\b", re.I)
+    r"préjudice|dommage|réparer|reparer|plainte|signaler|signalement|"
+    r"poursuivre|indemnisation|indemniser|réclamation|reclamation)\b", re.I)
 _ARTICLE_BLOCK_RE = re.compile(
     r"(?ms)^\s*Article\s+(\d{1,4}(?:\.\d+)?)\s*\n(.*?)(?=^\s*Article\s+"
     r"\d{1,4}(?:\.\d+)?\s*\n|\Z)")
@@ -626,9 +628,61 @@ def _compare_claim_to_source(claim: str, source: str) -> dict[str, Any]:
             "reason": "alignement propositionnel insuffisant"}
 
 
+def _remedy_claim_category(text: str) -> str | None:
+    folded = _fold(text)
+    if re.search(r"\b(?:police|criminel|criminelle|pénal|penal|"
+                 r"porter plainte|déposer une plainte|deposer une plainte|"
+                 r"plainte)\b", folded):
+        return "police_or_criminal_complaint"
+    if re.search(r"\b(?:ville|municipal|municipalité|municipalite|"
+                 r"signalement|signaler|arrondissement)\b", folded):
+        return "municipal_or_administrative_report"
+    if re.search(r"\b(?:mise en demeure|demande formelle)\b", folded):
+        return "formal_notice"
+    if re.search(r"\b(?:tribunal|action judiciaire|demande judiciaire|"
+                 r"instance civile|poursuivre)\b", folded):
+        return "civil_proceeding"
+    if re.search(r"\b(?:indemnisation|indemniser|réparation|reparation|"
+                 r"dommages?[- ]intérêts|dommages?[- ]interets|"
+                 r"réparer le préjudice|reparer le prejudice|"
+                 r"compensation)\b", folded):
+        return "civil_compensation"
+    return None
+
+
+def _split_remedy_claim(text: str) -> list[str]:
+    """Sépare un recours et son résultat dans une proposition composite."""
+    folded = _fold(text)
+    has_complaint = bool(re.search(
+        r"\b(?:porter plainte|déposer une plainte|deposer une plainte|"
+        r"plainte|signaler|signalement)\b", folded))
+    has_compensation = bool(re.search(
+        r"\b(?:indemnisation|indemniser|réparation|reparation|"
+        r"dommages?[- ]intérêts|dommages?[- ]interets|compensation)\b",
+        folded))
+    if not (has_complaint and has_compensation):
+        return [text]
+    match = re.search(
+        r"\s+(?:pour|afin de|afin d')\s+(?:obtenir|réclamer|reclamer|demander)\s+",
+        text, re.IGNORECASE)
+    if match:
+        prefix = text[:match.start()].strip(" ,;:")
+        suffix = text[match.end():].strip(" .;:")
+        subject = re.match(r"^(.*?\b(?:peut|pouvez|pourrait|pourriez)\b)\s+",
+                           prefix, re.IGNORECASE)
+        lead = subject.group(1) if subject else ""
+        return [prefix, f"{lead} obtenir {suffix}".strip()]
+    match = re.search(r"\s+(?:et|ainsi que)\s+", text, re.IGNORECASE)
+    if match:
+        return [text[:match.start()].strip(" ,;:"),
+                text[match.end():].strip(" .;:")]
+    return [text]
+
+
 def _build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
                         source_texts: dict[str, str], *, task_id: str = "",
                         rule_contract: RuleContract | dict[str, Any] | None = None,
+                        remedy_intent: RemedyIntent | dict[str, Any] | None = None,
                         version: int = 1) -> ClaimLedger:
     claims: list[LegalClaim] = []
     allowed = [sid for sid in [*selection.primary_sources, *selection.secondary_sources]
@@ -654,68 +708,122 @@ def _build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
         contract_sources = list(dict.fromkeys(str(item) for item in contract_sources))
         if contract_sources:
             allowed = [sid for sid in allowed if sid in contract_sources]
-    for index, paragraph in enumerate(re.split(r"(?<=[.!?])\s+|\n+", answer or "")):
-        text = paragraph.strip()
-        if (not text or not _LEGAL_MARKER_RE.search(text)
-                or "get_" in text.casefold()
-                or text.casefold().startswith((
-                    "règles et documents", "regles et documents",
-                    "je ne peux pas déterminer", "je ne peux pas determiner",
-                    "voici le texte officiel", "le texte officiel récupéré",
-                    "le texte officiel recupere",
-                    "conservez les", "l'application dépend", "l’application dépend",
-                    "l'application depend"))):
-            continue
-        if (re.fullmatch(r"\s*Article\s+\d{1,4}(?:\.\d+)?\s*", text, re.I)
-                and not re.search(r"\b(?:prévoit|prevu|stipule|dispose|doit|peut|"
-                                  r"est tenu|a droit|réparer|reparer|responsabil)\b",
-                                  text, re.I)):
-            continue
-        if (text.casefold().startswith(("cet article", "explication"))
-                and not re.search(r"\b(?:prévoit|prevu|stipule|dispose|doit|peut|"
-                                  r"est tenu|a droit|réparer|reparer)\b", text, re.I)):
-            continue
-        cited = set(_ARTICLE_RE.findall(text))
-        source_ids = [sid for sid in allowed
-                      if not cited or sid.rsplit(":", 1)[-1] in cited]
-        support_type = "unsupported"
-        passage = None
-        comparison: dict[str, Any] = {}
-        supporting_ids: list[str] = []
-        for sid in source_ids:
-            current = _compare_claim_to_source(text, source_texts[sid])
-            current_type = current["support_type"]
-            current_passage = current.get("passage")
-            if not comparison:
-                comparison = current
-            if current_type == "direct":
-                support_type, passage = current_type, current_passage
-                comparison = current
-                supporting_ids = [sid]
-                break
-            if current_type == "reasonable_inference" and support_type == "unsupported":
-                support_type, passage = current_type, current_passage
-                comparison = current
-                supporting_ids = [sid]
-        verified = support_type != "unsupported"
-        claims.append(LegalClaim(
-            claim_id=f"claim-{index}", text=text,
-            source_ids=supporting_ids,
-            cited_source_ids=source_ids,
-            support_type=support_type,
-            verification_status="verified" if verified else "failed",
-            failure_reason=(None if verified else
-                            comparison.get("reason") or
-                            "Aucun passage récupéré n'emporte cette proposition."),
-            premises=[passage] if support_type == "reasonable_inference" and passage else [],
-            supporting_passages=[passage] if passage else [],
-            added_conditions=list(comparison.get("added_conditions", [])),
-            omitted_exceptions=list(comparison.get("omitted_exceptions", [])),
-            modality_changed=bool(comparison.get("modality_changed", False)),
-            inference_explanation=("Les termes de l'affirmation sont présents dans le passage source; aucune condition nouvelle n'est ajoutée."
-                                   if support_type == "reasonable_inference" else ""),
-            task_id=task_id,
-        ))
+    remedy = (remedy_intent if isinstance(remedy_intent, dict)
+              else remedy_intent.model_dump(mode="json")
+              if remedy_intent else {})
+    supported_remedies = set(remedy.get("supported_remedy_types", []))
+    unsupported_remedies = set(remedy.get(
+        "unsupported_remedy_types",
+        remedy.get("unsupported_or_uncovered_remedy_types", []),
+    ))
+    paragraph_index = 0
+    for paragraph in re.split(r"(?<=[.!?])\s+|\n+", answer or ""):
+        chunks = _split_remedy_claim(paragraph.strip())
+        for chunk_index, text in enumerate(chunks):
+            index = paragraph_index if len(chunks) == 1 else (
+                f"{paragraph_index}.{chunk_index + 1}")
+            text = text.strip()
+            if (not text or not _LEGAL_MARKER_RE.search(text)
+                    or "get_" in text.casefold()
+                    or text.casefold().startswith((
+                        "règles et documents", "regles et documents",
+                        "je ne peux pas déterminer", "je ne peux pas determiner",
+                        "voici le texte officiel", "le texte officiel récupéré",
+                        "le texte officiel recupere",
+                        "conservez les", "l'application dépend", "l’application dépend",
+                        "l'application depend"))):
+                continue
+            if (re.fullmatch(r"\s*Article\s+\d{1,4}(?:\.\d+)?\s*", text, re.I)
+                    and not re.search(r"\b(?:prévoit|prevu|stipule|dispose|doit|peut|"
+                                      r"est tenu|a droit|réparer|reparer|responsabil)\b",
+                                      text, re.I)):
+                continue
+            if (text.casefold().startswith(("cet article", "explication"))
+                    and not re.search(r"\b(?:prévoit|prevu|stipule|dispose|doit|peut|"
+                                      r"est tenu|a droit|réparer|reparer)\b", text, re.I)):
+                continue
+            cited = set(_ARTICLE_RE.findall(text))
+            source_ids = [sid for sid in allowed
+                          if not cited or sid.rsplit(":", 1)[-1] in cited]
+            claim_category = _remedy_claim_category(text)
+            support_type = "unsupported"
+            passage = None
+            comparison: dict[str, Any] = {}
+            supporting_ids: list[str] = []
+            if (claim_category in unsupported_remedies
+                    and claim_category not in supported_remedies):
+                comparison = {
+                    "support_type": "unsupported",
+                    "reason": (
+                        "type de recours non soutenu par les sources récupérées"),
+                }
+            else:
+                for sid in source_ids:
+                    current = _compare_claim_to_source(text, source_texts[sid])
+                    current_type = current["support_type"]
+                    current_passage = current.get("passage")
+                    if not comparison:
+                        comparison = current
+                    if current_type == "direct":
+                        support_type, passage = current_type, current_passage
+                        comparison = current
+                        supporting_ids = [sid]
+                        break
+                    if (current_type == "reasonable_inference"
+                            and support_type == "unsupported"):
+                        support_type, passage = current_type, current_passage
+                        comparison = current
+                        supporting_ids = [sid]
+            if (support_type == "unsupported"
+                    and claim_category in supported_remedies):
+                remedy_evidence = (
+                    remedy.get("supported_remedy_evidence", {})
+                    .get(claim_category, [])
+                )
+                if remedy_evidence:
+                    first_evidence = remedy_evidence[0]
+                    support_type = "reasonable_inference"
+                    passage = first_evidence.get("passage", "")
+                    comparison = {
+                        "support_type": support_type,
+                        "passage": passage,
+                        "reason": "type de recours couvert par une proposition source",
+                    }
+                    supporting_ids = [
+                        str(first_evidence.get("source_id", ""))
+                    ] if first_evidence.get("source_id") in source_texts else []
+            verified = support_type != "unsupported"
+            claims.append(LegalClaim(
+                claim_id=f"claim-{index}", text=text,
+                source_ids=supporting_ids,
+                cited_source_ids=source_ids,
+                support_type=support_type,
+                verification_status="verified" if verified else "failed",
+                failure_reason=(None if verified else
+                                comparison.get("reason") or
+                                "Aucun passage récupéré n'emporte cette proposition."),
+                premises=[passage] if support_type == "reasonable_inference"
+                and passage else [],
+                supporting_passages=[passage] if passage else [],
+                added_conditions=list(comparison.get("added_conditions", [])),
+                omitted_exceptions=list(comparison.get("omitted_exceptions", [])),
+                modality_changed=bool(comparison.get("modality_changed", False)),
+                inference_explanation=(
+                    "Les termes de l'affirmation sont présents dans le passage "
+                    "source; aucune condition nouvelle n'est ajoutée."
+                    if support_type == "reasonable_inference" else ""),
+                claim_category=(
+                    "procedure" if claim_category in {
+                        "police_or_criminal_complaint",
+                        "municipal_or_administrative_report",
+                        "civil_proceeding",
+                        "formal_notice",
+                    } else
+                    "remedy_type" if claim_category else "substantive_rule"
+                ),
+                task_id=task_id,
+            ))
+        paragraph_index += 1
     return ClaimLedger(task_id=task_id, answer_hash=sha256_text(answer or ""),
                        version=version, claims=claims)
 
@@ -726,20 +834,24 @@ class LegalClaimVerificationService:
     def verify_answer(self, answer: str, selection: PrimaryAuthoritySelection,
                       source_texts: dict[str, str], *, task_id: str = "",
                       rule_contract: RuleContract | dict[str, Any] | None = None,
+                      remedy_intent: RemedyIntent | dict[str, Any] | None = None,
                       version: int = 1) -> ClaimLedger:
         return _build_claim_ledger(
             answer, selection, source_texts, task_id=task_id,
-            rule_contract=rule_contract, version=version)
+            rule_contract=rule_contract, remedy_intent=remedy_intent,
+            version=version)
 
 
 def build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
                        source_texts: dict[str, str], *, task_id: str = "",
                        rule_contract: RuleContract | dict[str, Any] | None = None,
+                       remedy_intent: RemedyIntent | dict[str, Any] | None = None,
                        version: int = 1) -> ClaimLedger:
     """Compatibility entry point delegating to the canonical verifier."""
     return LegalClaimVerificationService().verify_answer(
         answer, selection, source_texts, task_id=task_id,
-        rule_contract=rule_contract, version=version)
+        rule_contract=rule_contract, remedy_intent=remedy_intent,
+        version=version)
 
 
 def merge_failures(previous: list[dict[str, Any]], new: list[dict[str, Any]], *, node: str = "") -> list[dict[str, Any]]:

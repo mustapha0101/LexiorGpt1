@@ -39,6 +39,7 @@ from lexior.agentic.schemas import (
     RejectionDetail,
     RepairReport,
     RuleContract,
+    RemedyIntent,
     ResearchState,
     Role,
     ScenarioSpec,
@@ -162,6 +163,7 @@ class LexiorState(TypedDict, total=False):
     primary_authority_selection: PrimaryAuthoritySelection
     rule_contract: RuleContract
     source_sufficiency_decision: SourceSufficiencyDecision
+    remedy_intent: RemedyIntent
     normative_references: list[dict[str, Any]]
 
     # ── Rédaction ────────────────────────────────────────────────────────
@@ -311,6 +313,7 @@ def initial_state(
         "rule_contract": RuleContract(task_id=f"task-{thread_id or 'run'}"),
         "source_sufficiency_decision": SourceSufficiencyDecision(
             task_id=f"task-{thread_id or 'run'}"),
+        "remedy_intent": RemedyIntent(),
         "normative_references": [],
         "answer_contract": None,
         "final_answer": "",

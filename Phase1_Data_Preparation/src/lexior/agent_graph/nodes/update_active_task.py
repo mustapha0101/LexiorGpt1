@@ -74,6 +74,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             "primary_authority_selection": {},
             "rule_contract": {},
             "source_sufficiency_decision": {},
+            "remedy_intent": {},
             "normative_references": [],
             "regulation_verified": False,
             "answer_contract": None,

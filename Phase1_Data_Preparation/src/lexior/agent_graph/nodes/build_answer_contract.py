@@ -24,6 +24,8 @@ from lexior.services.assertion_grounding import (
     textes_recuperes,
 )
 from lexior.services.article_review import build_conditional_reasoning_contract
+from lexior.services.evidence_first import retrieved_articles
+from lexior.services.remedy_intent import classify_remedy_intent
 from lexior.agentic.schemas import RuleContract, SourceSufficiencyDecision
 
 from ..context import GraphContext
@@ -308,6 +310,39 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 "Réponds directement à l'objectif de l'utilisateur; n'ajoute "
                 "pas une limitation générique si la source suffit.")
 
+    source_texts = {
+        source_id: item[0]
+        for source_id, item in retrieved_articles(tool_history).items()
+    }
+    for observation in tool_history:
+        if (observation.ok and observation.normalized_response.strip()
+                and observation.tool_name not in {
+                    "semantic_search_ccq", "semantic_search_cpc",
+                    "search_quebec_jurisprudence", "search_quebec_regulations",
+                }):
+            source_texts.setdefault(
+                f"tool:{observation.tool_name}:{observation.content_hash}",
+                observation.normalized_response)
+    remedy_intent = classify_remedy_intent(
+        state.get("latest_user_intent")
+        or state.get("latest_user_message")
+        or state["scenario"].user_query,
+        source_texts=source_texts,
+        rule_contract=rule_contract,
+    )
+    if remedy_intent.raw_expression:
+        if remedy_intent.clarification_required:
+            directives.append(
+                "Le type de recours demandé n'est pas couvert : demande une "
+                "clarification ou indique explicitement la limite de couverture.")
+        elif remedy_intent.answerable_with_distinctions:
+            directives.extend([
+                "Distingue le recours couvert des recours policiers, "
+                "municipaux ou administratifs non couverts.",
+                "N'écris jamais qu'une plainte permet d'obtenir une "
+                "indemnisation sans distinguer les démarches.",
+            ])
+
     # Coverage gap directives.
     for gap in coverage_gaps:
         desc = gap.get("requested_court_scope", "") or gap.get(
@@ -370,6 +405,20 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "limitations": list(rule_contract.application_limits),
         "permitted_claims": list(rule_contract.permitted_claims),
         "prohibited_claims": list(rule_contract.prohibited_claims),
+        "raw_user_remedy_expression": remedy_intent.raw_expression,
+        "remedy_intent": remedy_intent.model_dump(mode="json"),
+        "supported_remedy_types": list(remedy_intent.supported_remedy_types),
+        "unsupported_or_uncovered_remedy_types": list(
+            remedy_intent.unsupported_remedy_types),
+        "required_remedy_distinctions": list(
+            remedy_intent.distinction_to_explain),
+        "prohibited_remedy_claims": [
+            "Ne pas présenter une plainte policière, criminelle, "
+            "municipale ou administrative comme un recours civil sans "
+            "source correspondante.",
+            "Ne pas affirmer qu'une plainte donne droit à une indemnisation "
+            "si cette relation n'est pas soutenue par une source.",
+        ] if remedy_intent.raw_expression else [],
         "raisonnement_autorise": raisonnement_autorise,
         "sources_alternatives": alternatives_for_contract,
         "lacunes_de_couverture": [g for g in coverage_gaps],
@@ -380,6 +429,28 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
 
     return {
         "answer_contract": contract,
+        "remedy_intent": remedy_intent,
+        "remedy_events": [{
+            "event_name": event_name,
+            "raw_expression": remedy_intent.raw_expression,
+            "possible_remedy_types": remedy_intent.possible_remedy_types,
+            "supported_remedy_types": remedy_intent.supported_remedy_types,
+            "unsupported_remedy_types": remedy_intent.unsupported_remedy_types,
+            "reason": remedy_intent.reason,
+        } for event_name in (
+            ["remedy_intent_classified"]
+            + (["remedy_ambiguity_detected"]
+               if remedy_intent.ambiguity_detected else [])
+            + (["remedy_distinction_added"]
+               if remedy_intent.distinction_to_explain else [])
+            + (["unsupported_remedy_detected"]
+               if remedy_intent.unsupported_remedy_types else [])
+            + (["remedy_clarification_required"]
+               if remedy_intent.clarification_required else [])
+            + (["remedy_clarification_skipped"]
+               if remedy_intent.answerable_with_distinctions
+               and not remedy_intent.clarification_required else [])
+        )],
         "exempt_tools": exempt,
         "status": "answering",
     }

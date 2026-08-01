@@ -208,6 +208,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         reponse_finale, selection, source_texts,
         task_id=state.get("task_id", ""),
         rule_contract=state.get("rule_contract"),
+        remedy_intent=state.get("remedy_intent")
+        or contract.get("remedy_intent"),
     )
     if contract.get("filtre_articles_officiels"):
         retained = {str(numero) for numero in contract.get(
@@ -272,6 +274,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             candidate, selection, source_texts,
             task_id=state.get("task_id", ""),
             rule_contract=state.get("rule_contract"),
+            remedy_intent=state.get("remedy_intent")
+            or contract.get("remedy_intent"),
             version=ledger.version + 1,
         ) if candidate else None
         if candidate_ledger and not any(
@@ -286,6 +290,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 fallback, selection, source_texts,
                 task_id=state.get("task_id", ""),
                 rule_contract=state.get("rule_contract"),
+                remedy_intent=state.get("remedy_intent")
+                or contract.get("remedy_intent"),
                 version=ledger.version + 1,
             )
             if not any(claim.verification_status == "failed"

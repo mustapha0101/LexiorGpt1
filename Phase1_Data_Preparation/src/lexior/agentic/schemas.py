@@ -415,6 +415,24 @@ class RuleContract(BaseModel):
     application_limits: list[str] = Field(default_factory=list)
 
 
+class RemedyIntent(BaseModel):
+    """Interprétation source-bornée d'une expression de recours."""
+
+    raw_expression: str = ""
+    requested_outcome: str = ""
+    possible_remedy_types: list[str] = Field(default_factory=list)
+    primary_interpretation: str = ""
+    ambiguity_detected: bool = False
+    clarification_required: bool = False
+    answerable_with_distinctions: bool = False
+    supported_remedy_types: list[str] = Field(default_factory=list)
+    unsupported_remedy_types: list[str] = Field(default_factory=list)
+    distinction_to_explain: list[str] = Field(default_factory=list)
+    reason: str = ""
+    supported_remedy_evidence: dict[str, list[dict[str, str]]] = Field(
+        default_factory=dict)
+
+
 class SourceSufficiencyDecision(BaseModel):
     task_id: str = ""
     sufficient_for_initial_answer: bool = False
@@ -441,6 +459,10 @@ class LegalClaim(BaseModel):
     omitted_exceptions: list[str] = Field(default_factory=list)
     modality_changed: bool = False
     inference_explanation: str = ""
+    claim_category: Literal[
+        "substantive_rule", "remedy_type", "procedure", "practical_advice",
+        "source_limitation",
+    ] = "substantive_rule"
     task_id: str = ""
 
 
