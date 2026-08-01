@@ -32,10 +32,10 @@ ne boucle.
 from __future__ import annotations
 
 import functools
-from typing import Optional
 
 from langgraph.errors import GraphInterrupt
 from langgraph.graph import END, StateGraph
+from langgraph.types import Command
 
 from . import nodes as node_registry
 from .context import GraphContext
@@ -53,8 +53,16 @@ _LINEAR_PREFIX = (
     "plan",
 )
 
-# Arêtes fixes (sans condition).
+# Arêtes fixes terminales. Les transitions internes passent par un routeur
+# gardé afin qu'un Command(goto="reject") ne soit jamais concurrencé par une
+# arête statique après une exception.
 _STATIC_EDGES = (
+    ("export_dataset", END),
+    ("return_live_answer", END),
+    ("reject", END),
+)
+
+_GUARDED_STATIC_EDGES = (
     ("verify_tool_result", "classify_tool_result"),
     ("update_research_state", "select_primary_authorities"),
     ("select_primary_authorities", "extract_rule_contract"),
@@ -66,9 +74,6 @@ _STATIC_EDGES = (
     ("run_critics", "classify_failures"),
     ("repair_answer", "run_critics"),
     ("validate_final", "compute_acceptance"),
-    ("export_dataset", END),
-    ("return_live_answer", END),
-    ("reject", END),
 )
 
 
@@ -81,16 +86,31 @@ def _wrap(node_name: str, fn, ctx: GraphContext):
     """
 
     @functools.wraps(fn)
-    def _node(state: LexiorState) -> dict:
+    def _node(state: LexiorState) -> dict | Command:
         try:
-            return fn(state, ctx)
+            update = fn(state, ctx)
+            if isinstance(update, dict):
+                # Make task identity available to every SSE update, including
+                # nodes whose normal payload is otherwise intentionally small.
+                update.setdefault("task_id", state.get("task_id", ""))
+                update.setdefault("thread_id", state.get("thread_id", ""))
+            return update
         except GraphInterrupt:
             raise
         except Exception as exc:  # noqa: BLE001 — rejet contrôlé
-            return {
-                "status": "rejected",
-                "stop_reason": f"{node_name}: {type(exc).__name__}: {exc}",
-            }
+            reason = f"{node_name}: {type(exc).__name__}: {exc}"
+            return Command(
+                update={
+                    "status": "rejected",
+                    "stop_reason": reason,
+                    "deterministic_blockers": [reason],
+                    "node_failed": node_name,
+                    "error_type": type(exc).__name__,
+                    "task_id": state.get("task_id", ""),
+                    "thread_id": state.get("thread_id", ""),
+                },
+                goto="reject",
+            )
 
     return _node
 
@@ -119,6 +139,14 @@ def build_graph(context: GraphContext, checkpointer=None):
     for source, router in ROUTERS.items():
         graph.add_conditional_edges(source, router,
                                     dict(CONDITIONAL_ROUTES[source]))
+
+    for upstream, downstream in _GUARDED_STATIC_EDGES:
+        graph.add_conditional_edges(
+            upstream,
+            lambda state, target=downstream: (
+                "reject" if state.get("status") == "rejected" else target),
+            {downstream: downstream, "reject": "reject"},
+        )
 
     for upstream, downstream in _STATIC_EDGES:
         graph.add_edge(upstream, downstream)

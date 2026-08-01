@@ -122,18 +122,33 @@ class StreamTranslator:
                 "label": NODE_LABELS.get(node_name, node_name),
             }
             if node_name in {"validate_final", "compute_acceptance"}:
-                status_event.update({
-                    "validation_issues": update.get("validation_issues", []),
-                    "grounding_failures": update.get("grounding_failures", []),
-                    "accepted": update.get("accepted"),
-                })
+                for field in ("validation_issues", "grounding_failures", "accepted",
+                              "grounding_failures_delta", "open_grounding_failures_total",
+                              "resolved_grounding_failures_total"):
+                    if field in update:
+                        status_event[field] = update[field]
+            if update.get("node_failed"):
+                yield {
+                    "type": "observability",
+                    "event": {
+                        "event_name": "node_failed",
+                        "event_names": ["node_failed"],
+                        "node": str(update.get("node_failed") or node_name),
+                        "task_id": update.get("task_id", ""),
+                        "thread_id": update.get("thread_id", "") or self._thread_id,
+                        "reason": str(update.get("stop_reason", "")),
+                        "error_type": str(update.get("error_type", "")),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
             yield status_event
 
             if node_name in {
                 "update_active_task", "select_primary_authorities",
                 "extract_rule_contract", "derive_rule_specific_facts",
                 "handle_clarification", "validate_plan",
-                "build_answer_contract", "validate_final",
+                "build_answer_contract", "validate_final", "compute_acceptance",
+                "repair_answer",
             }:
                 selection = update.get("primary_authority_selection") or {}
                 if hasattr(selection, "model_dump"):
@@ -171,12 +186,33 @@ class StreamTranslator:
                 if node_name == "build_answer_contract":
                     event_names.append("answer_contract_built")
                 if node_name == "validate_final":
+                    event_names.append("claim_verification_started")
                     event_names.append("claim_ledger_built")
                     event_names.extend(
                         item.get("event_name", "")
                         for item in update.get("claim_events", [])
                         if item.get("event_name") in {"claim_verified", "claim_failed"}
                     )
+                    if update.get("claim_ledger_rebuilt"):
+                        event_names.append("claim_ledger_rebuilt")
+                    if update.get("failure_resolved"):
+                        event_names.append("failure_resolved")
+                    if update.get("answer_repair_started"):
+                        event_names.append("answer_repair_started")
+                    if update.get("answer_repair_succeeded"):
+                        event_names.append("answer_repair_succeeded")
+                    if update.get("answer_repair_failed"):
+                        event_names.append("answer_repair_failed")
+                    if update.get("safe_fallback_built"):
+                        event_names.append("safe_fallback_built")
+                if node_name == "repair_answer":
+                    event_names.append(
+                        "answer_repair_succeeded"
+                        if (update.get("repair") and getattr(
+                            update["repair"], "status", "") == "successful")
+                        else "answer_repair_failed")
+                if node_name == "compute_acceptance":
+                    event_names.append("acceptance_computed")
                 references = update.get("normative_references") or []
                 if update.get("regulation_verified") or any(
                     isinstance(item, dict) and item.get("status") == "resolved"

@@ -13,22 +13,19 @@ import re
 from typing import Any
 
 from lexior.agentic.error_codes import ErrorCode, tag
-from lexior.services.assertion_grounding import (
-    VerdictAffirmation,
-    textes_recuperes,
-)
+from lexior.services.assertion_grounding import textes_recuperes
 from lexior.services.evidence_first import (
-    build_claim_ledger,
+    LegalClaimVerificationService,
     merge_failures,
+    resolve_failures,
     retrieved_articles,
 )
-from lexior.agentic.schemas import PrimaryAuthoritySelection
+from lexior.agentic.schemas import LegalClaim, PrimaryAuthoritySelection
 from lexior.services.modes import is_live
 
 from ..context import GraphContext
 from ..state import (
     LexiorState,
-    canonical_case_description,
     to_trajectory,
     visible_tool_history,
 )
@@ -181,43 +178,12 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     memory_blockers = _regle_sans_source(state)
     validation.errors.extend(memory_blockers)
 
-    # Le NUMÉRO cité est vérifié ailleurs ; ici c'est l'AFFIRMATION qui est
-    # confrontée au texte réellement récupéré. Un échec technique devient une
-    # erreur : ne pas avoir pu vérifier n'est pas avoir vérifié.
-    # Les faits sont nécessaires : les conditions temporelles, matérielles et
-    # personnelles d'une règle doivent correspondre à la situation décrite.
+    # Claim verification has one authority.  The ledger is built from the
+    # allowlisted sources and the current RuleContract; no second LLM judge
+    # runs here or in the critics.
     textes = textes_recuperes(visible_tool_history(state))
     reponse_finale = state.get("final_answer") or ""
-    verdicts = ctx.services.assertion_grounding.verifier(
-        reponse_finale,
-        textes,
-        faits=canonical_case_description(state))
     contract = state.get("answer_contract") or {}
-    if contract.get("filtre_articles_officiels"):
-        retained = {str(numero) for numero in contract.get(
-            "articles_retenus", [])}
-        for numero in _articles_cites(reponse_finale):
-            if numero in textes and numero not in retained:
-                verdicts.append(VerdictAffirmation(
-                    article=numero,
-                    affirmation=f"citation de l'article {numero}",
-                    soutenue=False,
-                    motif="l'article est exclu du contrat d'applicabilité",
-                ))
-    grounding_blockers: list[str] = []
-    grounding_failures: list[dict[str, str]] = []
-    for verdict in verdicts:
-        if not verdict.soutenue:
-            problem = tag(ErrorCode.UNGROUNDED_ARTICLE, verdict.probleme())
-            validation.errors.append(problem)
-            grounding_blockers.append(problem)
-            grounding_failures.append({
-                "claim": str(verdict.affirmation or ""),
-                "failure_type": "ungrounded_article",
-                "source_article": str(verdict.article or ""),
-                "reason": str(verdict.motif or ""),
-            })
-
     selection = state.get("primary_authority_selection")
     if isinstance(selection, dict):
         selection = PrimaryAuthoritySelection.model_validate(selection)
@@ -237,77 +203,161 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             source_texts.setdefault(
                 f"tool:{observation.tool_name}:{observation.content_hash}",
                 observation.normalized_response)
-    ledger = build_claim_ledger(
+    verifier = LegalClaimVerificationService()
+    ledger = verifier.verify_answer(
         reponse_finale, selection, source_texts,
         task_id=state.get("task_id", ""),
+        rule_contract=state.get("rule_contract"),
     )
-    ledger_failures = [
+    if contract.get("filtre_articles_officiels"):
+        retained = {str(numero) for numero in contract.get(
+            "articles_retenus", [])}
+        for numero in _articles_cites(reponse_finale):
+            if numero in textes and numero not in retained:
+                ledger.claims.append(LegalClaim(
+                    claim_id=f"article-filter-{numero}",
+                    text=f"citation de l'article {numero}",
+                    cited_source_ids=[f"ccq:{numero}"],
+                    verification_status="failed",
+                    failure_reason="l'article est exclu du contrat d'applicabilité",
+                    task_id=state.get("task_id", ""),
+                ))
+
+    failed_claims = [claim for claim in ledger.claims
+                     if claim.verification_status == "failed"]
+    grounding_failures: list[dict[str, Any]] = [
         {
             "claim": claim.text,
-            "failure_type": "ungrounded_claim",
+            "failure_type": (
+                "ungrounded_article" if claim.claim_id.startswith("article-filter-")
+                else "unsupported_legal_claim"),
+            "source_article": ",".join(claim.cited_source_ids),
             "reason": claim.failure_reason or "affirmation juridique non vérifiée",
+            "claim_id": claim.claim_id,
+            "status": "open",
         }
-        for claim in ledger.claims if claim.verification_status == "failed"
+        for claim in failed_claims
     ]
-    grounding_failures = merge_failures(
-        state.get("grounding_failures", []),
-        [*grounding_failures, *ledger_failures], node=NAME)
+    grounding_blockers = [
+        tag(ErrorCode.UNGROUNDED_ARTICLE, failure["reason"])
+        for failure in grounding_failures
+    ]
+    validation.errors.extend(grounding_blockers)
 
-    # A failed free-form paraphrase or a rule from memory must not become a
-    # technical error shown to the user. In live mode, replace it with an
-    # evidence-only fallback; it asserts no application of the rule.
+    # A failed claim must never be exposed raw in live mode.  First try one
+    # deterministic, source-bounded rewrite; if it cannot be validated, use
+    # the safe fallback and validate that new answer too.
     fallback = ""
+    repair_status = "not_needed"
+    claim_ledger_rebuilt = False
     safety_blockers = memory_blockers + grounding_blockers
     if safety_blockers and live:
+        repair_status = "attempted"
         cited_numbers = list(dict.fromkeys(
-            number
-            for verdict in verdicts if not verdict.soutenue
-            for number in _RE_ARTICLE_NUMBER.findall(verdict.article or "")
+            number for claim in failed_claims
+            for number in _RE_ARTICLE_NUMBER.findall(
+                " ".join([claim.text, *claim.cited_source_ids]))
         ))
         if contract.get("filtre_articles_officiels"):
-            # Le contrat résulte de la revue d'applicabilité : son ordre est
-            # plus fiable que les citations du brouillon que l'on vient de
-            # rejeter. Le repli ne doit donc pas perpétuer une citation
-            # marginale ou exclue simplement parce qu'elle figurait dans la
-            # réponse invalide.
             cited_numbers = [
                 str(number) for number in contract.get("articles_retenus", [])
                 if str(number) in textes
             ]
-        fallback = (
+        candidate = (
             ("" if ctx.config.evidence_first_enabled
              else _conditional_evidence_fallback(textes, contract))
             or _source_bounded_fallback(textes, cited_numbers)
-            or _safe_unresolved_fallback())
+        )
+        candidate_ledger = verifier.verify_answer(
+            candidate, selection, source_texts,
+            task_id=state.get("task_id", ""),
+            rule_contract=state.get("rule_contract"),
+            version=ledger.version + 1,
+        ) if candidate else None
+        if candidate_ledger and not any(
+                claim.verification_status == "failed"
+                for claim in candidate_ledger.claims):
+            fallback, ledger = candidate, candidate_ledger
+            claim_ledger_rebuilt = True
+            repair_status = "successful"
+        else:
+            fallback = _safe_unresolved_fallback()
+            fallback_ledger = verifier.verify_answer(
+                fallback, selection, source_texts,
+                task_id=state.get("task_id", ""),
+                rule_contract=state.get("rule_contract"),
+                version=ledger.version + 1,
+            )
+            if not any(claim.verification_status == "failed"
+                       for claim in fallback_ledger.claims):
+                ledger = fallback_ledger
+                claim_ledger_rebuilt = True
+                repair_status = "fallback"
+            else:
+                # Do not claim a safe delivery when the verifier cannot
+                # validate the fallback itself.
+                fallback = ""
+                repair_status = "failed"
         validation.errors = [error for error in validation.errors
                              if error not in safety_blockers]
         memory_blockers = []
         grounding_blockers = []
+        if fallback:
+            failed_claims = []
+
+    current_failures = [
+        {
+            "claim": claim.text,
+            "failure_type": (
+                "ungrounded_article" if claim.claim_id.startswith("article-filter-")
+                else "unsupported_legal_claim"),
+            "reason": claim.failure_reason or "affirmation juridique non vérifiée",
+            "claim_id": claim.claim_id,
+            "status": "open",
+        }
+        for claim in ledger.claims if claim.verification_status == "failed"
+    ]
+    failure_history = merge_failures(
+        state.get("failure_history", []), grounding_failures, node=NAME)
+    failure_history = resolve_failures(
+        failure_history, ledger.claims, node=NAME)
+    failure_resolved = any(item.get("status") == "resolved"
+                           and item.get("resolved_at_node") == NAME
+                           for item in failure_history)
+    claim_events = [{
+        "event_name": "claim_verification_started", "status": "started",
+    }]
+    claim_events.extend({
+        "event_name": "claim_verified" if claim.verification_status == "verified"
+        else "claim_failed", "claim_id": claim.claim_id,
+        "status": claim.verification_status,
+    } for claim in ledger.claims)
 
     return {
         "thread_id": state.get("thread_id", ""),
         "task_id": state.get("task_id", ""),
-        "claim_events": [
-            {"event_name": "claim_verified" if claim.verification_status == "verified"
-             else "claim_failed", "claim_id": claim.claim_id,
-             "status": claim.verification_status}
-            for claim in ledger.claims
-        ],
+        "claim_events": claim_events,
         **({"final_answer": fallback,
             "final_reasoning_summary": ""} if fallback else {}),
         "validation_result": validation,
         "validation_issues": list(validation.errors)
         + list(validation.warnings),
-        "grounding_failures": grounding_failures,
+        "grounding_failures": current_failures,
         "claim_ledger": ledger,
-        "failure_history": merge_failures(
-            state.get("failure_history", []), grounding_failures, node=NAME),
+        "failure_history": failure_history,
+        "failure_resolved": failure_resolved,
+        "claim_ledger_rebuilt": claim_ledger_rebuilt,
+        "answer_repair_started": bool(safety_blockers and live),
+        "answer_repair_succeeded": repair_status == "successful",
+        "answer_repair_failed": repair_status == "failed",
+        "safe_fallback_built": repair_status == "fallback",
         # Le dataset reste strict sur tous les validateurs. En live, seuls
         # les échecs de grounding d'une affirmation juridique bloquent : une
         # erreur de route historique ne doit pas transformer une réponse
         # générale non juridique en panne utilisateur.
         "deterministic_blockers": (
-            grounding_blockers if live else list(validation.errors)),
+            [*grounding_blockers, *memory_blockers]
+            if live else list(validation.errors)),
         "deterministic_validation": bool(validation.valid),
         "exempt_tools": exempt,
     }

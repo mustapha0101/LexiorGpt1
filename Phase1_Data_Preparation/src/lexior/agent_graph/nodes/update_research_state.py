@@ -97,7 +97,6 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 status=status,
                 reason=str(getattr(verdict, "motif", "") or ""),
                 text=text,
-                facts=case_description,
                 rank=rank,
                 source=observation.tool_name,
             )

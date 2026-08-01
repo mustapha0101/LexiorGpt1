@@ -69,7 +69,9 @@ _EXPORTS = {
     "decide_source_sufficiency": ".evidence_first",
     "normative_references": ".evidence_first",
     "build_claim_ledger": ".evidence_first",
+    "LegalClaimVerificationService": ".evidence_first",
     "merge_failures": ".evidence_first",
+    "resolve_failures": ".evidence_first",
     "normalize_and_repair_tool_args": ".evidence_first",
 }
 

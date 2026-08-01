@@ -431,16 +431,23 @@ class LegalClaim(BaseModel):
     claim_id: str
     text: str
     source_ids: list[str] = Field(default_factory=list)
+    cited_source_ids: list[str] = Field(default_factory=list)
     support_type: Literal["direct", "reasonable_inference", "unsupported"] = "unsupported"
     verification_status: Literal["pending", "verified", "failed", "removed", "repaired"] = "pending"
     failure_reason: Optional[str] = None
     premises: list[str] = Field(default_factory=list)
+    supporting_passages: list[str] = Field(default_factory=list)
+    added_conditions: list[str] = Field(default_factory=list)
+    omitted_exceptions: list[str] = Field(default_factory=list)
+    modality_changed: bool = False
     inference_explanation: str = ""
     task_id: str = ""
 
 
 class ClaimLedger(BaseModel):
     task_id: str = ""
+    answer_hash: str = ""
+    version: int = 1
     claims: list[LegalClaim] = Field(default_factory=list)
 
 

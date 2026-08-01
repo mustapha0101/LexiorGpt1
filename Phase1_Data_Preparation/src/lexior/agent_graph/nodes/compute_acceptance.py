@@ -24,7 +24,7 @@ from lexior.services.evidence import AcceptanceBlocker
 from lexior.services.modes import is_live
 from lexior.services.result_verification import ResultVerificationService
 from lexior.services.evidence_first import merge_failures
-from lexior.agentic.schemas import ClaimLedger
+from lexior.agentic.schemas import ClaimLedger, sha256_text
 
 from ..context import GraphContext
 from ..state import LexiorState, to_research_state, to_trajectory
@@ -96,6 +96,26 @@ def _open_grounding_failures(state: LexiorState) -> list[str]:
         }))
 
 
+def _ledger_matches_answer(state: LexiorState) -> bool:
+    ledger = state.get("claim_ledger")
+    if isinstance(ledger, dict):
+        ledger = ClaimLedger.model_validate(ledger)
+    if not ledger or not getattr(ledger, "answer_hash", ""):
+        return True
+    return ledger.answer_hash == sha256_text(state.get("final_answer") or "")
+
+
+def _grounding_counts(state: LexiorState) -> tuple[int, int]:
+    history = state.get("failure_history", []) or []
+    types = {"ungrounded_claim", "ungrounded_article", "unsupported_legal_claim"}
+    return (
+        sum(1 for item in history if item.get("status", "open") == "open"
+            and item.get("failure_type") in types),
+        sum(1 for item in history if item.get("status") == "resolved"
+            and item.get("failure_type") in types),
+    )
+
+
 def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     live = is_live(state.get("mode", ""))
 
@@ -121,11 +141,16 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             acceptance.accepted = False
             acceptance.blocking_errors = list(dict.fromkeys(
                 [*acceptance.blocking_errors, *claim_blockers]))
+        if not _ledger_matches_answer(state):
+            acceptance.accepted = False
+            acceptance.blocking_errors = list(dict.fromkeys(
+                [*acceptance.blocking_errors, "claim_ledger_stale"]))
         open_failures = _open_grounding_failures(state)
         if open_failures:
             acceptance.accepted = False
             acceptance.blocking_errors = list(dict.fromkeys(
                 [*acceptance.blocking_errors, *open_failures]))
+        open_count, resolved_count = _grounding_counts(state)
         return {"acceptance_result": acceptance,
                 "acceptance_blockers": list(dict.fromkeys(
                     [*blockers, *claim_blockers, *open_failures])),
@@ -134,7 +159,9 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                     [{"failure_type": item, "reason": item}
                      for item in claim_blockers], node=NAME),
                 "quality_accepted": acceptance.accepted,
-                "trajectory_accepted": acceptance.accepted}
+                "trajectory_accepted": acceptance.accepted,
+                "open_grounding_failures_total": open_count,
+                "resolved_grounding_failures_total": resolved_count}
 
     critics = state.get("critic_results", {}) or {}
     trajectory = to_trajectory(state)
@@ -153,6 +180,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     existing_blockers = list(state.get("acceptance_blockers", []))
     all_blockers = list(dict.fromkeys(existing_blockers + evidence_blockers))
     all_blockers.extend(_open_grounding_failures(state))
+    if not _ledger_matches_answer(state):
+        all_blockers.append("claim_ledger_stale")
     all_blockers = list(dict.fromkeys(all_blockers))
 
     if all_blockers and acceptance.accepted:
@@ -185,6 +214,11 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "quality_accepted": acceptance.accepted,
         "trajectory_accepted": acceptance.accepted,
     }
+    open_count, resolved_count = _grounding_counts(state)
+    updates.update({
+        "open_grounding_failures_total": open_count,
+        "resolved_grounding_failures_total": resolved_count,
+    })
 
     if not acceptance.accepted:
         repair = state.get("repair", RepairReport())

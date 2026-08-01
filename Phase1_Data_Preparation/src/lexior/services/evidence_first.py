@@ -26,6 +26,7 @@ from lexior.agentic.schemas import (
     SourceRejection,
     SourceSufficiencyDecision,
     ToolObservation,
+    sha256_text,
 )
 
 
@@ -509,23 +510,126 @@ def decide_source_sufficiency(
     )
 
 
-def _claim_supported_by_source(claim: str, source: str) -> tuple[str, str | None]:
-    claim_tokens = _tokens(claim)
+_CLAIM_CITATION_PREFIX_RE = re.compile(
+    r"\b(?:selon|d'après|dapres|suivant)\s+(?:l'|la\s+)?(?:article|art\.)\s*"
+    r"\d{1,4}(?:\.\d+)?\s*[,;:]?", re.I)
+_CLAIM_CITATION_RE = re.compile(
+    r"\b(?:articles?|art\.)\s*\d{1,4}(?:\.\d+)?", re.I)
+_CONDITION_SEGMENT_RE = re.compile(
+    r"\b(?:si|seulement si|seulement\s+s['’]?il|lorsque|en cas de|à moins que|a moins que|"
+    r"sauf|même si|meme si|soit que|sous réserve que|sous reserve que)\b"
+    r"([^.;]+)", re.I)
+_MODALITY_RE = {
+    "obligation": re.compile(r"\b(?:doit|doivent|est tenu|sont tenus|"
+                              r"obligation de)\b", re.I),
+    "permission": re.compile(r"\b(?:peut|peuvent|a droit|ont le droit|"
+                              r"est autoris)\b", re.I),
+    "prohibition": re.compile(r"\b(?:interdit|ne peut|ne peuvent)\b", re.I),
+}
+_PROPOSITION_STOPWORDS = {
+    "ainsi", "article", "articles", "art", "selon", "dapres", "d apres",
+    "suivant", "code", "civil", "quebec", "que", "qui", "meme", "si",
+    "soit", "fut", "etait", "être", "etre", "avoir", "a", "est",
+}
+
+
+def _semantic_tokens(value: Any) -> set[str]:
+    """Tokens propositionnels, avec seulement des équivalences grammaticales."""
+    tokens = _tokens(value)
+    aliases = {
+        "etait": "etre", "fut": "etre", "est": "etre",
+        "causé": "cause", "causee": "cause", "causes": "cause",
+        "réparer": "reparer", "réparé": "reparer", "réparation": "reparer",
+        "propriétaire": "proprietaire",
+    }
+    return {aliases.get(token, token) for token in tokens
+            if token not in _PROPOSITION_STOPWORDS}
+
+
+def _claim_proposition(claim: str) -> str:
+    value = _CLAIM_CITATION_PREFIX_RE.sub("", claim or "", count=1)
+    return _CLAIM_CITATION_RE.sub("", value, count=1).strip(" ,;:")
+
+
+def _modality(value: str) -> str:
+    for name, pattern in _MODALITY_RE.items():
+        if pattern.search(value or ""):
+            return name
+    return "none"
+
+
+def _condition_tokens(value: str) -> list[set[str]]:
+    return [_semantic_tokens(match.group(1))
+            for match in _CONDITION_SEGMENT_RE.finditer(value or "")
+            if _semantic_tokens(match.group(1))]
+
+
+def _compare_claim_to_source(claim: str, source: str) -> dict[str, Any]:
+    """Compare a legal proposition structurally, not by verbatim copying."""
+    claim_body = _claim_proposition(claim)
+    claim_tokens = _semantic_tokens(claim_body)
     if not claim_tokens:
-        return "unsupported", None
-    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", source) if part.strip()]
-    best = max(sentences, key=lambda sentence: len(claim_tokens & _tokens(sentence)), default="")
-    overlap = len(claim_tokens & _tokens(best)) / max(1, len(claim_tokens))
-    normalized_claim = _fold(claim).strip(" .,:;\"'")
-    if normalized_claim and normalized_claim in _fold(source):
-        return "direct", best
-    if overlap >= 0.75 and not re.search(r"\b(?:doit|peut|est tenu|a droit)\b", claim, re.I):
-        return "reasonable_inference", best
-    return "unsupported", None
+        return {"support_type": "unsupported", "passage": None,
+                "reason": "proposition juridique vide"}
+    sentences = [part.strip() for part in re.split(
+        r"(?<=[.!?])\s+|\n+", source or "") if part.strip()]
+    best = max(sentences, key=lambda sentence: len(
+        claim_tokens & _semantic_tokens(sentence)), default="")
+    source_tokens = _semantic_tokens(best or source)
+    overlap = len(claim_tokens & source_tokens) / max(1, len(claim_tokens))
+    normalized_claim = _fold(claim_body).strip(" .,:;\"'")
+    normalized_source = _fold(source).strip(" .,:;\"'")
+    if normalized_claim and normalized_claim in normalized_source:
+        return {"support_type": "direct", "passage": best or source,
+                "reason": "correspondance directe après normalisation"}
+
+    source_modality = _modality(best or source)
+    claim_modality = _modality(claim_body)
+    if (source_modality != "none" and claim_modality != "none"
+            and source_modality != claim_modality):
+        return {
+            "support_type": "unsupported", "passage": None,
+            "modality_changed": True,
+            "reason": (f"changement de modalité: source={source_modality}, "
+                       f"affirmation={claim_modality}"),
+        }
+
+    added_conditions: list[str] = []
+    for match in _CONDITION_SEGMENT_RE.finditer(claim_body):
+        condition_text = match.group(0).strip()
+        condition = _semantic_tokens(match.group(1))
+        if condition and len(condition & _semantic_tokens(source)) < max(
+                1, int(len(condition) * 0.6)):
+            added_conditions.append(condition_text)
+    if added_conditions:
+        return {
+            "support_type": "unsupported", "passage": None,
+            "added_conditions": added_conditions,
+            "reason": "condition ajoutée absente du passage source",
+        }
+
+    source_exception = [part.strip() for part in re.split(
+        r"(?<=[.!?])\s+|\n+", source or "") if _EXCEPTION_RE.search(part)]
+    if source_exception and not _CONDITION_SEGMENT_RE.search(claim_body):
+        return {
+            "support_type": "unsupported", "passage": None,
+            "omitted_exceptions": source_exception[:2],
+            "reason": "exception importante absente de la paraphrase",
+        }
+
+    if overlap >= 0.62:
+        return {
+            "support_type": "reasonable_inference", "passage": best or source,
+            "reason": "alignement propositionnel fidèle au passage source",
+        }
+    return {"support_type": "unsupported", "passage": None,
+            "reason": "alignement propositionnel insuffisant"}
 
 
-def build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
-                       source_texts: dict[str, str], *, task_id: str = "") -> ClaimLedger:
+def _build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
+                        source_texts: dict[str, str], *, task_id: str = "",
+                        rule_contract: RuleContract | dict[str, Any] | None = None,
+                        version: int = 1) -> ClaimLedger:
     claims: list[LegalClaim] = []
     allowed = [sid for sid in [*selection.primary_sources, *selection.secondary_sources]
                if sid in source_texts]
@@ -535,13 +639,34 @@ def build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
         # the caller's verified source_texts even when no CCQ/CPC authority
         # was selected.
         allowed = list(source_texts)
+    if rule_contract:
+        if isinstance(rule_contract, dict):
+            contract_sources = list(rule_contract.get("primary_source_ids", []))
+            contract_elements = rule_contract.get("elements", [])
+        else:
+            contract_sources = list(rule_contract.primary_source_ids)
+            contract_elements = rule_contract.elements
+        for element in contract_elements:
+            if isinstance(element, dict):
+                contract_sources.extend(element.get("support_source_ids", []))
+            else:
+                contract_sources.extend(element.support_source_ids)
+        contract_sources = list(dict.fromkeys(str(item) for item in contract_sources))
+        if contract_sources:
+            allowed = [sid for sid in allowed if sid in contract_sources]
     for index, paragraph in enumerate(re.split(r"(?<=[.!?])\s+|\n+", answer or "")):
         text = paragraph.strip()
         if (not text or not _LEGAL_MARKER_RE.search(text)
                 or "get_" in text.casefold()
-                or text.casefold().startswith(("règles et documents", "regles et documents"))):
+                or text.casefold().startswith((
+                    "règles et documents", "regles et documents",
+                    "je ne peux pas déterminer", "je ne peux pas determiner",
+                    "voici le texte officiel", "le texte officiel récupéré",
+                    "le texte officiel recupere",
+                    "conservez les", "l'application dépend", "l’application dépend",
+                    "l'application depend"))):
             continue
-        if (re.search(r"\bArticle\s+\d", text, re.I)
+        if (re.fullmatch(r"\s*Article\s+\d{1,4}(?:\.\d+)?\s*", text, re.I)
                 and not re.search(r"\b(?:prévoit|prevu|stipule|dispose|doit|peut|"
                                   r"est tenu|a droit|réparer|reparer|responsabil)\b",
                                   text, re.I)):
@@ -555,30 +680,66 @@ def build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
                       if not cited or sid.rsplit(":", 1)[-1] in cited]
         support_type = "unsupported"
         passage = None
+        comparison: dict[str, Any] = {}
         supporting_ids: list[str] = []
         for sid in source_ids:
-            current_type, current_passage = _claim_supported_by_source(text, source_texts[sid])
+            current = _compare_claim_to_source(text, source_texts[sid])
+            current_type = current["support_type"]
+            current_passage = current.get("passage")
+            if not comparison:
+                comparison = current
             if current_type == "direct":
                 support_type, passage = current_type, current_passage
+                comparison = current
                 supporting_ids = [sid]
                 break
             if current_type == "reasonable_inference" and support_type == "unsupported":
                 support_type, passage = current_type, current_passage
+                comparison = current
                 supporting_ids = [sid]
         verified = support_type != "unsupported"
         claims.append(LegalClaim(
             claim_id=f"claim-{index}", text=text,
             source_ids=supporting_ids,
+            cited_source_ids=source_ids,
             support_type=support_type,
             verification_status="verified" if verified else "failed",
             failure_reason=(None if verified else
-                            "Aucun passage récupéré n'emporte cette proposition exacte."),
+                            comparison.get("reason") or
+                            "Aucun passage récupéré n'emporte cette proposition."),
             premises=[passage] if support_type == "reasonable_inference" and passage else [],
+            supporting_passages=[passage] if passage else [],
+            added_conditions=list(comparison.get("added_conditions", [])),
+            omitted_exceptions=list(comparison.get("omitted_exceptions", [])),
+            modality_changed=bool(comparison.get("modality_changed", False)),
             inference_explanation=("Les termes de l'affirmation sont présents dans le passage source; aucune condition nouvelle n'est ajoutée."
                                    if support_type == "reasonable_inference" else ""),
             task_id=task_id,
         ))
-    return ClaimLedger(task_id=task_id, claims=claims)
+    return ClaimLedger(task_id=task_id, answer_hash=sha256_text(answer or ""),
+                       version=version, claims=claims)
+
+
+class LegalClaimVerificationService:
+    """Unique proposition-level verifier used by the final validation path."""
+
+    def verify_answer(self, answer: str, selection: PrimaryAuthoritySelection,
+                      source_texts: dict[str, str], *, task_id: str = "",
+                      rule_contract: RuleContract | dict[str, Any] | None = None,
+                      version: int = 1) -> ClaimLedger:
+        return _build_claim_ledger(
+            answer, selection, source_texts, task_id=task_id,
+            rule_contract=rule_contract, version=version)
+
+
+def build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
+                       source_texts: dict[str, str], *, task_id: str = "",
+                       rule_contract: RuleContract | dict[str, Any] | None = None,
+                       version: int = 1) -> ClaimLedger:
+    """Compatibility entry point delegating to the canonical verifier."""
+    return LegalClaimVerificationService().verify_answer(
+        answer, selection, source_texts, task_id=task_id,
+        rule_contract=rule_contract, version=version)
 
 
 def merge_failures(previous: list[dict[str, Any]], new: list[dict[str, Any]], *, node: str = "") -> list[dict[str, Any]]:
@@ -598,6 +759,30 @@ def merge_failures(previous: list[dict[str, Any]], new: list[dict[str, Any]], *,
             merged.append(value)
             seen.add(key)
     return merged
+
+
+def resolve_failures(previous: list[dict[str, Any]],
+                     current_claims: Iterable[LegalClaim], *,
+                     node: str = "") -> list[dict[str, Any]]:
+    """Close old grounding failures that no longer exist in the current answer."""
+    claims = {str(claim.text).strip() for claim in current_claims
+              if claim.verification_status == "failed"}
+    resolved: list[dict[str, Any]] = []
+    for item in previous or []:
+        value = dict(item)
+        failure_type = str(value.get("failure_type", ""))
+        claim = str(value.get("claim", "")).strip()
+        if (value.get("status", "open") == "open"
+                and failure_type in {"ungrounded_claim", "ungrounded_article",
+                                     "unsupported_legal_claim"}
+                and claim not in claims):
+            value.update({
+                "status": "resolved",
+                "resolved_at_node": node,
+                "resolution": "claim supprimé ou remplacé par une réponse vérifiée",
+            })
+        resolved.append(value)
+    return resolved
 
 
 def article_budget(config: Any, *, fetched_count: int = 0,
