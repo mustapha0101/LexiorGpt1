@@ -70,7 +70,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # une clarification, un fait qu'aucune règle déterministe ne sait
     # constater resterait « manquant » indéfiniment et rejouerait la
     # question sans fin.
-    if live and not state.get("clarification_count", 0):
+    if live and not state.get("clarification_count", 0) \
+            and not ctx.config.evidence_first_enabled:
         for fact in required_facts_for(state.get("request_type", "")):
             folded = fact.casefold()
             if resolved and any(alias in folded

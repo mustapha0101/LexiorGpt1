@@ -223,9 +223,22 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         selection = PrimaryAuthoritySelection.model_validate(selection)
     elif selection is None:
         selection = PrimaryAuthoritySelection(task_id=state.get("task_id", ""))
+    source_texts = {
+        sid: item[0]
+        for sid, item in retrieved_articles(visible_tool_history(state)).items()
+    }
+    for observation in visible_tool_history(state):
+        if (observation.ok and observation.normalized_response.strip()
+                and not ctx.catalog.is_local(observation.tool_name)
+                and observation.tool_name not in {
+                    "semantic_search_ccq", "semantic_search_cpc",
+                    "search_quebec_jurisprudence", "search_quebec_regulations",
+                }):
+            source_texts.setdefault(
+                f"tool:{observation.tool_name}:{observation.content_hash}",
+                observation.normalized_response)
     ledger = build_claim_ledger(
-        reponse_finale, selection,
-        {sid: item[0] for sid, item in retrieved_articles(visible_tool_history(state)).items()},
+        reponse_finale, selection, source_texts,
         task_id=state.get("task_id", ""),
     )
     ledger_failures = [
@@ -261,15 +274,25 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 str(number) for number in contract.get("articles_retenus", [])
                 if str(number) in textes
             ]
-        fallback = (_conditional_evidence_fallback(textes, contract)
-                    or _source_bounded_fallback(textes, cited_numbers)
-                    or _safe_unresolved_fallback())
+        fallback = (
+            ("" if ctx.config.evidence_first_enabled
+             else _conditional_evidence_fallback(textes, contract))
+            or _source_bounded_fallback(textes, cited_numbers)
+            or _safe_unresolved_fallback())
         validation.errors = [error for error in validation.errors
                              if error not in safety_blockers]
         memory_blockers = []
         grounding_blockers = []
 
     return {
+        "thread_id": state.get("thread_id", ""),
+        "task_id": state.get("task_id", ""),
+        "claim_events": [
+            {"event_name": "claim_verified" if claim.verification_status == "verified"
+             else "claim_failed", "claim_id": claim.claim_id,
+             "status": claim.verification_status}
+            for claim in ledger.claims
+        ],
         **({"final_answer": fallback,
             "final_reasoning_summary": ""} if fallback else {}),
         "validation_result": validation,

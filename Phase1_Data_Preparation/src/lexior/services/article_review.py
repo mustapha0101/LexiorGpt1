@@ -178,6 +178,34 @@ def enrich_article_review(
     }
 
 
+def enrich_source_bounded_review(
+        *, article_number: str, status: str, reason: str, text: str,
+        rank: int | None = None, source: str = "") -> dict[str, Any]:
+    """Review metadata that never invents legal roles or missing facts.
+
+    The evidence-first path stores the reviewer verdict and provenance, while
+    the operative propositions are extracted later from the official text by
+    ``services.evidence_first``.  The legacy lexical profile remains available
+    only for historical dataset compatibility and is intentionally not called
+    here.
+    """
+    return {
+        "article_number": str(article_number),
+        "status": status,
+        "reason": reason[:300],
+        "source": source,
+        "reviewed": bool(reason or status != "unreviewed"),
+        "text_available": bool(text.strip()),
+        "rerank_rank": rank if rank is not None else 10_000,
+        "retrieval_group": "primary" if status in {
+            "applicable", "conditionally_applicable"} else "contextual",
+        "rule_roles": [],
+        "missing_fact_keys": [],
+        "clarification_priority": 0,
+        "extraction_mode": "source_bounded",
+    }
+
+
 def known_fact_keys(facts: dict[str, Any], clarification_history: list[dict[str, Any]],
                     user_statements: Iterable[str] = ()) -> set[str]:
     """Return keys established or explicitly answered by the user."""
@@ -292,8 +320,13 @@ def build_clarification(
 
 
 def required_rule_roles(case_description: str, facts: dict[str, Any] | None = None) -> tuple[str, ...]:
-    """Return roles strictly required for a conditional answer."""
-    return ("general_liability_basis",)
+    """Return only roles explicitly supplied by a caller.
+
+    A question description alone cannot establish that a universal
+    responsibility role is required.  Evidence-first obtains its conditions
+    from ``RuleContract`` instead of this legacy compatibility helper.
+    """
+    return ()
 
 
 def assess_legislative_sufficiency(
@@ -321,7 +354,7 @@ def assess_legislative_sufficiency(
     required_covered = tuple(role for role in required if role in covered)
     supporting_covered = tuple(role for role in supporting if role in covered)
     optional_missing = tuple(role for role in optional if role not in covered)
-    sufficient = not missing and bool(primary or conditional)
+    sufficient = bool(primary or conditional)
     fetch_next = bool(remaining_candidates and not sufficient)
     if sufficient:
         reason = ("La base principale est couverte; les autres roles restent "

@@ -10,6 +10,8 @@ from __future__ import annotations
 from typing import Any
 import uuid
 
+from lexior.agentic.schemas import AcceptanceResult, ClaimLedger, RepairReport
+
 from ..context import GraphContext
 from ..state import LexiorState
 from ._common import detect_case_reference, first_user_content
@@ -31,9 +33,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # the UI, but research evidence and repair state do not cross the task
     # boundary.
     prior_issue = str(context.get("active_issue") or state.get("active_issue") or "").strip()
-    has_prior_research = bool(context.get("prior_evidence") or state.get("prior_evidence"))
     new_task = bool(
-        prior_issue and has_prior_research
+        prior_issue
         and latest.strip() and latest.strip() != prior_issue.strip()
         and not state.get("refers_to_previous_answer", False)
     )
@@ -48,6 +49,9 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             "active_issue": active_issue,
             "current_user_goal": latest,
             "facts": {},
+            "missing_facts_before_search": [],
+            "missing_facts_before_application": [],
+            "missing_critical_facts": [],
             "case_context": context,
             "prior_evidence": [],
             "article_reviews": {},
@@ -62,20 +66,50 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             "alternative_sources": [],
             "invalidated_sources": [],
             "coverage_gaps": [],
+            "official_rule_retrieved": False,
+            "official_rule_sources": [],
+            "case_law_verified": [],
+            "case_law_search_status": "not_required",
+            "usable_case_sources": [],
             "primary_authority_selection": {},
             "rule_contract": {},
             "source_sufficiency_decision": {},
             "normative_references": [],
+            "regulation_verified": False,
             "answer_contract": None,
             "information_gap": "",
-            "claim_ledger": {},
+            "fact_analysis": {
+                "jurisdiction": "", "user_goal": latest,
+                "asserted_material_facts": [],
+                "uncertain_material_facts": [],
+                "raw_clarification_answers": [], "legal_elements": [],
+            },
+            "latest_decision": None,
+            "planner_feedback": "",
+            "pending_clarification": {},
+            "clarification_answer": "",
+            "claim_ledger": ClaimLedger(task_id=task_id),
             "failure_history": [],
             "failure_reports": [],
             "grounding_failures": [],
             "repair_history": [],
             "repair_count": 0,
+            "repair": RepairReport(),
+            "repair_from_node": "",
             "clarification_count": 0,
             "reformulation_count": 0,
+            "last_tool_call": None,
+            "last_tool_normalization": {},
+            "last_tool_result_status": "",
+            "last_tool_assessment": None,
+            "deterministic_blockers": [],
+            "acceptance_blockers": [],
+            "validation_issues": [],
+            "validation_result": None,
+            "acceptance_result": AcceptanceResult(),
+            "delivered_to_user": False,
+            "trajectory_accepted": False,
+            "quality_accepted": False,
             "first_invalid_step": None,
         }
 

@@ -269,3 +269,15 @@ def is_verified_quebec_decision(text: str) -> bool:
     return len(text.strip()) >= 120 and not any(marker in folded for marker in (
         "aucune décision", "no decision", "résultat de recherche", "search result",
     ))
+
+
+def is_verified_quebec_regulation(text: str) -> bool:
+    """Validate a retrieved regulation independently of case citations."""
+    if not (text or "").strip():
+        return False
+    folded = text.casefold()
+    if any(marker in folded for marker in (
+            "aucun règlement", "aucune réglementation", "no regulation",
+            "résultat de recherche", "search result")):
+        return False
+    return len(text.strip()) >= 80

@@ -18,9 +18,10 @@ from typing import Any
 
 from lexior.agentic.case_law_gate import (
     gate_search_results, is_verified_quebec_decision,
+    is_verified_quebec_regulation,
 )
 from lexior.services.article_review import (
-    assess_legislative_sufficiency, enrich_article_review,
+    assess_legislative_sufficiency, enrich_source_bounded_review,
 )
 from lexior.services.assertion_grounding import (
     articles_incompatibles_deterministes,
@@ -91,7 +92,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         for rank, (number, text) in enumerate(official_texts.items(), start=1):
             verdict = deterministic.get(number) or selection.get(number)
             status = (_review_status(verdict) if verdict else "unreviewed")
-            reviews[number] = enrich_article_review(
+            reviews[number] = enrich_source_bounded_review(
                 article_number=number,
                 status=status,
                 reason=str(getattr(verdict, "motif", "") or ""),
@@ -101,11 +102,27 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 source=observation.tool_name,
             )
 
-        sufficiency = assess_legislative_sufficiency(
-            reviews, case_description, state.get("facts") or {},
-            remaining_candidates=any(
-                item.tool_name in {"semantic_search_ccq", "semantic_search_cpc"}
-                and item.ok for item in visible_history))
+        if ctx.config.evidence_first_enabled:
+            # The authoritative sufficiency decision is built after source
+            # selection and RuleContract extraction.  Do not expose the
+            # legacy role-based sufficiency as a routing signal.
+            sufficiency = {
+                "sufficient": False,
+                "required_rule_roles": [],
+                "covered_rule_roles": [],
+                "missing_rule_roles": [],
+                "primary_articles": list(reviews),
+                "conditional_articles": [],
+                "contextual_articles": [],
+                "should_fetch_next_batch": True,
+                "reason": "En attente de l'extraction source-bounded du RuleContract.",
+            }
+        else:
+            sufficiency = assess_legislative_sufficiency(
+                reviews, case_description, state.get("facts") or {},
+                remaining_candidates=any(
+                    item.tool_name in {"semantic_search_ccq", "semantic_search_cpc"}
+                    and item.ok for item in visible_history))
 
         # Une récupération officiellement réussie devient une preuve durable
         # uniquement si son texte a été effectivement parsé. Les résultats
@@ -121,14 +138,18 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 "official_rule_sources": sources,
                 "prior_evidence": prior_evidence,
                 "article_reviews": reviews,
-                "legislative_sufficiency": sufficiency.to_dict(),
+                "legislative_sufficiency": (
+                    sufficiency if isinstance(sufficiency, dict)
+                    else sufficiency.to_dict()),
             })
             context.update({
                 "prior_evidence": prior_evidence,
                 "article_reviews": reviews,
                 "official_rule_retrieved": True,
                 "official_rule_sources": sources,
-                "legislative_sufficiency": sufficiency.to_dict(),
+                "legislative_sufficiency": (
+                    sufficiency if isinstance(sufficiency, dict)
+                    else sufficiency.to_dict()),
             })
 
     if (observation.tool_name == "search_quebec_jurisprudence"
@@ -177,23 +198,37 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
 
     if (observation.tool_name == "get_quebec_regulation"
             and observation.ok
-            and is_verified_quebec_decision(observation.normalized_response)
             and (state.get("last_tool_assessment") or {}).get(
                 "usable_as_evidence", False)):
-        verified = _append_once(
-            list(state.get("case_law_verified", [])), observation)
         prior_evidence = _append_once(
             list(state.get("prior_evidence", [])), observation)
-        updates.update({
-            "case_law_verified": verified,
-            "prior_evidence": prior_evidence,
-            "case_law_search_status": "verified",
-        })
-        context.update({
-            "case_law_verified": verified,
-            "prior_evidence": prior_evidence,
-            "case_law_search_status": "verified",
-        })
+        # A regulation fetch is not a case fetch.  Provenance is determined
+        # by the successful search that supplied the URL, never by a case
+        # citation regex applied to a regulation text.
+        has_regulation_parent = any(
+            item.tool_name == "search_quebec_regulations" and item.ok
+            for item in visible_history[:-1])
+        if has_regulation_parent and is_verified_quebec_regulation(
+                observation.normalized_response):
+            references = [dict(item) for item in state.get(
+                "normative_references", [])]
+            for reference in references:
+                reference["status"] = "resolved"
+            updates.update({"prior_evidence": prior_evidence,
+                            "regulation_verified": True,
+                            "normative_references": references})
+            context.update({"prior_evidence": prior_evidence,
+                            "regulation_verified": True,
+                            "normative_references": references})
+        elif is_verified_quebec_decision(observation.normalized_response):
+            verified = _append_once(
+                list(state.get("case_law_verified", [])), observation)
+            updates.update({"case_law_verified": verified,
+                            "prior_evidence": prior_evidence,
+                            "case_law_search_status": "verified"})
+            context.update({"case_law_verified": verified,
+                            "prior_evidence": prior_evidence,
+                            "case_law_search_status": "verified"})
 
     if context:
         updates["case_context"] = context

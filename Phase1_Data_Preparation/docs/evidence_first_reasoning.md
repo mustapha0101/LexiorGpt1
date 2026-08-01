@@ -66,3 +66,33 @@ déterministe : elle ne remplace pas une analyse doctrinale. Les renvois
 réglementaires sont détectés et routés, mais l'extraction automatique d'un
 titre de règlement dépend du texte retourné par le corpus. Le chemin legacy
 reste disponible quand `LEXIOR_EVIDENCE_FIRST=false` pendant la migration.
+## Correctifs de cette itération
+
+Avant la correction, `infer_article_profile()` transformait des mots comme
+« réparer », « préjudice » ou « responsable » en rôles `fault`,
+`general_liability_basis` et `causation`, puis en questions sur la
+connaissance préalable et les mesures raisonnables. Ces rôles pouvaient
+contaminer un régime spécial.
+
+Le chemin evidence-first ne consomme plus ces profils lexicaux. Il conserve
+les propositions opérantes présentes dans chaque passage officiel avec
+`supporting_passages` et `support_source_ids`. Les catégories
+`blocking_facts`, `conditional_facts`, `supporting_facts` et
+`facts_not_required` sont distinctes; une condition générique absente du texte
+ne peut donc pas déclencher une clarification.
+
+`RuleContract` contrôle désormais la clarification et le writer. Une branche
+répondable est exprimée en si/alors. Une clarification n'est autorisée que
+pour un fait bloquant dérivé de la source; `asked_but_uncertain` est mémorisé
+par identifiant et la question ne peut pas être répétée.
+
+La sélection compare la correspondance texte-faits, la complétude, le verdict
+du reviewer et le rang de retrieval comme signal secondaire. L'identifiant de
+source n'est pas un tie-break de pertinence. Les sources rejetées et les
+résultats candidats ne sont pas transmis au writer.
+
+Un renvoi normatif vers un règlement impose la route règlementaire et la
+validation d'un règlement est distincte de celle d'une décision judiciaire.
+Le `ClaimLedger` exige un passage de soutien exact ou une inférence documentée
+par une prémisse récupérée. Un échec reste append-only et rend
+`quality_accepted` faux.

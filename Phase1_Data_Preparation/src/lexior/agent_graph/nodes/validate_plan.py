@@ -16,8 +16,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from lexior.agentic.schemas import Decision, DecisionTrace, PlannerDecision
-from lexior.services.evidence import AcceptanceBlocker, CoverageGap
+from lexior.agentic.schemas import Decision, DecisionTrace, PlannerDecision, RuleContract
+from lexior.services.evidence import CoverageGap
 from lexior.services.article_review import (
     build_clarification, question_for_fact_keys,
 )
@@ -28,21 +28,24 @@ from lexior.services.jurisdiction import (
     is_federal,
 )
 from lexior.services.modes import is_live
-from lexior.services.tool_coverage import get_coverage, has_equivalent_coverage
+from lexior.services.tool_coverage import get_coverage
 from lexior.services.evidence_first import (
     authorize_planner_action,
+    build_clarification_decision,
     normalize_and_repair_tool_args,
 )
 from lexior.services.validation import ProposalVerdict
 
 from ..context import GraphContext
-from ..state import LexiorState
+from ..state import LexiorState, canonical_case_description
 
 NAME = "validate_plan"
 
 # Faits manquants qui portent sur la juridiction : une fois celle-ci résolue,
 # les redemander revient à ignorer la réponse de l'usager.
-_RE_FAIT_JURIDICTION = re.compile(r"juridiction|province", re.IGNORECASE)
+_RE_FAIT_JURIDICTION = re.compile(
+    r"juridiction|province|québec|quebec|fédéral|federal|canada",
+    re.IGNORECASE)
 
 # Recherches par le sens : leurs deux champs décrivent une SITUATION. Un
 # numéro d'article n'y sert à rien — l'index compare du texte, pas des
@@ -120,7 +123,8 @@ def _forced_final(decision: PlannerDecision, jurisdiction: str,
 
 
 def _pending_clarification(state: LexiorState,
-                           decision: PlannerDecision) -> dict[str, Any]:
+                           decision: PlannerDecision,
+                           *, evidence_first: bool = False) -> dict[str, Any]:
     """Construit le contrat rendu à l'utilisateur avant l'interrupt()."""
     question = (decision.clarification_question or "").strip()
     if _RE_FAIT_JURIDICTION.search(question):
@@ -134,6 +138,28 @@ def _pending_clarification(state: LexiorState,
             "source_articles": [],
             "status": "pending",
         }
+
+    if evidence_first:
+        raw_contract = state.get("rule_contract") or {}
+        contract = (raw_contract if isinstance(raw_contract, RuleContract)
+                    else RuleContract.model_validate(raw_contract))
+        choice = build_clarification_decision(
+            contract, state.get("facts") or {},
+            state.get("clarification_history") or [],
+            task_id=state.get("task_id", ""),
+        )
+        if choice.needed and choice.question:
+            return {
+                "clarification_id": f"rule-fact-{choice.missing_fact_id}",
+                "category": "rule_element",
+                "fact_keys": [str(choice.missing_fact_id)],
+                "missing_rule_element_id": choice.missing_rule_element_id,
+                "question": choice.question,
+                "answer_type": "yes_no_or_explanation",
+                "source_ids": list(contract.primary_source_ids),
+                "status": "pending",
+            }
+        return {}
 
     context = state.get("case_context") or {}
     facts = dict(context.get("facts") or state.get("facts") or {})
@@ -233,8 +259,17 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     if decision.decision == Decision.call_tool and decision.next_tool:
         repaired_args, audit, arg_errors = normalize_and_repair_tool_args(
             ctx.catalog, decision.next_tool, decision.arguments,
-            active_task=state.get("case_context") or {},
+            active_task={
+                **(state.get("case_context") or {}),
+                "normalized_query": state.get("active_issue") or "",
+                "active_issue": state.get("active_issue") or "",
+                "canonical_case_description": canonical_case_description(state),
+            },
             latest_user_message=state.get("latest_user_message", ""),
+            user_messages=[
+                message.content for message in state.get("messages", [])
+                if getattr(message.role, "value", message.role) == "user"
+            ],
         )
         decision.arguments = repaired_args
         if audit.get("removed_fields") or audit.get("repaired_fields"):
@@ -247,9 +282,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 "deterministic_blockers": list(arg_errors),
             }
         if ctx.config.evidence_first_enabled:
-            decision = authorize_planner_action(
-                {**state, "information_gap": decision.decision_trace.need},
-                decision)
+            decision = authorize_planner_action(state, decision)
 
     sufficiency = state.get("source_sufficiency_decision") or {}
     if hasattr(sufficiency, "model_dump"):
@@ -267,12 +300,14 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                       "réponse. Je n'ajoute pas une recherche jurisprudentielle "
                       "sans lacune juridique explicite."))
 
-    unresolved_refs = state.get("normative_references", [])
+    unresolved_refs = [ref for ref in state.get("normative_references", [])
+                       if ref.get("status", "unresolved") != "resolved"]
     if (decision.decision == Decision.call_tool
-            and decision.next_tool == "search_quebec_jurisprudence"
+            and decision.next_tool != "search_quebec_regulations"
             and unresolved_refs
             and ctx.config.evidence_first_follow_normative_references
             and "search_quebec_regulations" in ctx.catalog.tools):
+        decision.decision = Decision.call_tool
         decision.next_tool = "search_quebec_regulations"
         decision.arguments = {"query": str(
             unresolved_refs[0].get("reference_text", ""))}
@@ -332,7 +367,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             federal_matter=_is_federal_matter(state, decision)) != "clarify":
         missing = [fact for fact in missing
                    if not _RE_FAIT_JURIDICTION.search(str(fact))]
-    if (live and missing
+    if (live and not ctx.config.evidence_first_enabled and missing
             and decision.decision not in (Decision.ask_clarification,
                                           Decision.cannot_conclude)
             and state.get("clarification_count", 0) < min(
@@ -352,28 +387,29 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # Une règle conditionnellement compatible signale une lacune FACTUELLE,
     # distincte de la juridiction. La catégorie est enregistrée par
     # handle_clarification et empêche de répéter cette étape au tour suivant.
-    facts_context = dict((state.get("case_context") or {}).get(
-        "facts") or state.get("facts") or {})
-    user_statements = facts_context.get("user_statements") or []
-    structured_clarification = build_clarification(
-        state.get("article_reviews") or {}, facts_context,
-        state.get("clarification_history") or [], user_statements)
-    if structured_clarification is None:
-        contract = state.get("rule_contract") or {}
-        if hasattr(contract, "model_dump"):
-            contract = contract.model_dump(mode="json")
-        missing_rule_facts = [str(item) for item in contract.get(
-            "decisive_facts_needed", []) if str(item).strip()
-            and (state.get("facts") or {}).get(str(item)) in (None, "", [], {})]
-        if missing_rule_facts:
+    structured_clarification = None
+    if ctx.config.evidence_first_enabled:
+        raw_contract = state.get("rule_contract") or {}
+        contract = (raw_contract if isinstance(raw_contract, RuleContract)
+                    else RuleContract.model_validate(raw_contract))
+        structured_decision = build_clarification_decision(
+            contract, state.get("facts") or {},
+            state.get("clarification_history") or [],
+            task_id=state.get("task_id", ""),
+        )
+        if structured_decision.needed and structured_decision.question:
             structured_clarification = {
-                "clarification_id": "rule-element-" + missing_rule_facts[0],
-                "category": "rule_element",
-                "fact_keys": [missing_rule_facts[0]],
-                "missing_rule_element_id": missing_rule_facts[0],
-                "question": question_for_fact_keys([missing_rule_facts[0]]),
-                "source_ids": list(contract.get("primary_source_ids", [])),
+                "clarification_id": f"rule-fact-{structured_decision.missing_fact_id}",
+                "fact_keys": [str(structured_decision.missing_fact_id)],
+                "question": structured_decision.question,
             }
+    else:
+        facts_context = dict((state.get("case_context") or {}).get(
+            "facts") or state.get("facts") or {})
+        user_statements = facts_context.get("user_statements") or []
+        structured_clarification = build_clarification(
+            state.get("article_reviews") or {}, facts_context,
+            state.get("clarification_history") or [], user_statements)
     if (live and state.get("request_type") == "case_analysis"
             and structured_clarification
             and state.get("clarification_count", 0) < min(
@@ -388,6 +424,22 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                       "sa revue indique qu'un fait nécessaire reste à établir."),
             action=Decision.ask_clarification,
             question=structured_clarification["question"])
+
+    raw_contract_for_clarification = state.get("rule_contract") or {}
+    contract_elements = (getattr(raw_contract_for_clarification, "elements", [])
+                         if not isinstance(raw_contract_for_clarification, dict)
+                         else raw_contract_for_clarification.get("elements", []))
+    if (ctx.config.evidence_first_enabled
+            and decision.decision == Decision.ask_clarification
+            and not _RE_FAIT_JURIDICTION.search(
+                decision.clarification_question or "")
+            and bool(contract_elements)
+            and not structured_clarification):
+        decision = _forced_final(
+            decision, resolved,
+            need="réponse conditionnelle possible; clarification non bloquante",
+            thinking=("Le RuleContract ne dérive aucun fait bloquant et le point "
+                      "peut être présenté par branches conditionnelles."))
 
     # 2. Clarification bornée.
     if decision.decision == Decision.ask_clarification:
@@ -482,7 +534,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                            decision.decision.value)
 
     if decision.decision == Decision.ask_clarification and live:
-        pending = _pending_clarification(state, decision)
+        pending = _pending_clarification(
+            state, decision, evidence_first=ctx.config.evidence_first_enabled)
         updates["pending_clarification"] = pending
         context = dict(state.get("case_context") or {})
         context["pending_clarification"] = pending

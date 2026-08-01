@@ -24,6 +24,7 @@ from lexior.services.assertion_grounding import (
     textes_recuperes,
 )
 from lexior.services.article_review import build_conditional_reasoning_contract
+from lexior.agentic.schemas import RuleContract, SourceSufficiencyDecision
 
 from ..context import GraphContext
 from ..state import LexiorState, canonical_case_description, visible_tool_history
@@ -63,7 +64,6 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             }
 
     # ── Evidence from the three-tier collections ─────────────────────────
-    usable_entries = state.get("usable_evidence_entries", [])
     alternative_entries = state.get("alternative_sources", [])
     coverage_gaps = state.get("coverage_gaps", [])
 
@@ -275,13 +275,35 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         }
         for numero in articles_retenus
     ]
-    conditional_reasoning_contract = build_conditional_reasoning_contract(
-        reviews_stored, textes_officiels, state.get("facts") or {})
-    if conditional_reasoning_contract:
-        directives.append(
-            "Utilise le contrat de raisonnement conditionnel : distingue les "
-            "faits affirmes par l'utilisateur des faits verifies et n'affirme "
-            "jamais une responsabilite automatique.")
+    evidence_first = bool(ctx.config.evidence_first_enabled)
+    conditional_reasoning_contract = []
+    if not evidence_first:
+        conditional_reasoning_contract = build_conditional_reasoning_contract(
+            reviews_stored, textes_officiels, state.get("facts") or {})
+        if conditional_reasoning_contract:
+            directives.append(
+                "Utilise le contrat de raisonnement conditionnel legacy et "
+                "distingue les faits affirmés des faits vérifiés.")
+
+    raw_rule_contract = state.get("rule_contract") or {}
+    rule_contract = (raw_rule_contract if isinstance(raw_rule_contract, RuleContract)
+                    else RuleContract.model_validate(raw_rule_contract))
+    raw_sufficiency = state.get("source_sufficiency_decision") or {}
+    sufficiency = (raw_sufficiency if isinstance(raw_sufficiency, SourceSufficiencyDecision)
+                   else SourceSufficiencyDecision.model_validate(raw_sufficiency))
+    if evidence_first:
+        if rule_contract.conditional_branches:
+            directives.append(
+                "Présente les branches conditionnelles dérivées des passages "
+                "sources avec une formulation si/alors.")
+        if rule_contract.supporting_facts:
+            directives.append(
+                "Mentionne les éléments de preuve comme supporting facts; ils "
+                "ne constituent pas des conditions bloquantes.")
+        if sufficiency.sufficient_for_initial_answer:
+            directives.append(
+                "Réponds directement à l'objectif de l'utilisateur; n'ajoute "
+                "pas une limitation générique si la source suffit.")
 
     # Coverage gap directives.
     for gap in coverage_gaps:
@@ -336,20 +358,22 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "primary_authority_selection": (
             authority_selection.model_dump(mode="json")
             if hasattr(authority_selection, "model_dump") else authority_selection),
-        "rule_contract": (
-            state.get("rule_contract").model_dump(mode="json")
-            if hasattr(state.get("rule_contract"), "model_dump")
-            else state.get("rule_contract", {})),
-        "source_sufficiency_decision": (
-            state.get("source_sufficiency_decision").model_dump(mode="json")
-            if hasattr(state.get("source_sufficiency_decision"), "model_dump")
-            else state.get("source_sufficiency_decision", {})),
+        "rule_contract": rule_contract.model_dump(mode="json"),
+        "source_sufficiency_decision": sufficiency.model_dump(mode="json"),
+        "authorized_source_ids": list(selected_source_ids),
+        "conditional_branches": list(rule_contract.conditional_branches),
+        "supporting_facts": [item.model_dump(mode="json")
+                             for item in rule_contract.supporting_facts],
+        "limitations": list(rule_contract.application_limits),
+        "permitted_claims": list(rule_contract.permitted_claims),
+        "prohibited_claims": list(rule_contract.prohibited_claims),
         "raisonnement_autorise": raisonnement_autorise,
-        "conditional_reasoning_contract": conditional_reasoning_contract,
         "sources_alternatives": alternatives_for_contract,
         "lacunes_de_couverture": [g for g in coverage_gaps],
         "consignes": directives,
     }
+    if not evidence_first and conditional_reasoning_contract:
+        contract["conditional_reasoning_contract"] = conditional_reasoning_contract
 
     return {
         "answer_contract": contract,

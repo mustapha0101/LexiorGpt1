@@ -97,8 +97,9 @@ class StreamTranslator:
     dans le MÊME événement plutôt que dans un second.
     """
 
-    def __init__(self, initial_tool_count: int = 0) -> None:
+    def __init__(self, initial_tool_count: int = 0, thread_id: str = "") -> None:
         self._tool_count = max(0, int(initial_tool_count))
+        self._thread_id = thread_id
         self._en_attente: list[dict[str, Any]] = []
         self._normalizations: dict[tuple[str, str], list[str]] = {}
 
@@ -131,24 +132,81 @@ class StreamTranslator:
             if node_name in {
                 "update_active_task", "select_primary_authorities",
                 "extract_rule_contract", "derive_rule_specific_facts",
+                "handle_clarification", "validate_plan",
                 "build_answer_contract", "validate_final",
             }:
                 selection = update.get("primary_authority_selection") or {}
                 if hasattr(selection, "model_dump"):
                     selection = selection.model_dump(mode="json")
+                event_names: list[str] = []
+                if node_name == "update_active_task" and update.get("active_task_reset"):
+                    event_names.append("active_task_reset")
+                if node_name == "select_primary_authorities":
+                    event_names.append("primary_authorities_selected")
+                if node_name == "extract_rule_contract":
+                    event_names.append("rule_contract_built")
+                    event_names.append("source_sufficiency_decided")
+                    contract = update.get("rule_contract")
+                    extraction_status = getattr(contract, "extraction_status", "")
+                    if isinstance(contract, dict):
+                        extraction_status = contract.get("extraction_status", "")
+                    if extraction_status == "fallback":
+                        event_names.append("rule_extraction_fallback_used")
+                if node_name == "derive_rule_specific_facts":
+                    event_names.append("clarification_evaluated")
+                    analysis = update.get("fact_analysis") or {}
+                    if not update.get("missing_critical_facts"):
+                        event_names.append("clarification_skipped_as_non_blocking")
+                    if analysis.get("conditional_facts"):
+                        event_names.append("conditional_answer_selected")
+                if node_name == "handle_clarification":
+                    event_names.append("clarification_evaluated")
+                    if update.get("stop_reason") == "clarification_already_asked":
+                        event_names.append("clarification_skipped_as_already_asked")
+                if node_name == "validate_plan":
+                    if update.get("last_tool_normalization"):
+                        event_names.append("repair_routed")
+                    if update.get("pending_clarification"):
+                        event_names.append("clarification_evaluated")
+                if node_name == "build_answer_contract":
+                    event_names.append("answer_contract_built")
+                if node_name == "validate_final":
+                    event_names.append("claim_ledger_built")
+                    event_names.extend(
+                        item.get("event_name", "")
+                        for item in update.get("claim_events", [])
+                        if item.get("event_name") in {"claim_verified", "claim_failed"}
+                    )
+                references = update.get("normative_references") or []
+                if update.get("regulation_verified") or any(
+                    isinstance(item, dict) and item.get("status") == "resolved"
+                    for item in references
+                ):
+                    event_names.append("normative_reference_resolved")
+                if references:
+                    event_names.append("normative_reference_detected")
+                event_names = list(dict.fromkeys(name for name in event_names if name))
                 yield {
                     "type": "observability",
                     "event": {
+                        "event_name": event_names[0] if event_names else node_name,
+                        "event_names": event_names,
                         "active_task_reset": "active_task_reset" if update.get("active_task_reset") else "",
                         "node": node_name,
                         "task_id": update.get("task_id", ""),
-                        "thread_id": update.get("thread_id", ""),
+                        "thread_id": update.get("thread_id", "") or self._thread_id,
                         "source_ids": [
                             *selection.get("primary_sources", []),
                             *selection.get("secondary_sources", []),
                         ] if isinstance(selection, dict) else [],
                         "reason": str(update.get("stop_reason", "") or update.get("reason", "")),
                         "status": str(update.get("status", "")),
+                        "claim_events": update.get("claim_events", []),
+                        "normative_reference_events": (
+                            ["normative_reference_resolved"]
+                            if update.get("regulation_verified") else
+                            ["normative_reference_detected"]
+                            if update.get("normative_references") else []),
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
                 }

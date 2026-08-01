@@ -309,7 +309,8 @@ class GraphRunner:
                 system_prompt=system_prompt,
                 prior_case_context=self._prior_case_context(config))
 
-        translator = StreamTranslator(initial_tool_count=prior_tool_count)
+        translator = StreamTranslator(
+            initial_tool_count=prior_tool_count, thread_id=thread_id)
         final: dict[str, Any] = {}
         interrupted_question: Optional[str] = None
 

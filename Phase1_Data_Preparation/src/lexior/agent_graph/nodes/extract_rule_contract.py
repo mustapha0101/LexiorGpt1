@@ -27,6 +27,10 @@ def run(state: LexiorState, ctx: GraphContext) -> dict:
     if selection is None:
         from lexior.agentic.schemas import PrimaryAuthoritySelection
         selection = PrimaryAuthoritySelection(task_id=state.get("task_id", ""))
+    refs = normative_references(visible_tool_history(state))
+    if state.get("regulation_verified"):
+        for reference in refs:
+            reference["status"] = "resolved"
     contract = build_rule_contract(
         selection, visible_tool_history(state), state.get("article_reviews", {}),
         state.get("facts", {}), task_id=state.get("task_id", ""),
@@ -35,11 +39,13 @@ def run(state: LexiorState, ctx: GraphContext) -> dict:
         selection, contract, visible_tool_history(state),
         task_id=state.get("task_id", ""),
         jurisprudence_requested=state.get("request_type") == "case_law_research",
+        regulation_resolved=bool(state.get("regulation_verified")),
     )
     articles = retrieved_articles(visible_tool_history(state))
     contract_errors = validate_rule_contract(
         contract, set(articles),
         set(item.source_id for item in selection.rejected_sources),
+        {sid: item[0] for sid, item in articles.items()},
     )
     context = dict(state.get("case_context") or {})
     context.update({
@@ -47,13 +53,20 @@ def run(state: LexiorState, ctx: GraphContext) -> dict:
         "primary_authority_selection": selection.model_dump(mode="json"),
         "rule_contract": contract.model_dump(mode="json"),
         "source_sufficiency_decision": sufficiency.model_dump(mode="json"),
-        "normative_references": normative_references(visible_tool_history(state)),
+        "normative_references": refs,
+        "information_gap": (
+            "renvoi réglementaire explicite non résolu"
+            if sufficiency.regulation_status == "required" else
+            "compléter la recherche législative"
+            if sufficiency.legislation_status != "sufficient" else ""),
     })
     return {
+        "thread_id": state.get("thread_id", ""),
+        "primary_authority_selection": selection,
         "task_id": state.get("task_id", ""),
         "rule_contract": contract,
         "source_sufficiency_decision": sufficiency,
-        "normative_references": normative_references(visible_tool_history(state)),
+        "normative_references": refs,
         "case_context": context,
         "deterministic_blockers": list(dict.fromkeys(
             [*state.get("deterministic_blockers", []), *contract_errors])),

@@ -125,6 +125,7 @@ class LexiorState(TypedDict, total=False):
 
     official_rule_retrieved: bool
     official_rule_sources: list[str]
+    regulation_verified: bool
     usable_case_sources: list[CaseRelevanceResult]
     case_law_verified: list[ToolObservation]
     case_law_search_status: str
@@ -296,6 +297,7 @@ def initial_state(
         "evidence_first_maximum_article_batches": 2,
         "official_rule_retrieved": False,
         "official_rule_sources": [],
+        "regulation_verified": False,
         "usable_case_sources": [],
         "case_law_verified": [],
         "case_law_search_status": "not_required",

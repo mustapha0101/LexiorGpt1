@@ -29,7 +29,11 @@ class PlannerService:
     def __init__(self, catalog: ToolCatalog, client=None,
                  offline: bool = False, *, initial_article_fetch_k: int = 6,
                  article_fetch_batch_size: int = 6,
-                 max_articles_per_issue: int = 20):
+                 max_articles_per_issue: int = 20,
+                 evidence_first_enabled: bool = False,
+                 evidence_first_initial_candidate_count: int = 5,
+                 evidence_first_initial_fetch_count: int = 3,
+                 evidence_first_maximum_article_batches: int = 2):
         self.catalog = catalog
         self.client = client
         self.offline = offline
@@ -37,6 +41,10 @@ class PlannerService:
             "initial_article_fetch_k": initial_article_fetch_k,
             "article_fetch_batch_size": article_fetch_batch_size,
             "max_articles_per_issue": max_articles_per_issue,
+            "evidence_first_enabled": evidence_first_enabled,
+            "evidence_first_initial_candidate_count": evidence_first_initial_candidate_count,
+            "evidence_first_initial_fetch_count": evidence_first_initial_fetch_count,
+            "evidence_first_maximum_article_batches": evidence_first_maximum_article_batches,
         }
         # Même classe, même client, même catalogue — seule la présence
         # d'une route scriptée change (chat_mode).

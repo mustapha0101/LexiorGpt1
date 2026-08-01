@@ -42,7 +42,9 @@ def _history_entry(question: str, missing_facts: list[str], answer: str,
         "answer": answer,
         "answered": bool(answer),
         "answer_interpretation": interpretation,
-        "status": "answered" if answer else "unanswered",
+        "status": ("asked_but_uncertain" if interpretation == "uncertain"
+                   else "answered" if answer else "unanswered"),
+        "user_answer_status": interpretation or "unanswered",
     }
 
 
@@ -106,6 +108,23 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             "status": "pending",
         }
 
+    clarification_id = str(pending.get("clarification_id") or "")
+    already_asked = any(
+        clarification_id and str(item.get("clarification_id", "")) == clarification_id
+        for item in state.get("clarification_history", [])
+    )
+    if already_asked:
+        # A fact can remain unknown after it was asked.  It is not eligible
+        # for another question in the same task; continue with branches.
+        return {
+            "pending_clarification": {},
+            "final_answer": (
+                "Je poursuis avec une réponse conditionnelle : le point « "
+                + question + " » a déjà été demandé et demeure incertain."),
+            "status": "answering",
+            "stop_reason": "clarification_already_asked",
+        }
+
     messages = list(state.get("messages", []))
     messages.append(Message(role=Role.assistant, content=question))
     count = state.get("clarification_count", 0) + 1
@@ -130,9 +149,12 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         facts = dict(context.get("facts") or state.get("facts") or {})
         facts, interpretation = _apply_fact_answer(
             facts, pending, answer_text)
-        history.append(_history_entry(
+        entry = _history_entry(
             question, missing_facts, answer_text, category, pending,
-            interpretation))
+            interpretation)
+        history = [item for item in history
+                   if item.get("clarification_id") != clarification_id]
+        history.append(entry)
         context.update({
             "facts": facts,
             "clarification_history": history,

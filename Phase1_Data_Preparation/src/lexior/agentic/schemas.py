@@ -357,7 +357,36 @@ class RuleElement(BaseModel):
     id: str
     description: str
     support_source_ids: list[str] = Field(default_factory=list)
+    supporting_passages: list[str] = Field(default_factory=list)
+    kind: Literal["subject", "persons", "trigger", "condition", "exception", "consequence", "operative_text"] = "operative_text"
     status: Literal["present", "missing", "uncertain", "not_applicable"] = "uncertain"
+
+
+class RuleFact(BaseModel):
+    fact_id: str
+    description: str
+    source_ids: list[str] = Field(default_factory=list)
+    supporting_passages: list[str] = Field(default_factory=list)
+    branches: list[str] = Field(default_factory=list)
+    status: Literal["blocking", "conditional", "supporting", "not_required"] = "supporting"
+
+
+class ClarificationDecision(BaseModel):
+    needed: bool = False
+    blocking: bool = False
+    answerable_conditionally: bool = True
+    missing_fact_id: Optional[str] = None
+    missing_rule_element_id: Optional[str] = None
+    question: Optional[str] = None
+    changes_jurisdiction: bool = False
+    changes_source_route: bool = False
+    changes_legal_regime: bool = False
+    changes_responsible_party: bool = False
+    changes_available_remedy: bool = False
+    conditional_branches: list[str] = Field(default_factory=list)
+    reason: str = ""
+    already_asked: bool = False
+    user_answer_status: str = "not_asked"
 
 
 class RuleContract(BaseModel):
@@ -369,8 +398,20 @@ class RuleContract(BaseModel):
     primary_source_ids: list[str] = Field(default_factory=list)
     elements: list[RuleElement] = Field(default_factory=list)
     supported_exceptions: list[RuleElement] = Field(default_factory=list)
+    subject: list[RuleElement] = Field(default_factory=list)
+    persons_covered: list[RuleElement] = Field(default_factory=list)
+    trigger_events: list[RuleElement] = Field(default_factory=list)
+    positive_conditions: list[RuleElement] = Field(default_factory=list)
+    consequences_or_remedies: list[RuleElement] = Field(default_factory=list)
+    blocking_facts: list[RuleFact] = Field(default_factory=list)
+    conditional_facts: list[RuleFact] = Field(default_factory=list)
+    supporting_facts: list[RuleFact] = Field(default_factory=list)
     decisive_facts_needed: list[str] = Field(default_factory=list)
     facts_not_required: list[str] = Field(default_factory=list)
+    conditional_branches: list[str] = Field(default_factory=list)
+    permitted_claims: list[str] = Field(default_factory=list)
+    prohibited_claims: list[str] = Field(default_factory=list)
+    extraction_status: Literal["source_bounded", "fallback_limited"] = "source_bounded"
     application_limits: list[str] = Field(default_factory=list)
 
 
@@ -393,6 +434,8 @@ class LegalClaim(BaseModel):
     support_type: Literal["direct", "reasonable_inference", "unsupported"] = "unsupported"
     verification_status: Literal["pending", "verified", "failed", "removed", "repaired"] = "pending"
     failure_reason: Optional[str] = None
+    premises: list[str] = Field(default_factory=list)
+    inference_explanation: str = ""
     task_id: str = ""
 
 

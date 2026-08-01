@@ -20,6 +20,7 @@ from lexior.services.article_review import (
     assess_legislative_sufficiency,
     format_facts_for_query,
 )
+from lexior.services.evidence_first import article_budget
 from lexior.services.evidence_first import normalize_and_repair_tool_args
 from .schemas import Decision, DecisionTrace, PlannerDecision, ResearchState
 from .tool_catalog import MAX_ARTICLES_PAR_APPEL, ToolCatalog
@@ -172,7 +173,11 @@ class PlannerAgent:
     def __init__(self, catalog: ToolCatalog, client=None, offline: bool = False,
                  chat_mode: bool = False, *, initial_article_fetch_k: int = 6,
                  article_fetch_batch_size: int = 6,
-                 max_articles_per_issue: int = 20):
+                 max_articles_per_issue: int = 20,
+                 evidence_first_enabled: bool = False,
+                 evidence_first_initial_candidate_count: int = 5,
+                 evidence_first_initial_fetch_count: int = 3,
+                 evidence_first_maximum_article_batches: int = 2):
         self.catalog = catalog
         self.client = client
         self.offline = offline
@@ -186,6 +191,13 @@ class PlannerAgent:
             int(article_fetch_batch_size), MAX_ARTICLES_PAR_APPEL))
         self.max_articles_per_issue = max(1, min(
             int(max_articles_per_issue), MAX_ARTICLES_PAR_APPEL))
+        self.evidence_first_enabled = bool(evidence_first_enabled)
+        self.evidence_first_initial_candidate_count = int(
+            evidence_first_initial_candidate_count)
+        self.evidence_first_initial_fetch_count = int(
+            evidence_first_initial_fetch_count)
+        self.evidence_first_maximum_article_batches = int(
+            evidence_first_maximum_article_batches)
 
     def decide(self, state: ResearchState) -> PlannerDecision:
         if self.offline:
@@ -284,6 +296,10 @@ class PlannerAgent:
                 active_task={"normalized_query": state.case_description,
                              "summary": state.case_description},
                 latest_user_message=state.scenario.user_query,
+                user_messages=[
+                    message.content for message in state.messages
+                    if getattr(message.role, "value", message.role) == "user"
+                ],
             )
             decision.arguments = normalized_args
             if audit.get("removed_fields") or audit.get("repaired_fields"):
@@ -380,6 +396,8 @@ class PlannerAgent:
         if not self.chat_mode:
             return self._legacy_article_fetch_arguments(state, fetch_tool)
         candidates = self._semantic_candidates_for(state, fetch_tool)
+        if self.evidence_first_enabled:
+            candidates = candidates[:self.evidence_first_initial_candidate_count]
         if not candidates:
             # Une demande précise peut légitimement mentionner un article
             # avant toute recherche. Elle ne reçoit aucune complétion de la
@@ -406,9 +424,20 @@ class PlannerAgent:
         remaining_capacity = self.max_articles_per_issue - len(fetched)
         if remaining_capacity <= 0 or not remaining:
             return None
-        width = (batch_size if batch_size is not None else
-                 (self.initial_article_fetch_k if not fetched
-                  else self.article_fetch_batch_size))
+        batch_index = sum(
+            observation.tool_name == fetch_tool and observation.ok
+            for observation in state.tool_history)
+        if self.evidence_first_enabled:
+            budget = article_budget(
+                self, fetched_count=len(fetched), batch_index=batch_index,
+                remaining_candidates=bool(remaining))
+            if not budget["allow_next"] and fetched:
+                return None
+            width = budget["fetch_count"]
+        else:
+            width = (batch_size if batch_size is not None else
+                     (self.initial_article_fetch_k if not fetched
+                      else self.article_fetch_batch_size))
         width = min(max(1, width), remaining_capacity,
                     MAX_ARTICLES_PAR_APPEL)
         return {"articles": remaining[:width]}
@@ -450,7 +479,8 @@ class PlannerAgent:
         primary = values[0]
         nearby = [value for value in values if abs(value - primary) <= 5]
         start, end = min(nearby), max(nearby)
-        as_json = lambda value: int(value) if value.is_integer() else value
+        def as_json(value: float) -> int | float:
+            return int(value) if value.is_integer() else value
         arguments = {"start_article": as_json(start)}
         if end != start:
             arguments["end_article"] = as_json(end)
@@ -667,7 +697,7 @@ class PlannerAgent:
                     decision_trace=DecisionTrace(
                         request_type=decision.request_type,
                         jurisdiction=decision.jurisdiction,
-                        need=f"outil requis non encore appelé",
+                        need="outil requis non encore appelé",
                         next_action=f"call_tool:{tool}"),
                 )
         return decision
@@ -736,6 +766,42 @@ class PlannerAgent:
             return decision
         if state.scenario.request_type != "case_analysis":
             return decision
+        if self.evidence_first_enabled:
+            fetched_batches = sum(
+                observation.tool_name in {"get_ccq_articles", "get_cpc_articles"}
+                and observation.ok for observation in state.tool_history)
+            source_bounded = any(
+                review.get("extraction_mode") == "source_bounded"
+                and review.get("status") in {"applicable", "conditionally_applicable"}
+                for review in state.article_reviews.values())
+            candidates = bool(
+                self._semantic_candidates_for(state, "get_ccq_articles")
+                or self._semantic_candidates_for(state, "get_cpc_articles"))
+            if source_bounded or fetched_batches >= self.evidence_first_maximum_article_batches:
+                return self._guard_live_source_completeness(state, decision)
+            fetch_tool = next((tool for tool in (
+                "get_ccq_articles", "get_cpc_articles")
+                if self._semantic_candidates_for(state, tool)), None)
+            if candidates and fetch_tool:
+                arguments = self._article_fetch_arguments(state, fetch_tool)
+                if arguments:
+                    return PlannerDecision(
+                        request_type=decision.request_type,
+                        jurisdiction=decision.jurisdiction,
+                        decision=Decision.call_tool,
+                        next_tool=fetch_tool,
+                        arguments=arguments,
+                        thinking_text=(
+                            "Les propositions du premier lot ne permettent pas "
+                            "encore de retenir une autorité suffisante; un seul "
+                            "lot evidence-first supplémentaire est autorisé."),
+                        decision_trace=DecisionTrace(
+                            request_type=decision.request_type,
+                            jurisdiction=decision.jurisdiction,
+                            need="lacune de source explicite",
+                            next_action=f"call_tool:{fetch_tool}"),
+                    )
+            return self._guard_live_source_completeness(state, decision)
         sufficiency = assess_legislative_sufficiency(
             state.article_reviews, state.case_description, state.case_facts,
             remaining_candidates=bool(
@@ -854,7 +920,10 @@ class PlannerAgent:
     def _guard_live_source_completeness(
             self, state: ResearchState,
             decision: PlannerDecision) -> PlannerDecision:
-        """Cherche la jurisprudence après une règle revue et des faits utiles."""
+        """Evidence-first does not add case law without an explicit gap."""
+        if (self.evidence_first_enabled
+                and state.scenario.request_type != "case_law_research"):
+            return decision
         if decision.decision not in {
                 Decision.final_answer, Decision.cannot_conclude}:
             return decision
@@ -1108,7 +1177,7 @@ class PlannerAgent:
                     decision_trace=DecisionTrace(
                         request_type=decision.request_type,
                         jurisdiction=decision.jurisdiction,
-                        need=f"redirection vers outil compatible",
+                        need="redirection vers outil compatible",
                         next_action=f"call_tool:{candidate}"),
                 )
         return PlannerDecision(
@@ -1331,7 +1400,6 @@ class PlannerAgent:
     @staticmethod
     def _generate_offline_thinking(tool: str, args: dict, state: ResearchState) -> str:
         """Génère un thinking en langue naturelle pour le mode offline."""
-        query = state.scenario.user_query
         request_type = state.scenario.request_type
         step = state.tool_calls_made()
 

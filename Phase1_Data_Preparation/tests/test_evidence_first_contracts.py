@@ -34,7 +34,7 @@ def test_primary_authorities_are_an_allowlist_and_are_bounded():
     assert all(source.source_id != "ccq:101" for source in selection.rejected_sources) is False
 
 
-def test_rule_contract_uses_only_retrieved_sources_and_decisive_review_facts():
+def test_rule_contract_uses_only_retrieved_source_propositions():
     observations = [_article(
         "Article 100\nToute personne doit réparer le préjudice causé par sa faute."
     )]
@@ -46,7 +46,10 @@ def test_rule_contract_uses_only_retrieved_sources_and_decisive_review_facts():
         "100": {"status": "conditionally_applicable", "retrieval_group": "primary", "missing_fact_keys": ["causation"]}
     }, {}, task_id="t1")
     assert contract.primary_source_ids == ["ccq:100"]
-    assert contract.decisive_facts_needed == ["causation"]
+    assert contract.decisive_facts_needed == []
+    assert "causation" in contract.facts_not_required
+    assert contract.extraction_status == "source_bounded"
+    assert contract.elements[0].supporting_passages
     assert all(source.startswith("ccq:") for element in contract.elements for source in element.support_source_ids)
 
 

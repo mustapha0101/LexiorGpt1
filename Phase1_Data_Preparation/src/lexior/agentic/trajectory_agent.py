@@ -16,6 +16,11 @@ _ARTICLE_BLOCK_RE = re.compile(
 PRECISE_ARTICLE_TYPES = {"exact_text_retrieval"}
 ARTICLE_FETCH_TOOLS = {"get_ccq_articles", "get_cpc_articles"}
 RETRIEVAL_ONLY_TOOLS = {"semantic_search_ccq", "semantic_search_cpc"}
+RETRIEVAL_ONLY_TOOLS |= {
+    "search_quebec_regulations", "search_quebec_jurisprudence",
+    "search_legal_documents", "coverage", "search_ccq_keywords",
+    "search_cpc_keywords",
+}
 
 
 def normalize_final_answer(text: str) -> str:

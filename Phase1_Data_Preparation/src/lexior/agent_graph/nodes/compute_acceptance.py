@@ -84,6 +84,18 @@ def _compute_evidence_blockers(state: LexiorState) -> list[str]:
     return blockers
 
 
+def _open_grounding_failures(state: LexiorState) -> list[str]:
+    failures = [item for item in state.get("failure_history", [])
+                if str(item.get("status", "open")) == "open"]
+    failures.extend(item for item in state.get("grounding_failures", [])
+                    if str(item.get("status", "open")) == "open")
+    return list(dict.fromkeys(
+        "unsupported_legal_claim" for item in failures
+        if item.get("failure_type") in {
+            "ungrounded_claim", "ungrounded_article", "unsupported_legal_claim"
+        }))
+
+
 def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     live = is_live(state.get("mode", ""))
 
@@ -109,9 +121,14 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             acceptance.accepted = False
             acceptance.blocking_errors = list(dict.fromkeys(
                 [*acceptance.blocking_errors, *claim_blockers]))
+        open_failures = _open_grounding_failures(state)
+        if open_failures:
+            acceptance.accepted = False
+            acceptance.blocking_errors = list(dict.fromkeys(
+                [*acceptance.blocking_errors, *open_failures]))
         return {"acceptance_result": acceptance,
                 "acceptance_blockers": list(dict.fromkeys(
-                    [*blockers, *claim_blockers])),
+                    [*blockers, *claim_blockers, *open_failures])),
                 "failure_history": merge_failures(
                     state.get("failure_history", []),
                     [{"failure_type": item, "reason": item}
@@ -135,6 +152,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     evidence_blockers = _compute_evidence_blockers(state)
     existing_blockers = list(state.get("acceptance_blockers", []))
     all_blockers = list(dict.fromkeys(existing_blockers + evidence_blockers))
+    all_blockers.extend(_open_grounding_failures(state))
+    all_blockers = list(dict.fromkeys(all_blockers))
 
     if all_blockers and acceptance.accepted:
         acceptance.accepted = False

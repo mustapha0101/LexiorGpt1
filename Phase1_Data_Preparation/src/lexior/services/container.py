@@ -8,7 +8,7 @@ partagé par les deux modes (dataset et live).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from lexior.agentic.config import AgenticConfig
 from lexior.agentic.tool_catalog import ToolCatalog
@@ -76,7 +76,11 @@ def build_services(
             catalog, client=teacher, offline=offline,
             initial_article_fetch_k=config.initial_article_fetch_k,
             article_fetch_batch_size=config.article_fetch_batch_size,
-            max_articles_per_issue=config.max_articles_per_issue),
+            max_articles_per_issue=config.max_articles_per_issue,
+            evidence_first_enabled=config.evidence_first_enabled,
+            evidence_first_initial_candidate_count=config.evidence_first_initial_candidate_count,
+            evidence_first_initial_fetch_count=config.evidence_first_initial_fetch_count,
+            evidence_first_maximum_article_batches=config.evidence_first_maximum_article_batches),
         tools=ToolExecutionService(executor),
         verification=ResultVerificationService(),
         research=LegalResearchService(),
