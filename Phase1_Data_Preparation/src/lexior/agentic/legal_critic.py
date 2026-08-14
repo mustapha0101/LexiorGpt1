@@ -133,7 +133,23 @@ class LegalCritic:
             "ne respecte pas l'exigence de reproduction",
         )
 
+        # Un reproche de RATTACHEMENT À LA SOURCE n'est jamais hors sujet :
+        # il ne doit sortir du filtre de portée sous aucun prétexte, sans
+        # quoi un article inventé pourrait faire remonter le verdict à
+        # « accepté ».
+        grounding_markers = (
+            "absent des reponses", "absent des resultats", "non recupere",
+            "aucune source", "sans source", "ungrounded", "invente",
+            "n'existe pas", "introuvable dans", "non verifie",
+        )
+
+        def is_grounding_complaint(value: str) -> bool:
+            folded = cls._fold(value)
+            return any(marker in folded for marker in grounding_markers)
+
         def invalid_exact_requirement(value: str) -> bool:
+            if is_grounding_complaint(value):
+                return False
             folded = cls._fold(value)
             return any(marker in folded for marker in exact_markers)
 

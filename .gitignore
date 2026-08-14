@@ -1,49 +1,27 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Operating System Files
-.DS_Store
-Thumbs.db
-
-# Virtual environments
-venv/
-.venv/
-env/
+# Secrets et environnement local
 .env
-setup_env.sh
-export_keys.sh
+.env.*
+!.env.example
+.venv/
 
-# Datasets & Local Cache
-data/formatted_dataset.jsonl
-*.jsonl
-*.csv
-*.parquet
-.cache/
-Phase1_Data_Preparation/data/agentic/rag_index/
-Phase1_Data_Preparation/data/
-
-# Training Outputs & Checkpoints
-outputs/
-checkpoints/
-lora_model/
-unsloth_compiled_cache/
-wandb/
-.huggingface/
-
-# Notebooks
-.ipynb_checkpoints
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
 
 # Frontend
 node_modules/
 dist/
+*.tsbuildinfo
 
-# Local artifacts
-nul
-Phase1_Data_Preparation/agentic_generation.zip
-.claude/
+# Données et caches produits pendant la démo
+Phase1_Data_Preparation/data/
+*.log
+*.sqlite
+*.db
 
-# Jeu de test de recherche : versionné malgré la règle *.jsonl ci-dessus.
-!Phase1_Data_Preparation/tests/fixtures/*.jsonl
+# Éditeurs et système
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -15,7 +15,7 @@ from lexior.services.modes import is_live
 
 from ..context import GraphContext
 from ..state import LexiorState
-from ._common import is_greeting, requested_output_type
+from ._common import is_clearly_non_legal, is_greeting, requested_output_type
 
 NAME = "classify_request"
 
@@ -25,7 +25,12 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     latest = state.get("latest_user_message", "")
 
     request_type = scenario.request_type
-    if is_live(state.get("mode", "")) and is_greeting(latest):
+    if is_live(state.get("mode", "")) and (
+            is_greeting(latest) or is_clearly_non_legal(latest)):
+        # En live, ``scenario.request_type`` porte la valeur par défaut du
+        # runner (``case_analysis``) : sans cette détection, une demande de
+        # recette part en résolution de juridiction et l'utilisateur se voit
+        # demander sa province.
         request_type = "non_legal"
 
     return {

@@ -20,6 +20,7 @@ from typing import Any
 
 from lexior.agentic.taxonomy import REQUEST_TYPES
 from lexior.services.modes import is_live
+from lexior.services.jurisdiction import is_employment_text
 
 from ..context import GraphContext
 from ..state import LexiorState
@@ -27,6 +28,7 @@ from ..state import LexiorState
 NAME = "analyze_facts"
 
 _JURISDICTION_FACT = "juridiction (province ou fédéral)"
+_LEGAL_REGIME_FACT = "régime juridique de l'emploi (secteur fédéral ou provincial)"
 
 # Un fait requis nommant la juridiction est satisfait par la juridiction
 # résolue : inutile de le redemander.
@@ -64,6 +66,22 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         elif (state.get("request_type") != "non_legal"
                 and _JURISDICTION_FACT not in missing_before_search):
             missing_before_search.append(_JURISDICTION_FACT)
+        active_text = str(
+            state.get("latest_user_intent")
+            or state.get("latest_user_message")
+            or state.get("active_issue")
+            or state["scenario"].user_query
+        )
+        if (is_employment_text(active_text)
+                and state.get("legal_regime", "unknown") == "unknown"
+                and _LEGAL_REGIME_FACT not in missing_before_search):
+            missing_before_search.append(_LEGAL_REGIME_FACT)
+        elif state.get("legal_regime", "unknown") != "unknown":
+            facts["legal_regime"] = state.get("legal_regime")
+            missing_before_search = [
+                fact for fact in missing_before_search
+                if fact != _LEGAL_REGIME_FACT
+            ]
 
     # Faits obligatoires du type de demande, en live uniquement (en dataset
     # le scénario porte ses propres faits requis) et UNE SEULE FOIS : après
@@ -100,6 +118,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                          "certainty": "asserted"})
     fact_analysis = {
         "jurisdiction": resolved,
+        "legal_regime": state.get("legal_regime", "unknown"),
         "user_goal": state.get("latest_user_intent") or state.get(
             "latest_user_message", ""),
         "asserted_material_facts": asserted,

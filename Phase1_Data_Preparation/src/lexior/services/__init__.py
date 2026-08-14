@@ -46,7 +46,6 @@ _EXPORTS = {
     "RepairService": ".repair",
     "FailureReport": ".repair",
     "FAILURE_TARGETS": ".repair",
-    "DatasetExportService": ".dataset_export",
     # evidence
     "EvidenceLevel": ".evidence",
     "DetailedResultStatus": ".evidence",

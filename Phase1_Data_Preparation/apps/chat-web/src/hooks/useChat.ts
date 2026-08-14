@@ -7,7 +7,6 @@ import type {
   SSEEvent,
   ToolCall,
 } from "../types";
-import type { EvaluationChatContext } from "./useHumanEvaluation";
 
 let nextId = 0;
 function uid(): string {
@@ -32,8 +31,6 @@ export interface UseChatReturn {
   sendMessage: (query: string) => Promise<void>;
   cancelStream: () => void;
   clearMessages: () => void;
-  beginThread: (threadId: string) => void;
-  setEvaluationContext: (context: EvaluationChatContext | null) => void;
   lastDone: boolean;
   lastDonePendingClarification: boolean;
   lastAccepted: boolean | null;
@@ -59,7 +56,6 @@ export function useChat(): UseChatReturn {
   const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
   const [rawEvents, setRawEvents] = useState<RawSSELine[]>([]);
   const [model, setModelState] = useState<ChatModelId>(loadSavedModel);
-  const [evaluationContext, setEvaluationContextState] = useState<EvaluationChatContext | null>(null);
   const [lastDone, setLastDone] = useState(false);
   const [lastDonePendingClarification, setLastDonePendingClarification] = useState(false);
   const [lastAccepted, setLastAccepted] = useState<boolean | null>(null);
@@ -143,12 +139,9 @@ export function useChat(): UseChatReturn {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             query,
-            mode: evaluationContext?.mode ?? "live",
             thread_id: threadIdRef.current,
             history,
             model: modelRef.current,
-            evaluation_run_id: evaluationContext?.runId,
-            evaluation_scenario_id: evaluationContext?.scenarioId,
           }),
           signal: controller.signal,
         });
@@ -219,6 +212,7 @@ export function useChat(): UseChatReturn {
                     toolCalls: [
                       ...(m.toolCalls ?? []),
                        {
+                         index: event.index,
                          tool: event.tool,
                          args: event.args,
                          schemaCorrection: event.schema_correction,
@@ -232,21 +226,34 @@ export function useChat(): UseChatReturn {
               case "tool_result":
                 upsertAssistant((m) => {
                   const calls = [...(m.toolCalls ?? [])];
-                  for (let i = calls.length - 1; i >= 0; i--) {
-                    if (
-                      calls[i]!.tool === event.tool &&
-                      calls[i]!.result === undefined
-                    ) {
-                      calls[i] = {
-                        ...calls[i]!,
-                        result: event.result,
-                        ok: event.ok,
-                        classification: event.classification,
-                        reason: event.reason,
-                        metadata: event.metadata,
-                      };
-                      break;
+                  // Appariement par `index` : une observation révisée après
+                  // vérification porte le MÊME index et doit remplacer la
+                  // version affichée. L'ancien appariement « dernier appel du
+                  // même outil sans résultat » ne trouvait rien et la
+                  // révision était perdue — l'interface montrait alors le
+                  // résultat non vérifié.
+                  let target = calls.findIndex((c) => c.index === event.index);
+                  if (target === -1) {
+                    for (let i = calls.length - 1; i >= 0; i--) {
+                      if (
+                        calls[i]!.tool === event.tool &&
+                        calls[i]!.result === undefined
+                      ) {
+                        target = i;
+                        break;
+                      }
                     }
+                  }
+                  if (target !== -1) {
+                    calls[target] = {
+                      ...calls[target]!,
+                      result: event.result,
+                      ok: event.ok,
+                      classification: event.classification,
+                      reason: event.reason,
+                      metadata: event.metadata,
+                      revised: Boolean(event.revised),
+                    };
                   }
                   return { ...m, toolCalls: calls };
                 }, blankAssistant);
@@ -354,7 +361,7 @@ export function useChat(): UseChatReturn {
         abortRef.current = null;
       }
     },
-    [evaluationContext, upsertAssistant],
+    [upsertAssistant],
   );
 
   const cancelStream = useCallback(() => {
@@ -373,23 +380,6 @@ export function useChat(): UseChatReturn {
     setLastAccepted(null);
   }, []);
 
-  const beginThread = useCallback((threadId: string) => {
-    abortRef.current?.abort();
-    setMessages([]);
-    setCurrentNode(null);
-    setVisitedNodes([]);
-    setRawEvents([]);
-    setLastDone(false);
-    setLastDonePendingClarification(false);
-    setLastAccepted(null);
-    threadIdRef.current = threadId;
-  }, []);
-
-  const setEvaluationContext = useCallback((context: EvaluationChatContext | null) => {
-    setEvaluationContextState(context);
-    if (context) threadIdRef.current = context.threadId;
-  }, []);
-
   return {
     messages,
     streaming,
@@ -402,8 +392,6 @@ export function useChat(): UseChatReturn {
     sendMessage,
     cancelStream,
     clearMessages,
-    beginThread,
-    setEvaluationContext,
     lastDone,
     lastDonePendingClarification,
     lastAccepted,

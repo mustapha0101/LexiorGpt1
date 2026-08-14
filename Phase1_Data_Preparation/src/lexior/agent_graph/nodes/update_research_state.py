@@ -99,6 +99,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 text=text,
                 rank=rank,
                 source=observation.tool_name,
+                required_application_facts=(
+                    getattr(verdict, "faits_requis", ()) if verdict else ()),
             )
 
         if ctx.config.evidence_first_enabled:

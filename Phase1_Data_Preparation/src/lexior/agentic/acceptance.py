@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional, TYPE_CHECKING
 
+from .citations import extract_article_citations, mentions_article
 from .error_codes import BLOCKING_CODES, ErrorCode, extract_code, tag
 from .schemas import (
     AcceptanceResult, CriticResult, ResearchState,
@@ -440,7 +441,7 @@ def _check_article_grounding(trajectory: TrainingTrajectory) -> list[str]:
     if not final:
         return issues
 
-    cited_articles = set(ARTICLE_CITATION_RE.findall(final))
+    cited_articles = set(extract_article_citations(final))
     if not cited_articles:
         return issues
 
@@ -452,10 +453,7 @@ def _check_article_grounding(trajectory: TrainingTrajectory) -> list[str]:
     ).casefold()
 
     for article in cited_articles:
-        if not re.search(
-            rf"\barticle\s+{re.escape(article)}\b",
-            retrieved_text, re.IGNORECASE,
-        ):
+        if not mentions_article(retrieved_text, article):
             issues.append(f"unsupported_article: article {article} cité "
                           "dans la réponse mais absent des résultats d'outils")
 

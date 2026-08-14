@@ -47,7 +47,6 @@ NODE_LABELS = {
     "repair_trajectory": "Repairing trajectory",
     "validate_final": "Validating trajectory",
     "compute_acceptance": "Computing acceptance",
-    "export_dataset": "Exporting result",
     "return_live_answer": "Delivering answer",
     "reject": "Processing rejection",
 }
@@ -60,7 +59,7 @@ _TOOL_RESULT_INLINE_MAX = max(1000, int(os.environ.get(
 # quand même : mieux vaut l'afficher sans classification que le perdre.
 _NOEUDS_TERMINAUX = frozenset({
     "generate_answer", "return_live_answer", "reject",
-    "handle_clarification", "export_dataset",
+    "handle_clarification",
 })
 
 _ARTICLE_RE = re.compile(r"\bArticle\s+(\d{1,4}(?:\.\d+)?)", re.IGNORECASE)
@@ -102,6 +101,11 @@ class StreamTranslator:
         self._thread_id = thread_id
         self._en_attente: list[dict[str, Any]] = []
         self._normalizations: dict[tuple[str, str], list[str]] = {}
+        # Empreinte de chaque observation DÉJÀ diffusée, par index. La
+        # vérification réécrit l'observation SUR PLACE (même longueur
+        # d'historique) : sans empreinte, la version vérifiée — qui peut
+        # invalider un résultat annoncé comme valide — n'était jamais émise.
+        self._empreintes: dict[int, str] = {}
 
     def translate_chunk(
         self, chunk: dict[str, Any],
@@ -277,6 +281,10 @@ class StreamTranslator:
                         "jurisdiction": update.get(
                             "resolved_jurisdiction",
                             decision.get("jurisdiction", "")),
+                        # Le raisonnement du planner est déjà calculé et
+                        # l'interface le lit (useChat.ts) : sans ce champ,
+                        # la colonne « raisonnement » du journal reste vide.
+                        "thinking": decision.get("thinking_text", ""),
                     }
 
             normalization = update.get("last_tool_normalization")
@@ -291,24 +299,38 @@ class StreamTranslator:
 
             tool_history = update.get("tool_history")
             if isinstance(tool_history, list):
-                for rang, obs in enumerate(tool_history[self._tool_count:],
-                                           start=self._tool_count):
+                for rang, obs in enumerate(tool_history):
                     text = obs.normalized_response or ""
+                    empreinte = hashlib.sha256(
+                        f"{obs.ok}\x00{text}".encode("utf-8")).hexdigest()
+                    deja_vu = rang < self._tool_count
+                    if deja_vu and self._empreintes.get(rang) == empreinte:
+                        continue
+                    self._empreintes[rang] = empreinte
                     metadata = dict(getattr(obs, "result_metadata", {}) or {})
                     metadata = {
                         **result_metadata(obs.tool_name, obs.arguments, text),
                         **metadata,
                     }
-                    yield {
-                        "type": "tool_call",
-                        "tool": obs.tool_name,
-                        "args": obs.arguments,
-                        "schema_correction": self._normalizations.pop(
-                            (obs.tool_name, json.dumps(
-                                obs.arguments, sort_keys=True,
-                                ensure_ascii=False)), []),
-                    }
+                    if not deja_vu:
+                        yield {
+                            "type": "tool_call",
+                            # Même index que le tool_result correspondant :
+                            # l'interface peut ainsi remplacer une observation
+                            # révisée au lieu de deviner par position.
+                            "index": rang,
+                            "tool": obs.tool_name,
+                            "args": obs.arguments,
+                            "schema_correction": self._normalizations.pop(
+                                (obs.tool_name, json.dumps(
+                                    obs.arguments, sort_keys=True,
+                                    ensure_ascii=False)), []),
+                        }
                     self._en_attente.append({
+                        # Une observation revue APRÈS diffusion est réémise
+                        # avec le même index : l'interface remplace la
+                        # version non vérifiée au lieu d'en empiler une autre.
+                        "revised": deja_vu,
                         "type": "tool_result",
                         "index": rang,
                         "tool": obs.tool_name,
@@ -349,7 +371,13 @@ class StreamTranslator:
                 continue
             par_index[int(index)] = (str(lire("result_status", "") or ""),
                                      str(lire("result_reason", "") or ""))
+        # Une observation vérifiée dans le même intervalle que son émission
+        # ne doit pas produire deux événements : seule la DERNIÈRE version
+        # d'un index part, l'ordre d'apparition étant conservé.
+        dernier: dict[int, dict[str, Any]] = {}
         for evenement in self._en_attente:
+            dernier[evenement["index"]] = evenement
+        for evenement in dernier.values():
             statut, motif = par_index.get(evenement["index"], ("", ""))
             evenement["classification"] = statut
             evenement["reason"] = motif

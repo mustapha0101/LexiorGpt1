@@ -2,7 +2,7 @@
 """Le système d'agents central de Lexior, fondé sur LangGraph.
 
 UN graphe (``build_graph``), UN état (``LexiorState``), UN exécuteur
-(``GraphRunner``) — deux modes : ``dataset`` et ``live``.
+(``GraphRunner``) pour le chat live.
 
 Les symboles qui dépendent de ``langgraph`` sont résolus à la demande :
 importer un module de logique pure (``result_classifier``, ``state``,
@@ -32,7 +32,6 @@ _LAZY: dict[str, str] = {
     "build_graph": ".graph",
     "build_default_graph": ".graph",
     "GraphRunner": ".runner",
-    "DatasetRunResult": ".runner",
     "LiveTurnResult": ".runner",
     "NODE_LABELS": ".events",
     "StreamTranslator": ".events",
@@ -50,7 +49,7 @@ if TYPE_CHECKING:  # pragma: no cover - aide les analyseurs statiques
     from .events import NODE_LABELS, StreamTranslator
     from .graph import build_default_graph, build_graph
     from .nodes import NODE_NAMES
-    from .runner import DatasetRunResult, GraphRunner, LiveTurnResult
+    from .runner import GraphRunner, LiveTurnResult
 
 
 def __getattr__(name: str):
@@ -82,7 +81,6 @@ __all__ = [
     "build_graph",
     "build_default_graph",
     "GraphRunner",
-    "DatasetRunResult",
     "LiveTurnResult",
     "NODE_LABELS",
     "NODE_NAMES",

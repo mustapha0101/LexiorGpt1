@@ -20,6 +20,7 @@ from lexior.agentic.schemas import (
     RejectionDetail,
     RepairReport,
 )
+from lexior.agentic.error_codes import ErrorCode, extract_code
 from lexior.services.evidence import AcceptanceBlocker
 from lexior.services.modes import is_live
 from lexior.services.result_verification import ResultVerificationService
@@ -30,6 +31,31 @@ from ..context import GraphContext
 from ..state import LexiorState, to_research_state, to_trajectory
 
 NAME = "compute_acceptance"
+
+
+_CITATION_ERROR_CODES = (
+    ErrorCode.UNGROUNDED_CITATION,
+    ErrorCode.UNGROUNDED_ARTICLE,
+    ErrorCode.UNGROUNDED_URL,
+)
+
+
+def _ungrounded_citation_errors(state: LexiorState) -> list[str]:
+    """Erreurs de citation relevées par le validateur déterministe.
+
+    ``validate_final`` les calcule déjà; la branche live ne les lisait pas.
+    Un article cité sans texte officiel correspondant doit bloquer la
+    livraison, pas seulement figurer dans un rapport.
+    """
+    validation = state.get("validation_result")
+    raw = list(getattr(validation, "errors", None) or [])
+    raw += list(state.get("validation_issues", []) or [])
+    found: list[str] = []
+    for item in raw:
+        code = extract_code(str(item))
+        if code in _CITATION_ERROR_CODES:
+            found.append(str(item))
+    return list(dict.fromkeys(found))
 
 
 def _compute_evidence_blockers(state: LexiorState) -> list[str]:
@@ -150,10 +176,20 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             acceptance.accepted = False
             acceptance.blocking_errors = list(dict.fromkeys(
                 [*acceptance.blocking_errors, *open_failures]))
+        citation_failures = _ungrounded_citation_errors(state)
+        if citation_failures:
+            # Une citation sans source récupérée est la faute la plus grave
+            # d'un assistant juridique. Le mode live ignorait les erreurs
+            # déterministes du validateur : elles bloquent désormais ici
+            # comme en mode dataset.
+            acceptance.accepted = False
+            acceptance.blocking_errors = list(dict.fromkeys(
+                [*acceptance.blocking_errors, *citation_failures]))
         open_count, resolved_count = _grounding_counts(state)
         return {"acceptance_result": acceptance,
                 "acceptance_blockers": list(dict.fromkeys(
-                    [*blockers, *claim_blockers, *open_failures])),
+                    [*blockers, *claim_blockers, *open_failures,
+                     *citation_failures])),
                 "failure_history": merge_failures(
                     state.get("failure_history", []),
                     [{"failure_type": item, "reason": item}

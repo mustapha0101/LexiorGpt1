@@ -365,13 +365,18 @@ def planner_system_prompt(catalog: ToolCatalog) -> str:
         "cherchées puis réunies. Remplis-le à chaque recherche : c'est lui "
         'qui porte la traduction.",\n'
         '  "request_type": "...",\n'
-        '  "jurisdiction": "...",\n'
+        '  "jurisdiction": "lieu: Québec, Ontario, etc.",\n'
+        '  "legal_regime": "unknown | provincial | federal",\n'
         '  "missing_critical_facts": [...],\n'
         '  "required_sources": [...],\n'
         '  "decision": "call_tool",  // une de: "ask_clarification", "call_tool", "final_answer", "cannot_conclude"\n'
         '  "next_tool": "nom_canonique ou null",\n'
         '  "arguments": {...},\n'
-        '  "clarification_question": "... ou null"\n'
+        '  "clarification_question": "... ou null",\n'
+        '  "clarification_scope": "none | jurisdiction | legal_regime | application_fact",\n'
+        '  "clarification_blocking": false,\n'
+        '  "answerable_conditionally": true,\n'
+        '  "clarification_fact_keys": []\n'
         "}\n\n"
         "Le champ thinking_text est OBLIGATOIRE. Il forme un FIL DE "
         "RAISONNEMENT CONTINU qui progresse à chaque tour.\n\n"
@@ -446,8 +451,19 @@ def planner_system_prompt(catalog: ToolCatalog) -> str:
         "═══ RÈGLES GÉNÉRALES ═══\n"
         "- un seul appel d'outil à la fois ;\n"
         "- arguments conformes au schéma ;\n"
-        "- clarification AVANT recherche si un fait manquant change la "
-        "juridiction ou la règle ; UNE SEULE clarification autorisée ; si "
+        "- clarification AVANT recherche uniquement si l'information manquante "
+        "change la juridiction, la compétence fédérale/provinciale ou le régime "
+        "juridique à rechercher; indique alors clarification_blocking=true et "
+        "le scope correspondant ;\n"
+        "- les faits nécessaires à l'application (date, connaissance, avis, "
+        "existence antérieure du vice, etc.) ne bloquent pas la recherche : "
+        "clarification_blocking=false, answerable_conditionally=true, puis "
+        "réponse par branches si/alors et questions à la fin ;\n"
+        "- pour l'emploi, si la province et le secteur fédéral/provincial sont "
+        "inconnus, regroupe ces éléments dans une seule clarification courte ;\n"
+        "- ne mets jamais Federal dans jurisdiction : jurisdiction décrit le "
+        "lieu de travail; mets federal dans legal_regime ;\n"
+        "- UNE SEULE clarification autorisée ; si "
         "clarification_already_answered=true, INTERDIT de redemander ;\n"
         "- question non juridique : final_answer, aucun outil ;\n"
         "- article précis : récupère l'article, puis arrête ;\n"
@@ -470,7 +486,11 @@ TRAJECTORY_ANSWER_SYSTEM = (
     "puis expose la règle principale, son application aux faits, les branches "
     "conditionnelles utiles, les éléments de preuve et les limites réellement "
     "indiquées par SourceSufficiencyDecision. La jurisprudence n'est pas requise "
-    "par défaut.\n\n"
+    "par défaut.\n"
+    "Si une source officielle est disponible mais qu'un fait d'application "
+    "manque, ne réponds pas seulement « je ne peux pas déterminer ». Présente "
+    "d'abord la règle générale, puis ce que les faits connus permettent de dire, "
+    "puis les branches « si/alors », et termine par les questions décisives.\n\n"
     "GROUNDING — chaque affirmation juridique dans ta réponse DOIT avoir une "
     "source récupérée correspondante. Si tu ne peux pas la relier à un "
     "résultat d'outil, ne l'écris pas. Pour chaque proposition clé, garde "
@@ -506,6 +526,8 @@ TRAJECTORY_ANSWER_SYSTEM = (
     "identité du bien ou de son gardien, communications, date, heure et lieu ;\n"
     "- PERTINENCE : si les articles récupérés traitent d'un sujet différent, "
     "ne force PAS une réponse ;\n"
+    "- une lacune factuelle n'est pas une absence de preuve : si le texte officiel "
+    "est pertinent, une réponse conditionnelle reste autorisée ;\n"
     "- prose uniquement, jamais de JSON."
 )
 
@@ -564,8 +586,12 @@ AGENTIC_CRITIC_SYSTEM = (
     "1. request_classification (0.0–1.0) : le type de demande a-t-il été "
     "correctement identifié?\n"
     "2. jurisdiction (0.0–1.0) : la bonne juridiction a-t-elle été choisie?\n"
-    "3. clarification (0.0–1.0) : la clarification était-elle nécessaire et "
-    "bien posée? Pas de clarification inutile?\n"
+    "3. clarification (0.0–1.0) : une clarification AVANT recherche n'est "
+    "nécessaire que si elle change le lieu, la compétence fédérale/provinciale "
+    "ou le régime de sources. Un fait d'application (date, connaissance, avis, "
+    "existence du vice, etc.) ne doit pas interrompre la recherche : il doit "
+    "être traité conditionnellement et demandé à la fin. Évalue cette politique, "
+    "ainsi que la formulation de la question.\n"
     "4. tool_selection (0.0–1.0) : les bons outils ont-ils été choisis?\n"
     "5. search_quality (0.0–1.0) : les requêtes de recherche étaient-elles "
     "pertinentes et bien formulées?\n"
@@ -573,7 +599,9 @@ AGENTIC_CRITIC_SYSTEM = (
     "évalués (pertinent vs hors sujet)?\n\n"
     "LABELS À ATTRIBUER (liste, zéro ou plusieurs) :\n"
     "- unnecessary_clarification : clarification demandée sans nécessité\n"
-    "- missing_clarification : clarification nécessaire mais non demandée\n"
+    "- missing_clarification : clarification bloquante de juridiction ou de "
+    "régime nécessaire mais non demandée; ne pas utiliser ce label pour un "
+    "fait d'application traité par une réponse conditionnelle\n"
     "- retrieval_target_mislabeled_as_fact : un article ou loi à retrouver "
     "traité comme un fait manquant\n"
     "- wrong_tool : outil incorrect pour la juridiction ou le type\n"

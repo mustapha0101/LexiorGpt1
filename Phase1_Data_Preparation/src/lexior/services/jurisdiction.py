@@ -78,6 +78,22 @@ _CITY_RE = re.compile(
 _YES_RE = re.compile(r"^\s*(oui|yes|ouais|exactement|c'est ça)\s*[.!]?\s*$", re.I)
 _NO_RE = re.compile(r"^\s*(non|no|nope|pas au qu[ée]bec)\s*[.!]?\s*$", re.I)
 
+_EMPLOYMENT_RE = re.compile(
+    r"\b(?:emploi|employ[ée]|employeur|travail|travaille|salari[ée]|"
+    r"congédi|licenci|heures? supplémentaires?|syndicat)\b", re.I)
+_FEDERAL_SECTOR_RE = re.compile(
+    r"\b(?:banque|bank|compagnie aérienne|transport aérien|aéroport|"
+    r"chemin de fer|railway|transport interprovincial|télécom|"
+    r"télécommunication|radiodiffusion|poste canada|service public fédéral|"
+    r"gouvernement fédéral)\b", re.I)
+_EXPLICIT_FEDERAL_RE = re.compile(
+    r"\b(?:régime|compétence|secteur|droit|emploi)\s+fédéral(?:e)?\b", re.I)
+_EXPLICIT_PROVINCIAL_RE = re.compile(
+    r"\b(?:régime|compétence|secteur|droit|emploi)\s+provincial(?:e)?\b", re.I)
+_PROVINCIAL_SECTOR_RE = re.compile(
+    r"\b(?:commerce local|commerce de détail|restaurant|restauration|"
+    r"construction|manufacture|usine|cabinet professionnel|hôtel)\b", re.I)
+
 
 def detect_jurisdiction_hint(messages: Sequence) -> Optional[str]:
     """Juridiction déduite DÉTERMINISTIQUEMENT de la conversation.
@@ -119,6 +135,46 @@ def detect_jurisdiction_hint(messages: Sequence) -> Optional[str]:
                 elif _NO_RE.match(message.content):
                     hint = OUTSIDE_QUEBEC
     return hint
+
+
+def is_employment_matter(messages: Sequence) -> bool:
+    """Détecte seulement si la conversation porte explicitement sur l'emploi."""
+    return any(
+        getattr(message.role, "value", message.role) == "user"
+        and is_employment_text(message.content or "")
+        for message in messages
+    )
+
+
+def is_employment_text(text: str) -> bool:
+    """Détecte l'emploi dans le texte de la tâche active uniquement."""
+    return _EMPLOYMENT_RE.search(text or "") is not None
+
+
+def detect_legal_regime_hint(messages: Sequence) -> tuple[Optional[str], str]:
+    """Retourne un régime seulement à partir d'un signal utilisateur explicite.
+
+    Une province n'est jamais assimilée à un régime. Les secteurs fédéraux
+    listés ici servent uniquement de signaux de compétence largement établis;
+    en leur absence, un dossier d'emploi demeure ``unknown`` et doit être
+    clarifié avant de choisir les sources.
+    """
+    regime: Optional[str] = None
+    sector = ""
+    for message in messages:
+        if getattr(message.role, "value", message.role) != "user":
+            continue
+        content = message.content or ""
+        federal_sector = _FEDERAL_SECTOR_RE.search(content)
+        if federal_sector:
+            regime, sector = "federal", federal_sector.group(0)
+        elif _EXPLICIT_FEDERAL_RE.search(content):
+            regime = "federal"
+        elif provincial_sector := _PROVINCIAL_SECTOR_RE.search(content):
+            regime, sector = "provincial", provincial_sector.group(0)
+        elif _EXPLICIT_PROVINCIAL_RE.search(content):
+            regime = "provincial"
+    return regime, sector
 
 
 def is_quebec(value: str) -> bool:

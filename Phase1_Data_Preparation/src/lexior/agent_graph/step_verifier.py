@@ -38,9 +38,12 @@ from lexior.agentic.acceptance import (
 from lexior.agentic.response_verifier import (
     verify_observation as _verify_observation,
 )
+from lexior.agentic.citations import (
+    extract_article_citations,
+    mentions_article,
+)
 from lexior.agentic.tool_catalog import ToolCatalog
 from lexior.agentic.validators import (
-    ARTICLE_CITATION_RE,
     CERTAINTY_RE,
     CITATION_MARK_RE,
     PRECISE_ARTICLE_TOOLS,
@@ -306,11 +309,8 @@ class StepVerifier:
         evidence_text = "\n".join(
             o.normalized_response for o in citable
         ).casefold()
-        for article in ARTICLE_CITATION_RE.findall(final):
-            if not re.search(
-                rf"\barticle\s+{re.escape(article)}\b",
-                evidence_text, re.IGNORECASE,
-            ):
+        for article in extract_article_citations(final):
+            if not mentions_article(evidence_text, article):
                 errors.append(
                     f"article {article} absent des réponses d'outils")
 

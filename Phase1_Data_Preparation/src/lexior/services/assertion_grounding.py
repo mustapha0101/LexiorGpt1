@@ -23,9 +23,10 @@ Laisser passer faute d'avoir pu vérifier reviendrait à ne pas vérifier.
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+from .text_folding import fold_text
 
 # « article 1457 », « articles 984 et 985 », « art. 596.1 »
 _RE_CITATION = re.compile(
@@ -115,10 +116,18 @@ _SELECTION_SYSTEME = (
     "survenait plus tard.\n\n"
     "Un article applicable ou incertain ne permet pas d'affirmer une issue "
     "certaine : les conditions non établies doivent rester conditionnelles. "
+    "Pour un article incertain, remplis faits_requis uniquement avec les faits "
+    "qui sont à la fois absents des FAITS et exigés explicitement par une phrase "
+    "du texte. Pour chaque fait, copie un court passage_source exactement présent "
+    "dans l'article et formule une question compréhensible. N'ajoute aucun fait "
+    "tiré de ta mémoire juridique. Pour applicable ou incompatible, faits_requis "
+    "est une liste vide. "
     "Réponds uniquement par {\"articles\":[{\"article\":\"numéro\","
     "\"cause_du_texte\":\"...\",\"cause_des_faits\":\"...\","
     "\"cause_compatible\":true,\"statut\":\"applicable|incertain|incompatible\","
-    "\"motif\":\"une phrase\"}]}. Chaque article fourni doit apparaître "
+    "\"motif\":\"une phrase\",\"faits_requis\":[{\"id\":\"identifiant_court\","
+    "\"description\":\"fait à établir\",\"question\":\"question à poser\","
+    "\"passage_source\":\"extrait exact\"}]}]}. Chaque article fourni doit apparaître "
     "exactement une fois.")
 
 
@@ -144,6 +153,63 @@ class ApplicabiliteArticle:
 
     statut: str
     motif: str = ""
+    faits_requis: tuple[dict[str, str], ...] = ()
+
+
+def _normaliser_source(value: str) -> str:
+    # Repliement partagé : l'apostrophe typographique du corpus officiel
+    # DOIT être repliée, sinon un extrait recopié avec une apostrophe
+    # droite est déclaré absent de sa propre source.
+    return fold_text(value)
+
+
+def _faits_requis_source_bornes(
+        raw: Any, article_text: str,
+        rejets: Optional[list[dict[str, str]]] = None,
+) -> tuple[dict[str, str], ...]:
+    """Conserve uniquement les faits reliés à un extrait exact de la source.
+
+    Un extrait non retrouvé dans la source est écarté — mais l'abandon est
+    CONSIGNÉ dans ``rejets`` : c'est le symptôme d'un relecteur qui
+    paraphrase au lieu de citer, et il faut pouvoir le voir.
+    """
+    if not isinstance(raw, list):
+        return ()
+    source = _normaliser_source(article_text)
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw[:5]:
+        if not isinstance(item, dict):
+            continue
+        description = str(item.get("description") or "").strip()[:240]
+        passage = str(item.get("passage_source") or "").strip()[:500]
+        if not description or not passage:
+            continue
+        if _normaliser_source(passage) not in source:
+            if rejets is not None:
+                rejets.append({
+                    "motif": "passage_source_absent_de_la_source",
+                    "description": description,
+                    "passage_source": passage[:200],
+                })
+            continue
+        fact_id = re.sub(
+            r"[^a-z0-9]+", "_",
+            _normaliser_source(str(item.get("id") or description)),
+        ).strip("_")[:80]
+        if not fact_id or fact_id in seen:
+            continue
+        question = str(item.get("question") or "").strip()[:300]
+        if not question:
+            question = f"Pouvez-vous préciser si {description}?"
+        result.append({
+            "id": fact_id,
+            "description": description,
+            "question": question,
+            "passage_source": passage,
+        })
+        seen.add(fact_id)
+    return tuple(result)
 
 
 def _prevention_incompatible_avec_fait_realise(texte: str, faits: str) -> bool:
@@ -153,13 +219,8 @@ def _prevention_incompatible_avec_fait_realise(texte: str, faits: str) -> bool:
     dépend ni d'un article ni d'un type de bien. Un texte qui prévoit aussi
     la réparation demeure disponible pour le juge de pertinence.
     """
-    def normaliser(value: str) -> str:
-        decomposed = unicodedata.normalize("NFKD", value or "")
-        return "".join(char for char in decomposed
-                       if not unicodedata.combining(char)).casefold()
-
-    texte_normalise = normaliser(texte)
-    faits_normalises = normaliser(faits)
+    texte_normalise = fold_text(texte, collapse_whitespace=False)
+    faits_normalises = fold_text(faits, collapse_whitespace=False)
     return bool(
         _FAIT_DEJA_REALISE_RE.search(faits_normalises)
         and _MESURE_PREVENTIVE_RE.search(texte_normalise)
@@ -220,6 +281,9 @@ class AssertionGroundingService:
         self.client = client
         self.offline = offline
         self.role = role
+        # Extraits écartés faute d'être retrouvés dans leur source, au
+        # dernier appel de sélection. Diagnostic, jamais une décision.
+        self.derniers_rejets_passage: list[dict[str, str]] = []
 
     def disponible(self) -> bool:
         return bool(self.client) and not self.offline
@@ -303,6 +367,7 @@ class AssertionGroundingService:
             return {}
         statuts = {"applicable", "incertain", "incompatible"}
         resultat: dict[str, ApplicabiliteArticle] = {}
+        rejets: list[dict[str, str]] = []
         for entree in entrees:
             if not isinstance(entree, dict):
                 continue
@@ -312,9 +377,15 @@ class AssertionGroundingService:
                 continue
             if entree.get("cause_compatible") is False:
                 statut = "incompatible"
+            faits_requis = (
+                _faits_requis_source_bornes(
+                    entree.get("faits_requis"), textes[numero], rejets)
+                if statut == "incertain" else ()
+            )
             resultat[numero] = ApplicabiliteArticle(
                 statut=statut,
-                motif=str(entree.get("motif") or "").strip()[:300])
+                motif=str(entree.get("motif") or "").strip()[:300],
+                faits_requis=faits_requis)
         for numero, texte in textes.items():
             if (numero in resultat
                     and _prevention_incompatible_avec_fait_realise(texte, faits)):
@@ -322,6 +393,17 @@ class AssertionGroundingService:
                     statut="incompatible",
                     motif=("le texte ne prévoit qu'une mesure préventive alors "
                            "que les faits décrivent un dommage déjà réalisé"))
+        if rejets:
+            # Visible plutôt que muet : un extrait introuvable dans sa propre
+            # source signale un relecteur qui paraphrase, et le fait requis
+            # perdu retire sa formulation conditionnelle à la réponse.
+            self.derniers_rejets_passage = list(rejets)
+            print(
+                f"[assertion_grounding] {len(rejets)} extrait(s) écarté(s) : "
+                "passage_source introuvable dans le texte officiel",
+                flush=True)
+        else:
+            self.derniers_rejets_passage = []
         # Une sélection partielle ne doit jamais faire disparaître un texte
         # officiel par accident : on ne filtre que si tous les articles ont
         # été classés exactement une fois.

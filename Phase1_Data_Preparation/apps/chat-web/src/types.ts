@@ -9,11 +9,15 @@ export interface RequestStartedEvent {
   type: "request_started";
   model: string;
   provider_model: string;
+  /** Modèle qui JUGE la réponse — distinct du rédacteur en principe. */
+  critic_model?: string;
   thread_id: string;
 }
 
 export interface ToolCallEvent {
   type: "tool_call";
+  /** Rang de l'observation, partagé avec le `tool_result` correspondant. */
+  index: number;
   tool: string;
   args: Record<string, unknown>;
   /** Champs ignorés car absents du schéma courant de l'outil. */
@@ -22,9 +26,17 @@ export interface ToolCallEvent {
 
 export interface ToolResultEvent {
   type: "tool_result";
+  /** Rang de l'observation, identique à celui du `tool_call`. */
+  index: number;
   tool: string;
   result: string;
   ok: boolean;
+  /**
+   * Vrai quand l'observation a été RÉVISÉE après une première diffusion
+   * (la vérification peut invalider un résultat d'abord annoncé valide).
+   * Le couple `index` permet de remplacer la version affichée.
+   */
+  revised?: boolean;
   /** usable | citable | candidate | irrelevant | empty | wrong_document_type… */
   classification?: string;
   /** Motif du classement, quand il y en a un. */
@@ -71,9 +83,16 @@ export interface DecisionEvent {
 
 export interface DoneEvent {
   type: "done";
+  /**
+   * Verdict RÉEL du contrôle d'acceptation. Faux pour une clarification en
+   * attente, une réponse vide, un rejet ou une réponse de repli : ce champ
+   * ne dit pas « le tour s'est terminé » mais « la réponse est fondée ».
+   */
   accepted: boolean;
   /** Le graphe est suspendu sur une clarification (interrupt LangGraph) */
   pending_clarification?: boolean;
+  /** Motif d'arrêt quand `accepted` est faux. */
+  stop_reason?: string;
   /** Thread LangGraph de la conversation */
   thread_id?: string;
 }
@@ -96,11 +115,6 @@ export interface ObservabilityEvent {
   };
 }
 
-export interface EvaluationSaveErrorEvent {
-  type: "evaluation_save_error";
-  message: string;
-}
-
 export type SSEEvent =
   | RequestStartedEvent
   | ThinkingEvent
@@ -112,14 +126,15 @@ export type SSEEvent =
   | ObservabilityEvent
   | DecisionEvent
   | DoneEvent
-  | ErrorEvent
-  | EvaluationSaveErrorEvent;
+  | ErrorEvent;
 
 /* ── Chat message model ── */
 
 export type MessageRole = "user" | "assistant" | "tool" | "clarification";
 
 export interface ToolCall {
+  /** Rang de l'observation; sert à remplacer une version révisée. */
+  index?: number;
   tool: string;
   args: Record<string, unknown>;
   result?: string;
@@ -128,6 +143,8 @@ export interface ToolCall {
   reason?: string;
   schemaCorrection?: string[];
   metadata?: ToolResultMetadata;
+  /** L'observation affichée a été révisée par la vérification. */
+  revised?: boolean;
 }
 
 export interface ChatMessage {
@@ -141,24 +158,6 @@ export interface ChatMessage {
   /** Current agent status label */
   statusLabel?: string;
   timestamp: number;
-}
-
-/* ── Dataset dashboard types ── */
-
-export interface DatasetRun {
-  run_id: string;
-  created_at: string;
-  accepted: number;
-  rejected: number;
-  total: number;
-  acceptance_rate: number;
-}
-
-export interface Rejection {
-  scenario_id: string;
-  reason: string;
-  category?: string;
-  details?: string;
 }
 
 /* ── Raw SSE line (Agent Log raw view) ── */
@@ -188,59 +187,9 @@ export interface AgentLogEntry {
   thinking?: string;
 }
 
-/* ── App view ── */
-
-export type AppView = "chat" | "dashboard";
-
 /* ── Chat model selection ── */
 
 export type ChatModelId = "gpt-4o" | "gpt-4o-mini" | "qwen-local";
-
-export type HumanEvaluationMode = "normal" | "human_40";
-
-export interface HumanScenario {
-  scenario_id: number;
-  category: number;
-  category_label: string;
-  scenario_description: string;
-  planned_order: number;
-  actual_order: number | null;
-  status: "not_started" | "in_progress" | "completed" | "interrupted";
-  started_at: string | null;
-  completed_at: string | null;
-  duration_ms: number | null;
-  thread_id: string | null;
-  start_count: number;
-  resume_count: number;
-  human_query: string | null;
-  expected_answer_note: string | null;
-  human_evaluation: {
-    overall_rating?: string;
-    route_quality?: string;
-    response_quality?: string[];
-    notes?: string;
-    observed_category?: string;
-  } | null;
-  final_result: { content?: string; accepted?: boolean; stop_reason?: string | null } | null;
-  conversation: Array<Record<string, unknown>>;
-  tool_calls: Array<Record<string, unknown>>;
-  validation_events: Array<Record<string, unknown>>;
-  timing: Record<string, unknown>;
-}
-
-export interface HumanEvaluationRun {
-  schema_version: string;
-  run: {
-    run_id: string;
-    started_at: string;
-    completed_at: string | null;
-    status: string;
-    current_scenario_id: number | null;
-    total_scenarios: number;
-  };
-  scenarios: HumanScenario[];
-  run_summary: Record<string, unknown> | null;
-}
 
 export const CHAT_MODEL_OPTIONS: { id: ChatModelId; label: string }[] = [
   { id: "gpt-4o", label: "GPT-4o" },

@@ -25,8 +25,12 @@ NAME = "handle_clarification"
 def _clarification_category(question: str, missing_facts: list[str]) -> str:
     """Catégorie explicite pour éviter de redemander la même information."""
     corpus = " ".join([question, *map(str, missing_facts)]).casefold()
+    if any(token in corpus for token in (
+            "secteur", "employeur", "régime", "fédéral", "federal",
+            "provincial")):
+        return "legal_regime"
     return "jurisdiction" if any(token in corpus for token in (
-        "province", "juridiction", "fédéral", "federal")) else "fact"
+        "province", "juridiction", "territoire", "pays")) else "fact"
 
 
 def _history_entry(question: str, missing_facts: list[str], answer: str,
@@ -68,11 +72,14 @@ def _apply_fact_answer(facts: dict[str, Any], clarification: dict[str, Any],
                        answer: str) -> tuple[dict[str, Any], str]:
     interpretation = _interpret_answer(answer)
     keys = [str(key) for key in clarification.get("fact_keys", [])]
-    if clarification.get("category") != "fact":
+    if clarification.get("category") not in {"fact", "rule_element",
+                                               "legal_regime"}:
         return facts, interpretation
     for key in keys:
         value: Any
-        if interpretation == "affirmative":
+        if clarification.get("category") == "legal_regime":
+            value = {"answer": answer, "interpretation": interpretation}
+        elif interpretation == "affirmative":
             value = True
         elif interpretation == "negative":
             value = False
@@ -116,13 +123,21 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     if already_asked:
         # A fact can remain unknown after it was asked.  It is not eligible
         # for another question in the same task; continue with branches.
+        #
+        # Le compteur DOIT avancer et le motif DOIT router vers la réponse :
+        # sans les deux, validate_plan reforce la même clarification (l'id
+        # est constant), le budget ne bouge jamais et le tour boucle entre
+        # resolve_jurisdiction et validate_plan jusqu'à épuiser le budget de
+        # supersteps — une soixantaine de secondes de silence.
         return {
             "pending_clarification": {},
+            "clarification_count": state.get("clarification_count", 0) + 1,
             "final_answer": (
                 "Je poursuis avec une réponse conditionnelle : le point « "
                 + question + " » a déjà été demandé et demeure incertain."),
             "status": "answering",
-            "stop_reason": "clarification_already_asked",
+            "stop_reason": "clarification_required",
+            "clarification_unresolved": True,
         }
 
     messages = list(state.get("messages", []))
@@ -130,7 +145,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     count = state.get("clarification_count", 0) + 1
     missing_facts = list(pending.get(
         "fact_keys", state.get("missing_critical_facts", [])))
-    category = _clarification_category(question, missing_facts)
+    category = str(pending.get("category") or
+                   _clarification_category(question, missing_facts))
 
     if is_live(state.get("mode", "")):
         # Suspension du graphe — la question part vers l'utilisateur réel.

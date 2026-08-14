@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lexior"
-version = "0.1.0"
-description = "Multi-agent legal assistant framework for Canadian law"
+name = "lexior-live-demo"
+version = "0.3.0"
+description = "Lexior multi-agent legal assistant live demo"
 requires-python = ">=3.10"
 dependencies = [
     "langgraph>=0.2",
@@ -13,19 +13,31 @@ dependencies = [
     "openai>=1.0",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
+    "sse-starlette>=2.0",
     "pydantic>=2.0",
+    "python-dotenv>=1.0",
+    "PyYAML>=6.0",
+    "numpy>=1.26",
+    "mcp>=1.0",
 ]
 
 [project.optional-dependencies]
+# Reconstruction de l'index sémantique CCQ/CPC. L'index livré est exclu du
+# dépôt (voir .gitignore) : sans ce groupe, `lexior.agentic.legal_rag`
+# échoue à l'import de `datasets` au moment de le rebâtir.
+index = [
+    "datasets>=2.14",
+]
 dev = [
     "pytest>=8.0",
-    "pytest-asyncio>=0.23",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
-# Les scripts de nettoyage sous ``scripts/`` sont des exécutables de contrôle
-# et appellent sys.exit() à l'import. Les tests automatisés vivent ici.
 testpaths = ["tests"]
+pythonpath = ["src"]
+# La suite est VOLONTAIREMENT hors ligne : aucun appel modèle, aucun appel
+# MCP. Elle doit rester exécutable sans clé d'API et sans serveur.
+addopts = "-q"

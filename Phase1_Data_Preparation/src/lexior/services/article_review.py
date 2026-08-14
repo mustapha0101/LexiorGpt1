@@ -5,14 +5,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-import unicodedata
 from typing import Any, Iterable
+
+from .text_folding import fold_text
 
 
 def _fold(value: Any) -> str:
-    text = unicodedata.normalize("NFKD", str(value or ""))
-    text = "".join(char for char in text if not unicodedata.combining(char))
-    return re.sub(r"\s+", " ", text.casefold()).strip()
+    return fold_text(value)
 
 
 def _contains(text: str, patterns: Iterable[str]) -> bool:
@@ -180,15 +179,18 @@ def enrich_article_review(
 
 def enrich_source_bounded_review(
         *, article_number: str, status: str, reason: str, text: str,
-        rank: int | None = None, source: str = "") -> dict[str, Any]:
-    """Review metadata that never invents legal roles or missing facts.
+        rank: int | None = None, source: str = "",
+        required_application_facts: Iterable[dict[str, str]] = ()) -> dict[str, Any]:
+    """Review metadata with source-bounded application facts only.
 
     The evidence-first path stores the reviewer verdict and provenance, while
     the operative propositions are extracted later from the official text by
-    ``services.evidence_first``.  The legacy lexical profile remains available
-    only for historical dataset compatibility and is intentionally not called
-    here.
+    ``services.evidence_first``. Missing facts are accepted only after the
+    reviewer has attached an exact passage from that official text.
     """
+    required_facts = [dict(item) for item in required_application_facts
+                      if isinstance(item, dict) and item.get("id")
+                      and item.get("passage_source")]
     return {
         "article_number": str(article_number),
         "status": status,
@@ -200,7 +202,8 @@ def enrich_source_bounded_review(
         "retrieval_group": "primary" if status in {
             "applicable", "conditionally_applicable"} else "contextual",
         "rule_roles": [],
-        "missing_fact_keys": [],
+        "missing_fact_keys": [str(item["id"]) for item in required_facts],
+        "required_application_facts": required_facts,
         "clarification_priority": 0,
         "extraction_mode": "source_bounded",
     }

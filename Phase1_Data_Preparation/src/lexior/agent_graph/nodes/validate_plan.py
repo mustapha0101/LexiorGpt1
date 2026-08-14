@@ -28,6 +28,7 @@ from lexior.services.jurisdiction import (
     is_federal,
 )
 from lexior.services.modes import is_live
+from lexior.services.text_folding import fold_text
 from lexior.services.tool_coverage import get_coverage
 from lexior.services.evidence_first import (
     authorize_planner_action,
@@ -45,6 +46,16 @@ NAME = "validate_plan"
 # les redemander revient à ignorer la réponse de l'usager.
 _RE_FAIT_JURIDICTION = re.compile(
     r"juridiction|province|québec|quebec|fédéral|federal|canada",
+    re.IGNORECASE)
+_RE_LIEU = re.compile(
+    r"juridiction|province|territoire|pays|québec|quebec|ontario",
+    re.IGNORECASE)
+# Le régime fédéral/provincial demandé ici est propre au droit du travail.
+# Les mots « fédéral » et « province » apparaissent aussi dans notre fait de
+# juridiction générique (« juridiction (province ou fédéral) ») : les accepter
+# seuls transformait toute question à juridiction inconnue en dossier d'emploi.
+_RE_REGIME = re.compile(
+    r"emploi|employé|employeur|salarié|droit\s+du\s+travail",
     re.IGNORECASE)
 
 # Recherches par le sens : leurs deux champs décrivent une SITUATION. Un
@@ -100,14 +111,30 @@ def _retirer_numeros_des_recherches(decision: PlannerDecision) -> None:
 def _forced(decision: PlannerDecision, jurisdiction: str, need: str,
             thinking: str, action: Decision,
             question: str = "") -> PlannerDecision:
+    effective_question = question or decision.clarification_question
+    scope = decision.clarification_scope
+    blocking = decision.clarification_blocking
+    if action == Decision.ask_clarification and scope == "none":
+        if _RE_REGIME.search(effective_question or ""):
+            scope, blocking = "legal_regime", True
+        elif _RE_LIEU.search(effective_question or ""):
+            scope, blocking = "jurisdiction", True
+        else:
+            scope, blocking = "application_fact", False
     return PlannerDecision(
         request_type=decision.request_type,
         jurisdiction=jurisdiction,
+        legal_regime=decision.legal_regime,
         missing_critical_facts=decision.missing_critical_facts,
         required_sources=decision.required_sources,
         decision=action,
-        clarification_question=question or decision.clarification_question,
+        clarification_question=effective_question,
         thinking_text=thinking,
+        legal_terms=decision.legal_terms,
+        clarification_scope=scope,
+        clarification_blocking=blocking,
+        answerable_conditionally=decision.answerable_conditionally,
+        clarification_fact_keys=decision.clarification_fact_keys,
         decision_trace=DecisionTrace(
             request_type=decision.request_type,
             jurisdiction=jurisdiction,
@@ -127,14 +154,43 @@ def _pending_clarification(state: LexiorState,
                            *, evidence_first: bool = False) -> dict[str, Any]:
     """Construit le contrat rendu à l'utilisateur avant l'interrupt()."""
     question = (decision.clarification_question or "").strip()
-    if _RE_FAIT_JURIDICTION.search(question):
+    clarification_scope = decision.clarification_scope
+    is_jurisdiction = (
+        clarification_scope == "jurisdiction"
+        or (clarification_scope == "none"
+            and _RE_LIEU.search(question) is not None))
+    if is_jurisdiction:
         return {
             "clarification_id": "jurisdiction-province",
             "category": "jurisdiction",
-            "fact_keys": ["jurisdiction"],
+            "fact_keys": decision.clarification_fact_keys or ["jurisdiction"],
             "question": question or (
                 "Dans quelle province êtes-vous? La réponse dépend du droit applicable."),
             "answer_type": "province_or_federal",
+            "blocking": True,
+            "answerable_conditionally": False,
+            "source_articles": [],
+            "status": "pending",
+        }
+    if clarification_scope == "legal_regime":
+        location_missing = not state.get("resolved_jurisdiction")
+        return {
+            "clarification_id": "legal-regime-employment",
+            "category": "legal_regime",
+            "fact_keys": (decision.clarification_fact_keys or (
+                ["work_location", "employment_sector"]
+                if location_missing else ["employment_sector"])),
+            "question": question or (
+                "Dans quelle province travaillez-vous et dans quel secteur "
+                "votre employeur exerce-t-il ses activités (par exemple banque, "
+                "transport aérien, télécommunications ou commerce local)?"
+                if location_missing else
+                "Dans quel secteur votre employeur exerce-t-il ses activités "
+                "(par exemple banque, transport aérien, télécommunications "
+                "ou commerce local)?"),
+            "answer_type": "location_and_employment_sector",
+            "blocking": True,
+            "answerable_conditionally": False,
             "source_articles": [],
             "status": "pending",
         }
@@ -156,6 +212,8 @@ def _pending_clarification(state: LexiorState,
                 "missing_rule_element_id": choice.missing_rule_element_id,
                 "question": choice.question,
                 "answer_type": "yes_no_or_explanation",
+                "blocking": choice.blocking,
+                "answerable_conditionally": choice.answerable_conditionally,
                 "source_ids": list(contract.primary_source_ids),
                 "status": "pending",
             }
@@ -206,6 +264,8 @@ def _pending_clarification(state: LexiorState,
         "fact_keys": fact_keys[:3],
         "question": safe_question,
         "answer_type": "yes_no_or_explanation",
+        "blocking": False,
+        "answerable_conditionally": True,
         "source_articles": [],
         "status": "pending",
     }
@@ -214,8 +274,84 @@ def _pending_clarification(state: LexiorState,
 def _is_federal_matter(state: LexiorState,
                        decision: PlannerDecision) -> bool:
     """Le droit applicable est-il fédéral, quelle que soit la province ?"""
-    return (is_federal(state.get("expected_jurisdiction", ""))
+    state_regime = str(state.get("legal_regime", "")).casefold()
+    return (state_regime == "federal"
+            or is_federal(state.get("substantive_law", ""))
+            or is_federal(state.get("expected_jurisdiction", ""))
+            or decision.legal_regime == "federal"
             or is_federal(decision.jurisdiction))
+
+
+def _distinct_legal_terms(legal_terms: str, query: str) -> str:
+    """Seconde formulation, ou rien si elle recopie la question.
+
+    ``semantic_search_*`` réunit DEUX formulations. Recopier la question
+    dans ``legal_terms`` passe la validation de schéma (``minLength: 1``)
+    mais rend l'union dégénérée : les deux canaux voient le même texte,
+    et le jeu de candidats se réduit aux premiers rangs denses — les
+    candidats purement lexicaux et les rangs denses suivants disparaissent.
+    Une chaîne vide est la façon documentée de dire « une seule
+    formulation ».
+    """
+    terms = (legal_terms or "").strip()
+    if not terms:
+        return ""
+    folded_terms = fold_text(terms)
+    folded_query = fold_text(query)
+    if folded_terms == folded_query:
+        return ""
+    # Recopie déguisée : la question entière plus quelques mots.
+    if folded_query and folded_query in folded_terms:
+        reste = folded_terms.replace(folded_query, " ").split()
+        if len(reste) < 3:
+            return ""
+    return terms
+
+
+def _initial_research_for_nonblocking_fact(
+        state: LexiorState, decision: PlannerDecision,
+        ctx: GraphContext) -> PlannerDecision:
+    """Remplace une question factuelle prématurée par la première recherche.
+
+    Cette fonction ne devine pas le droit applicable : elle n'est appelée
+    qu'après résolution du lieu et du régime lorsque celui-ci est nécessaire.
+    """
+    query = str(
+        state.get("active_issue")
+        or state.get("latest_user_intent")
+        or state.get("latest_user_message")
+        or state["scenario"].user_query
+    ).strip()
+    legal_terms = str(decision.legal_terms or query).strip()
+    federal = _is_federal_matter(state, decision)
+    if federal and "search_legal_documents" in ctx.catalog.tools:
+        tool = "search_legal_documents"
+        arguments = {"query": legal_terms or query, "doc_type": "laws",
+                     "search_language": "fr"}
+    else:
+        tool = ("semantic_search_cpc"
+                if state.get("request_type") == "procedure_guidance"
+                else "semantic_search_ccq")
+        if tool not in ctx.catalog.tools:
+            return _forced_final(
+                decision, state.get("resolved_jurisdiction", ""),
+                need="aucun outil initial compatible",
+                thinking="Aucun outil compatible n'est disponible pour poursuivre.")
+        arguments = {"query": query,
+                     "legal_terms": _distinct_legal_terms(legal_terms, query)}
+    decision.decision = Decision.call_tool
+    decision.next_tool = tool
+    decision.arguments = arguments
+    decision.clarification_question = None
+    decision.clarification_scope = "none"
+    decision.clarification_blocking = False
+    decision.answerable_conditionally = True
+    decision.decision_trace.need = "rechercher la règle avant son application"
+    decision.decision_trace.next_action = f"call_tool:{tool}"
+    decision.thinking_text = (
+        "Le fait manquant concerne seulement l'application. Je recherche "
+        "d'abord la règle, puis je répondrai conditionnellement.")
+    return decision
 
 
 def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
@@ -229,6 +365,22 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     step = state.get("step", 0)
     max_steps = state.get("max_planner_decisions", 12)
     resolved = state.get("resolved_jurisdiction", "")
+
+    # Une question d'application ne doit jamais suspendre le flux. Avant la
+    # première recherche, elle est remplacée par une recherche compatible;
+    # après récupération de sources, elle devient une réponse conditionnelle.
+    if (live and decision.decision == Decision.ask_clarification
+            and decision.clarification_scope == "application_fact"
+            and not decision.clarification_blocking):
+        if state.get("tool_history"):
+            decision = _forced_final(
+                decision, resolved,
+                need="fait d'application non bloquant",
+                thinking=("La règle peut être exposée avec les faits connus; "
+                          "les inconnues seront posées à la fin."))
+        else:
+            decision = _initial_research_for_nonblocking_fact(
+                state, decision, ctx)
 
     # 1. Borne de décisions du planner.
     if step >= max_steps:
@@ -314,6 +466,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         decision.decision_trace.need = (
             "renvoi normatif explicite non résolu; combler ce gap avant la jurisprudence")
         decision.decision_trace.next_action = "call_tool:search_quebec_regulations"
+    proposed_regime = decision.legal_regime
     if locked and resolved:
         decision.jurisdiction = resolved
     elif decision.jurisdiction and not live:
@@ -329,7 +482,13 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # 5d. Couverture de juridiction — quatre cas, quatre comportements.
     # Le comportement manquait : les catégories n'existaient que dans le
     # YAML des distributions.
-    if live and decision.decision != Decision.ask_clarification:
+    non_legal = "non_legal" in {state.get("request_type", ""),
+                                decision.request_type}
+    if (live and decision.decision != Decision.ask_clarification
+            and not non_legal):
+        # Une demande hors du droit n'a pas de juridiction applicable :
+        # forcer la question « dans quelle province êtes-vous? » sur une
+        # question de recette est le pire visage de l'assistant.
         action = coverage_action(
             resolved, federal_matter=_is_federal_matter(state, decision))
         clarifications = state.get("clarification_count", 0)
@@ -341,8 +500,13 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                           "droit varie d'une province à l'autre : je la "
                           "demande plutôt que de la supposer."),
                 action=Decision.ask_clarification,
-                question=("Dans quelle province êtes-vous? La réponse dépend "
-                          "du droit applicable."))
+                question=(
+                    "Dans quelle province travaillez-vous et dans quel secteur "
+                    "votre employeur exerce-t-il ses activités?"
+                    if any("régime juridique de l'emploi" in str(item)
+                           for item in state.get("missing_facts_before_search", []))
+                    else "Dans quelle province êtes-vous? La réponse dépend "
+                         "du droit applicable."))
         elif action == "decline":
             decision = _forced(
                 decision, resolved,
@@ -367,6 +531,31 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             federal_matter=_is_federal_matter(state, decision)) != "clarify":
         missing = [fact for fact in missing
                    if not _RE_FAIT_JURIDICTION.search(str(fact))]
+    missing_regime = [fact for fact in state.get(
+        "missing_facts_before_search", []) if _RE_REGIME.search(str(fact))]
+    if (live and missing_regime
+            and state.get("legal_regime", "unknown") == "unknown"
+            and decision.decision != Decision.cannot_conclude):
+        decision = _forced(
+            decision, resolved,
+            need="régime juridique fédéral ou provincial inconnu",
+            thinking=("Le secteur de l'employeur détermine les sources de "
+                      "droit du travail à rechercher."),
+            action=Decision.ask_clarification,
+            question=(
+                "Dans quelle province travaillez-vous et dans quel secteur "
+                "votre employeur exerce-t-il ses activités (par exemple banque, "
+                "transport aérien, télécommunications ou commerce local)?"
+                if not resolved else
+                "Dans quel secteur votre employeur exerce-t-il ses activités "
+                "(par exemple banque, transport aérien, télécommunications "
+                "ou commerce local)?"))
+        decision.clarification_scope = "legal_regime"
+        decision.clarification_blocking = True
+        decision.answerable_conditionally = False
+        decision.clarification_fact_keys = (
+            ["work_location", "employment_sector"]
+            if not resolved else ["employment_sector"])
     if (live and not ctx.config.evidence_first_enabled and missing
             and decision.decision not in (Decision.ask_clarification,
                                           Decision.cannot_conclude)
@@ -410,20 +599,9 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         structured_clarification = build_clarification(
             state.get("article_reviews") or {}, facts_context,
             state.get("clarification_history") or [], user_statements)
-    if (live and state.get("request_type") == "case_analysis"
-            and structured_clarification
-            and state.get("clarification_count", 0) < min(
-                state.get("max_clarifications", 2),
-                ctx.config.evidence_first_maximum_clarifications)
-            and decision.decision not in (Decision.ask_clarification,
-                                          Decision.cannot_conclude)):
-        decision = _forced(
-            decision, resolved,
-            need="fait matériel requis par la règle revue",
-            thinking=("Un texte officiel est potentiellement pertinent, mais "
-                      "sa revue indique qu'un fait nécessaire reste à établir."),
-            action=Decision.ask_clarification,
-            question=structured_clarification["question"])
+    # Les clarifications issues du RuleContract portent sur l'application de
+    # la règle. Elles alimentent la réponse conditionnelle mais ne suspendent
+    # jamais le graphe.
 
     raw_contract_for_clarification = state.get("rule_contract") or {}
     contract_elements = (getattr(raw_contract_for_clarification, "elements", [])
@@ -431,8 +609,9 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                          else raw_contract_for_clarification.get("elements", []))
     if (ctx.config.evidence_first_enabled
             and decision.decision == Decision.ask_clarification
-            and not _RE_FAIT_JURIDICTION.search(
-                decision.clarification_question or "")
+            and decision.clarification_scope not in {
+                "jurisdiction", "legal_regime"}
+            and not decision.clarification_blocking
             and bool(contract_elements)
             and not structured_clarification):
         decision = _forced_final(
@@ -541,15 +720,23 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         context["pending_clarification"] = pending
         updates["case_context"] = context
 
+    if proposed_regime in {"federal", "provincial"}:
+        updates.setdefault("planner_proposed_legal_regime", proposed_regime)
+
+    # Budget PROPRE à la reprise jurisprudentielle. Il partageait
+    # « reformulation_count » avec la reformulation de recherche
+    # sémantique, dont le maximum est 1 : une seule reprise ici épuisait
+    # tout le budget de reformulation, et route_after_classification ne
+    # pouvait plus jamais reformuler un résultat non pertinent.
     if (live and decision.decision == Decision.call_tool
             and decision.next_tool == "search_quebec_jurisprudence"
             and state.get("case_law_search_status") in {
                 "irrelevant", "empty", "failed", "tool_error",
                 "coverage_gap", "candidates_without_url"}
-            and state.get("reformulation_count", 0) < state.get(
+            and state.get("case_law_retry_count", 0) < state.get(
                 "max_search_reformulations", 1)):
-        updates["reformulation_count"] = state.get(
-            "reformulation_count", 0) + 1
+        updates["case_law_retry_count"] = state.get(
+            "case_law_retry_count", 0) + 1
 
     _retirer_numeros_des_recherches(decision)
     updates["latest_decision"] = decision.model_dump(mode="json")

@@ -1,48 +1,31 @@
 # -*- coding: utf-8 -*-
-"""GraphRunner — l'unique point d'entrée d'exécution des deux modes.
-
-    dataset : run_dataset(scenario)  → DatasetRunResult
-    live    : stream_live(...)       → événements SSE (générateur)
-              resume_live(...)       → reprise après interrupt()
-
-Un seul graphe compilé, un seul contexte de services. L'ancien
-``AgenticOrchestrator`` n'est plus qu'une façade au-dessus de
-``run_dataset``.
-"""
+"""Exécution du graphe de la démonstration live Lexior."""
 
 from __future__ import annotations
 
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Iterator, Optional
 
+from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from lexior.agentic.prompts import agent_system_prompt
-from lexior.agentic.schemas import (
-    RejectionRecord,
-    ScenarioSpec,
-    TrainingTrajectory,
-)
-from lexior.agentic.validators import ValidationResult
+from lexior.agentic.schemas import ScenarioSpec
 
 from .checkpointing import create_memory_checkpointer
 from .context import GraphContext
-from .events import NODE_LABELS, StreamTranslator, extract_interrupt_question
+from .events import StreamTranslator, extract_interrupt_question
 from .graph import build_graph
 from .state import initial_state
 
-
-@dataclass
-class DatasetRunResult:
-    """Résultat d'un run dataset — même contrat que l'orchestrateur."""
-
-    accepted: bool
-    trajectory: Optional[TrainingTrajectory] = None
-    rejection: Optional[RejectionRecord] = None
-    validation: Optional[ValidationResult] = None
-    final_state: dict[str, Any] = field(default_factory=dict)
+# Coût mesuré d'un tour : préfixe linéaire + contrat de réponse + critiques
+# + acceptation, puis un cycle par appel d'outil / réparation / clarification.
+_TURN_SUPERSTEPS = 15
+_SUPERSTEPS_PER_CYCLE = 9
+_RECURSION_SLACK = 12
+_MIN_RECURSION_LIMIT = 80
 
 
 @dataclass
@@ -59,108 +42,76 @@ class LiveTurnResult:
 
 
 class GraphRunner:
-    """Compile LE graphe une fois; sert les deux modes."""
+    """Compile une fois le graphe utilisé par le chat live."""
 
     def __init__(self, context: GraphContext, checkpointer=None):
         self.context = context
         self.checkpointer = checkpointer or create_memory_checkpointer()
         self.graph = build_graph(self.context, checkpointer=self.checkpointer)
+        self.recursion_limit = self._derive_recursion_limit()
 
     # ── Aides communes ───────────────────────────────────────────────────
 
+    def _derive_recursion_limit(self) -> int:
+        """Plafond LangGraph déduit des budgets réellement configurés.
+
+        Un tour coûte ``_TURN_SUPERSTEPS + _SUPERSTEPS_PER_CYCLE × N`` où N
+        est le nombre de cycles (appel d'outil, réparation, clarification).
+        Un plafond fixe plus bas que les budgets rendrait ceux-ci inatteignables
+        et transformerait un tour normal en ``GraphRecursionError``.
+        """
+        config = self.context.config
+        tool_calls = getattr(config, "max_tool_calls_live",
+                             getattr(config, "max_tool_calls", 6))
+        repairs = getattr(config, "max_repairs", 1)
+        clarifications = getattr(config, "max_clarifications_live", 2)
+        reformulations = getattr(config, "max_search_reformulations_live", 1)
+        cycles = int(tool_calls) + int(repairs) + int(clarifications) \
+            + int(reformulations)
+        return max(
+            _MIN_RECURSION_LIMIT,
+            _TURN_SUPERSTEPS + _SUPERSTEPS_PER_CYCLE * cycles
+            + _RECURSION_SLACK,
+        )
+
     def _config(self, thread_id: str) -> dict:
         return {"configurable": {"thread_id": thread_id},
-                "recursion_limit": 80}
+                "recursion_limit": self.recursion_limit}
 
     def system_prompt(self) -> str:
         return agent_system_prompt(self.context.catalog)
 
     def has_pending_interrupt(self, thread_id: str) -> bool:
+        """Vrai UNIQUEMENT si le thread est suspendu sur un ``interrupt()``.
+
+        ``snapshot.next`` est non vide pour tout run inachevé — y compris un
+        run mort sur ``GraphRecursionError``. S'y fier ferait passer la
+        question suivante en ``Command(resume=...)`` vers un interrupt
+        inexistant, où elle serait silencieusement perdue.
+        """
+        return self._interrupt_state(thread_id)[0]
+
+    def _interrupt_state(self, thread_id: str) -> tuple[bool, bool]:
+        """``(suspendu sur interrupt, thread inachevé sans interrupt)``."""
         try:
             snapshot = self.graph.get_state(self._config(thread_id))
         except Exception:
-            return False
-        return bool(snapshot and snapshot.next)
-
-    # ── Mode dataset ─────────────────────────────────────────────────────
-
-    def run_dataset(
-        self,
-        scenario: ScenarioSpec,
-        *,
-        progress: Optional[Callable[[str], None]] = None,
-        thread_id: Optional[str] = None,
-    ) -> DatasetRunResult:
-        """ScenarioSpec → graphe central → trajectoire validée."""
-        thread_id = thread_id or f"dataset-{scenario.scenario_id}-{uuid.uuid4().hex[:6]}"
-        state = initial_state(
-            scenario,
-            mode="dataset",
-            max_tool_calls=self.context.config.max_tool_calls,
-            system_prompt=self.system_prompt(),
-            thread_id=thread_id,
-            max_reformulations=self.context.max_reformulations,
-            max_repairs=self.context.max_repairs,
-        )
-        state["evidence_first_maximum_article_batches"] = self.context.config.evidence_first_maximum_article_batches
-
-        notify = progress or (lambda _message: None)
-        final: dict[str, Any] = {}
-        try:
-            for chunk in self.graph.stream(
-                    state, config=self._config(thread_id),
-                    stream_mode=["updates", "values"]):
-                stream_type, payload = chunk
-                if stream_type == "updates" and isinstance(payload, dict):
-                    for node_name in payload:
-                        if node_name != "__interrupt__":
-                            notify(NODE_LABELS.get(node_name, node_name))
-                elif stream_type == "values" and isinstance(payload, dict):
-                    final = payload
-        finally:
-            self._forget_thread(thread_id)
-
-        return self._to_dataset_result(scenario, final)
-
-    def _to_dataset_result(self, scenario: ScenarioSpec,
-                           final: dict[str, Any]) -> DatasetRunResult:
-        accepted = final.get("status") == "accepted"
-        trajectory = None
-        if final.get("trajectory"):
-            trajectory = TrainingTrajectory.model_validate(
-                final["trajectory"])
-
-        rejection = None
-        if not accepted:
-            export = final.get("export_result") or {}
-            raw = export.get("rejection") if isinstance(export, dict) else None
-            if raw:
-                rejection = RejectionRecord.model_validate(raw)
-            else:
-                rejection = RejectionRecord(
-                    scenario_id=scenario.scenario_id,
-                    request_type=scenario.request_type,
-                    stage="graph",
-                    reasons=[final.get("stop_reason")
-                             or "rejet sans raison"],
-                )
-
-        return DatasetRunResult(
-            accepted=accepted,
-            trajectory=trajectory,
-            rejection=rejection,
-            validation=final.get("validation_result"),
-            final_state=final,
-        )
-
-    def _forget_thread(self, thread_id: str) -> None:
-        """Purge le thread éphémère d'un run dataset (best effort)."""
-        delete = getattr(self.checkpointer, "delete_thread", None)
-        if callable(delete):
-            try:
-                delete(thread_id)
-            except Exception:
-                pass
+            return False, False
+        if snapshot is None:
+            return False, False
+        interrupts = getattr(snapshot, "interrupts", ()) or ()
+        if not interrupts:
+            interrupts = tuple(
+                interrupt
+                for task in (getattr(snapshot, "tasks", ()) or ())
+                for interrupt in (getattr(task, "interrupts", ()) or ())
+            )
+        if interrupts:
+            return True, False
+        # Non vide sans interrupt : le thread est resté en plan (crash,
+        # limite de récursion, consommateur SSE parti). On repart à neuf
+        # plutôt que d'avaler le message suivant.
+        return False, bool(getattr(snapshot, "next", ()))
 
     # ── Mode live ────────────────────────────────────────────────────────
 
@@ -271,7 +222,7 @@ class GraphRunner:
             values = getattr(snapshot, "values", {}) or {}
             context = values.get("case_context", {})
             return deepcopy(context) if isinstance(context, dict) else {}
-        except (AttributeError, KeyError, TypeError, ValueError):
+        except Exception:  # noqa: BLE001 — checkpoint illisible ou corrompu
             # Checkpointer absent ou thread encore inexistant.
             return {}
 
@@ -282,7 +233,7 @@ class GraphRunner:
             values = getattr(snapshot, "values", {}) or {}
             history = values.get("tool_history", [])
             return len(history) if isinstance(history, list) else 0
-        except (AttributeError, KeyError, TypeError, ValueError):
+        except Exception:  # noqa: BLE001 — checkpoint illisible ou corrompu
             return 0
 
     def stream_live(self, query: str, *, thread_id: Optional[str] = None,
@@ -298,7 +249,14 @@ class GraphRunner:
         thread_id = thread_id or f"live-{uuid.uuid4().hex[:8]}"
         config = self._config(thread_id)
 
-        pending_interrupt = self.has_pending_interrupt(thread_id)
+        pending_interrupt, stalled = self._interrupt_state(thread_id)
+        if stalled:
+            # Thread resté en plan : on redémarre un tour propre sur un
+            # nouveau fil plutôt que d'écrire par-dessus un checkpoint mort.
+            thread_id = f"live-{uuid.uuid4().hex[:8]}"
+            config = self._config(thread_id)
+            yield {"type": "status", "node": "runner",
+                   "label": "Reprise sur un nouveau fil (tour précédent interrompu)"}
         prior_tool_count = self._checkpoint_tool_count(config) \
             if pending_interrupt else 0
         if pending_interrupt:
@@ -314,24 +272,39 @@ class GraphRunner:
         final: dict[str, Any] = {}
         interrupted_question: Optional[str] = None
 
-        for chunk in self.graph.stream(
-                payload, config=config, stream_mode=["updates", "values"]):
-            stream_type, data = chunk
-            if stream_type == "updates" and isinstance(data, dict):
-                if "__interrupt__" in data:
-                    interrupted_question = extract_interrupt_question(data)
-                for event in translator.translate_chunk(data):
-                    yield event
-            elif stream_type == "values" and isinstance(data, dict):
-                final = data
+        try:
+            for chunk in self.graph.stream(
+                    payload, config=config, stream_mode=["updates", "values"]):
+                stream_type, data = chunk
+                if stream_type == "updates" and isinstance(data, dict):
+                    if "__interrupt__" in data:
+                        interrupted_question = extract_interrupt_question(data)
+                    for event in translator.translate_chunk(data):
+                        yield event
+                elif stream_type == "values" and isinstance(data, dict):
+                    final = data
+        except GraphRecursionError:
+            # Budget de supersteps épuisé : dégradation annoncée, jamais une
+            # trace interne brute ni un tour sans « done ».
+            for event in translator.flush():
+                yield event
+            yield {"type": "token",
+                   "content": ("La recherche n'a pas convergé dans le budget "
+                               "d'étapes alloué. Reformulez la question ou "
+                               "précisez la province concernée.")}
+            yield {"type": "done", "accepted": False,
+                   "stop_reason": "recursion_limit_reached",
+                   "thread_id": thread_id}
+            return
         # Rien ne doit rester en attente si le graphe s'est arrêté avant un
         # nœud terminal connu.
         for event in translator.flush():
             yield event
 
         if interrupted_question is not None:
-            # clarification déjà émise par le traducteur
-            yield {"type": "done", "accepted": True,
+            # clarification déjà émise par le traducteur; le tour n'est PAS
+            # une réponse acceptée, seulement une question en attente.
+            yield {"type": "done", "accepted": False,
                    "pending_clarification": True, "thread_id": thread_id}
             return
 
@@ -346,7 +319,24 @@ class GraphRunner:
 
         for start in range(0, len(answer), 20):
             yield {"type": "token", "content": answer[start:start + 20]}
-        yield {"type": "done", "accepted": True, "thread_id": thread_id}
+        yield {"type": "done", "accepted": self._accepted(final),
+               "thread_id": thread_id}
+
+    @staticmethod
+    def _accepted(final: dict[str, Any]) -> bool:
+        """Verdict réel du tour — jamais « accepté » par défaut.
+
+        ``status != "rejected"`` ne dit rien de l'acceptation : une réponse
+        de repli (« je ne peux pas déterminer ») en sort aussi. Seul
+        ``acceptance_result`` fait foi, et une réponse vide n'est jamais
+        acceptée.
+        """
+        if not str(final.get("final_answer") or "").strip():
+            return False
+        acceptance = final.get("acceptance_result")
+        if acceptance is None:
+            return False
+        return bool(getattr(acceptance, "accepted", False))
 
     def run_live(self, query: str, *, thread_id: Optional[str] = None,
                  history: Optional[list[dict]] = None,
@@ -355,7 +345,11 @@ class GraphRunner:
         thread_id = thread_id or f"live-{uuid.uuid4().hex[:8]}"
         config = self._config(thread_id)
 
-        if self.has_pending_interrupt(thread_id):
+        pending_interrupt, stalled = self._interrupt_state(thread_id)
+        if stalled:
+            thread_id = f"live-{uuid.uuid4().hex[:8]}"
+            config = self._config(thread_id)
+        if pending_interrupt:
             payload: Any = Command(resume=query)
         else:
             payload = self.build_live_state(
@@ -363,7 +357,14 @@ class GraphRunner:
                 system_prompt=system_prompt,
                 prior_case_context=self._prior_case_context(config))
 
-        result = self.graph.invoke(payload, config=config)
+        try:
+            result = self.graph.invoke(payload, config=config)
+        except GraphRecursionError:
+            return LiveTurnResult(
+                thread_id=thread_id,
+                status="rejected",
+                final_state={"stop_reason": "recursion_limit_reached"},
+            )
         question = extract_interrupt_question(result)
         return LiveTurnResult(
             thread_id=thread_id,

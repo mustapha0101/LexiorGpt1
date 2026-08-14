@@ -89,6 +89,10 @@ class LexiorState(TypedDict, total=False):
     jurisdiction_verified: bool
     jurisdiction_basis: str
     jurisdiction_locked: bool
+    legal_regime: str             # "unknown" | "provincial" | "federal"
+    legal_regime_basis: str
+    legal_regime_verified: bool
+    employment_sector: str
 
     # ── Faits ────────────────────────────────────────────────────────────
     facts: dict[str, Any]
@@ -122,6 +126,9 @@ class LexiorState(TypedDict, total=False):
     last_tool_result_status: str   # SearchResultStatus
     last_tool_assessment: Optional[dict]
     reformulation_count: int
+    # Budget distinct de la reprise jurisprudentielle : le partager avec
+    # reformulation_count faisait consommer par l'un le budget de l'autre.
+    case_law_retry_count: int
     max_reformulations: int
 
     official_rule_retrieved: bool
@@ -201,6 +208,27 @@ class LexiorState(TypedDict, total=False):
     trajectory: Optional[dict]
     export_result: Optional[dict]
 
+    # ── Télémétrie d'exécution ───────────────────────────────────────────
+    # LangGraph IGNORE en silence toute clé retournée par un nœud qui n'est
+    # pas déclarée ici : elle ne paraît ni dans le flux « updates » ni dans
+    # l'état final. Ces canaux étaient écrits mais jamais lus, ce qui rendait
+    # muettes les familles d'événements correspondantes dans events.py.
+    # Toute nouvelle clé écrite par un nœud DOIT être ajoutée ici.
+    claim_events: list[dict[str, Any]]
+    claim_ledger_rebuilt: bool
+    failure_resolved: bool
+    answer_repair_started: bool
+    answer_repair_succeeded: bool
+    answer_repair_failed: bool
+    safe_fallback_built: bool
+    remedy_events: list[dict[str, Any]]
+    preflight_grounding_issues: list[dict[str, Any]]
+    open_grounding_failures_total: int
+    resolved_grounding_failures_total: int
+    clarification_unresolved: bool
+    node_failed: str
+    error_type: str
+
 
 # ── Fabrique ─────────────────────────────────────────────────────────────
 
@@ -258,6 +286,10 @@ def initial_state(
         "jurisdiction_verified": False,
         "jurisdiction_basis": "",
         "jurisdiction_locked": False,
+        "legal_regime": "unknown",
+        "legal_regime_basis": "",
+        "legal_regime_verified": False,
+        "employment_sector": "",
         "facts": dict(scenario.facts_provided),
         "missing_facts_before_search": list(
             scenario.facts_required_before_search),
@@ -295,6 +327,7 @@ def initial_state(
         "last_tool_result_status": "",
         "last_tool_assessment": None,
         "reformulation_count": 0,
+        "case_law_retry_count": 0,
         "max_reformulations": max_reformulations,
         "evidence_first_maximum_article_batches": 2,
         "official_rule_retrieved": False,
@@ -353,6 +386,23 @@ def initial_state(
         "generation_metadata": GenerationMetadata(),
         "trajectory": None,
         "export_result": None,
+        # Télémétrie d'exécution — remise à neutre à chaque tour, sinon un
+        # thread live conserverait les drapeaux du tour précédent.
+        "grounding_failures": [],
+        "claim_events": [],
+        "claim_ledger_rebuilt": False,
+        "failure_resolved": False,
+        "answer_repair_started": False,
+        "answer_repair_succeeded": False,
+        "answer_repair_failed": False,
+        "safe_fallback_built": False,
+        "remedy_events": [],
+        "preflight_grounding_issues": [],
+        "open_grounding_failures_total": 0,
+        "resolved_grounding_failures_total": 0,
+        "clarification_unresolved": False,
+        "node_failed": "",
+        "error_type": "",
     }
 
 
@@ -440,6 +490,9 @@ def to_research_state(state: LexiorState) -> ResearchState:
         step=state.get("step", 0),
         max_tool_calls=state.get("max_tool_calls", 4),
         jurisdiction_status=state.get("resolved_jurisdiction") or "unknown",
+        work_location=state.get("work_location", ""),
+        legal_regime=state.get("legal_regime", "unknown"),
+        employment_sector=state.get("employment_sector", ""),
         missing_critical_facts=state.get("missing_critical_facts", []),
         status=StateStatus(status),
         stop_reason=state.get("stop_reason") or None,

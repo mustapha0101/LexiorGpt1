@@ -40,11 +40,33 @@ def normalize_soquij_urls(text: str) -> str:
 SECRET_RE = re.compile(r"(?i)(?:bearer\s+|api[_-]?key[=:]\s*)[^\s,;]+")
 # Change la clé lorsque la politique de cache évolue. Les anciennes entrées
 # peuvent contenir des erreurs MCP persistées et ne doivent pas être relues.
-NORMALIZATION_VERSION = "mcp-normalize-1.3-no-failed-observations"
+NORMALIZATION_VERSION = "mcp-normalize-1.4-keyword-fallback-union"
 
 
 class MCPExecutionError(Exception):
     pass
+
+
+def keyword_fallback_queries(arguments: dict[str, Any]) -> list[str]:
+    """Transforme la recherche hybride en quelques requêtes lexicales utiles."""
+    legal_terms = str(arguments.get("legal_terms") or "").strip()
+    user_query = str(arguments.get("query") or "").strip()
+    candidates = [
+        part.strip() for part in re.split(r"[,;\n|]+", legal_terms)
+        if part.strip()
+    ]
+    if user_query:
+        candidates.append(user_query)
+    if not candidates and legal_terms:
+        candidates.append(legal_terms)
+    unique: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = " ".join(candidate.casefold().split())
+        if key and key not in seen:
+            unique.append(candidate[:300])
+            seen.add(key)
+    return unique[:4]
 
 
 def safe_error_text(error: Exception) -> str:
@@ -175,6 +197,31 @@ class MockMCPTransport:
         return value
 
 
+def _streamable_http_context(url: str, timeout: float):
+    """Ouvre un transport Streamable HTTP, quel que soit le nom du SDK.
+
+    ``mcp`` a renommé ``streamablehttp_client`` en ``streamable_http_client``
+    (2.0). Importer l'ancien nom levait ``ImportError`` à CHAQUE appel :
+    le serveur a2aj — droit fédéral et jurisprudence canadienne — était
+    donc injoignable en silence, et la démo se réduisait au CCQ.
+    """
+    import mcp.client.streamable_http as transport_module
+
+    factory = getattr(transport_module, "streamable_http_client", None)
+    if factory is None:
+        factory = getattr(transport_module, "streamablehttp_client", None)
+    if factory is None:  # pragma: no cover - SDK incompatible
+        raise MCPExecutionError(
+            "le SDK mcp installé n'expose aucun client Streamable HTTP "
+            "(ni streamable_http_client ni streamablehttp_client)")
+    try:
+        return factory(url, timeout=timeout)
+    except TypeError:
+        # 2.x ne prend plus « timeout » : le plafond est appliqué par les
+        # asyncio.wait_for qui entourent initialize()/call_tool().
+        return factory(url)
+
+
 class RealMCPTransport:
     """Client MCP standard pour serveurs SSE et Streamable HTTP."""
 
@@ -208,9 +255,8 @@ class RealMCPTransport:
             from mcp.client.sse import sse_client
             read, write = await stack.enter_async_context(sse_client(url=url, timeout=self.timeout))
         elif server_type in {"streamable-http", "streamablehttp", "http"}:
-            from mcp.client.streamable_http import streamablehttp_client
             streams = await stack.enter_async_context(
-                streamablehttp_client(url=url, timeout=self.timeout))
+                _streamable_http_context(url, self.timeout))
             read, write = streams[0], streams[1]
         else:
             raise MCPExecutionError(
@@ -300,10 +346,38 @@ class MCPExecutor:
                     raw = await asyncio.wait_for(
                         self.transport.call(spec.server, call.name, call.arguments), self.timeout)
                 elif self.catalog.is_local(call.name):
-                    if self.rag is None:
-                        raise MCPExecutionError(
-                            f"index RAG non initialisé pour {call.name}")
-                    raw = self.rag.call(call.name, call.arguments)
+                    if self.rag is not None:
+                        raw = self.rag.call(call.name, call.arguments)
+                    else:
+                        fallback_name = {
+                            "semantic_search_ccq": "search_ccq_keywords",
+                            "semantic_search_cpc": "search_cpc_keywords",
+                        }.get(call.name)
+                        if not fallback_name or fallback_name not in self.catalog.tools:
+                            raise MCPExecutionError(
+                                f"index RAG non initialisé pour {call.name}")
+                        fallback_spec = self.catalog.tools[fallback_name]
+                        keywords = keyword_fallback_queries(call.arguments)
+                        if not keywords:
+                            raise MCPExecutionError(
+                                f"requête vide pour le fallback de {call.name}")
+                        server_entry = self.catalog.servers.get(
+                            fallback_spec.server, {}
+                        )
+                        fallback_results = []
+                        for keyword in keywords:
+                            fallback_results.append(await self.transport.call(
+                                server_entry.get("observedAs", ""),
+                                fallback_spec.server,
+                                fallback_name,
+                                {"keyword": keyword},
+                            ))
+                        raw = {
+                            "fallback": fallback_name,
+                            "queries": keywords,
+                            "results": [_jsonable(item)
+                                        for item in fallback_results],
+                        }
                 else:
                     server_entry = self.catalog.servers.get(spec.server, {})
                     raw = await self.transport.call(server_entry.get("observedAs", ""), spec.server,

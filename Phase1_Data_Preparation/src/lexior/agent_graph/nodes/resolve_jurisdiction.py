@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from lexior.services.jurisdiction import JurisdictionResolution
+from lexior.services.jurisdiction import detect_legal_regime_hint
 from lexior.services.modes import is_live
 
 from ..context import GraphContext
@@ -60,6 +61,29 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         updates["case_context"] = context
         if resolution.basis == "explicit_user_statement":
             updates["work_location"] = resolution.value
+        regime_messages = list(state.get("messages", []))
+        if state.get("active_task_reset"):
+            regime_messages = [
+                message for message in reversed(regime_messages)
+                if getattr(message.role, "value", message.role) == "user"
+            ][:1]
+        regime, sector = detect_legal_regime_hint(regime_messages)
+        if regime:
+            updates.update({
+                "legal_regime": regime,
+                "legal_regime_basis": "explicit_user_statement",
+                "legal_regime_verified": True,
+                "substantive_law": regime,
+            })
+            context.update({
+                "legal_regime": regime,
+                "legal_regime_basis": "explicit_user_statement",
+                "legal_regime_verified": True,
+            })
+        if sector:
+            updates["employment_sector"] = sector
+            context["employment_sector"] = sector
+        updates["case_context"] = context
         return updates
 
     resolution = service.resolve_dataset(state["scenario"], "", previous)

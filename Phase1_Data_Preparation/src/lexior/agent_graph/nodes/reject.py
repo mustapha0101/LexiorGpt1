@@ -58,7 +58,17 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         trajectory=(trajectory.model_dump(mode="json")
                     if trajectory else None),
     )
-    ctx.services.export.export_rejected(rejection)
+    # L'export des rejets appartient au pipeline dataset; la démo live n'en
+    # embarque pas. « reject » est la sortie de secours du graphe : elle ne
+    # doit jamais échouer parce qu'un service optionnel est absent.
+    export = getattr(ctx.services, "export", None)
+    exported = False
+    if export is not None:
+        try:
+            export.export_rejected(rejection)
+            exported = getattr(export, "storage", None) is not None
+        except Exception:  # noqa: BLE001 — un rejet doit toujours aboutir
+            exported = False
 
     repair = state.get("repair", RepairReport())
     detail = state.get("rejection_detail") or RejectionDetail(
@@ -72,7 +82,10 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     # Un rejet en live passe par ici, pas par return_live_answer : sans cette
     # ligne, l'enregistrement perdrait précisément les échecs.
     if state.get("mode") == "live":
-        enregistrer_tour(state, ctx.config, "rejected")
+        try:
+            enregistrer_tour(state, ctx.config, "rejected")
+        except Exception:  # noqa: BLE001 — journal best-effort
+            pass
 
     return {
         "status": "rejected",
@@ -80,7 +93,6 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "rejection_detail": detail,
         "trajectory": (trajectory.model_dump(mode="json")
                        if trajectory else state.get("trajectory")),
-        "export_result": {"exported": ctx.services.export.storage
-                          is not None,
+        "export_result": {"exported": exported,
                           "rejection": rejection.model_dump(mode="json")},
     }

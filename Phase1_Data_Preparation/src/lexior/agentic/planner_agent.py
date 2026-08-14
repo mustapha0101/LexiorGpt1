@@ -1235,6 +1235,10 @@ class PlannerAgent:
             raise RuntimeError("client Teacher requis hors mode offline")
         visible = {
             "user_query": state.scenario.user_query,
+            "work_location": state.work_location,
+            "jurisdiction_status": state.jurisdiction_status,
+            "legal_regime": state.legal_regime,
+            "employment_sector": state.employment_sector,
             "messages": [m.model_dump(mode="json") for m in state.messages],
             "clarification_already_answered": any(
                 state.messages[index].role.value == "assistant" and

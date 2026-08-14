@@ -30,6 +30,10 @@ from lexior.agentic.schemas import (
     sha256_text,
 )
 
+from lexior.agentic.citations import extract_article_citations
+
+from .text_folding import fold_text
+
 
 _REGULATION_RE = re.compile(
     r"[^.\n]{0,120}\b(?:prescrit|prévu|prevu|selon|déterminé|determine|"
@@ -64,8 +68,9 @@ _GENERIC_FACT_IDS = (
 
 
 def _fold(value: Any) -> str:
-    text = unicodedata.normalize("NFKD", str(value or ""))
-    return "".join(c for c in text if not unicodedata.combining(c)).casefold()
+    # Repliement partagé : replie AUSSI l'apostrophe typographique, que le
+    # corpus officiel emploie exclusivement (cf. services.text_folding).
+    return fold_text(value, collapse_whitespace=False)
 
 
 def _tokens(value: Any) -> set[str]:
@@ -81,25 +86,47 @@ def source_id(tool_name: str, article_number: str) -> str:
     return f"{prefix}:{article_number}"
 
 
+_ARTICLE_BLOCK_HEADER_RE = re.compile(
+    r"^[ \t]*Article\s+(\d{1,4}(?:\.\d+)?)\b", re.I | re.M)
+
+
 def retrieved_articles(observations: Iterable[ToolObservation]) -> dict[str, tuple[str, str, int]]:
-    """Return source_id -> (exact article text, label, observation index)."""
+    """Return source_id -> (exact article text, label, observation index).
+
+    Un article n'est « récupéré » que s'il possède SON PROPRE bloc, repéré
+    par son en-tête. Auparavant, tout numéro cité dans le corps d'un
+    article — un renvoi du type « les articles 1457 et 1458 s'appliquent »
+    — était enregistré comme source, et le texte associé était la réponse
+    ENTIÈRE de l'outil faute de bloc correspondant. Le vérificateur
+    attribuait alors le texte d'un article à un autre numéro, et une
+    affirmation fausse passait le contrôle.
+    """
     result: dict[str, tuple[str, str, int]] = {}
     for index, observation in enumerate(observations):
         if observation.tool_name not in {"get_ccq_articles", "get_cpc_articles"} or not observation.ok:
             continue
         text = observation.normalized_response or ""
-        numbers = list(dict.fromkeys(_ARTICLE_RE.findall(text)))
-        if not numbers and isinstance(observation.arguments, dict):
-            numbers = [str(raw) for raw in observation.arguments.get("articles", [])]
-        blocks = re.split(r"(?=^\s*Article\s+\d)", text, flags=re.I | re.M)
-        for number in numbers:
-            match = next(
-                (block for block in blocks if re.search(
-                    rf"^\s*Article\s+{re.escape(number)}\b", block, re.I | re.M)),
-                text,
-            )
+        headers = list(_ARTICLE_BLOCK_HEADER_RE.finditer(text))
+        for position, header in enumerate(headers):
+            number = header.group(1)
+            end = (headers[position + 1].start()
+                   if position + 1 < len(headers) else len(text))
+            block = text[header.start():end].strip()
+            if not block:
+                continue
             result[source_id(observation.tool_name, number)] = (
-                match.strip(), number, index)
+                block, number, index)
+        if headers:
+            continue
+        # Aucune en-tête : réponse mono-article. Le numéro fait alors foi
+        # s'il a été DEMANDÉ — jamais s'il est seulement mentionné.
+        requested = []
+        if isinstance(observation.arguments, dict):
+            requested = [str(raw) for raw in
+                         observation.arguments.get("articles", []) or []]
+        if len(requested) == 1 and text.strip():
+            result[source_id(observation.tool_name, requested[0])] = (
+                text.strip(), requested[0], index)
     return result
 
 
@@ -182,15 +209,10 @@ def _source_bounded_contract_for_source(
     if clauses:
         # These are source excerpts, not inferred legal categories.
         subject.append(_element(sid, clauses[0], "subject", 0))
-    conditional_facts = [
-        RuleFact(
-            fact_id=f"conditional_{index}", description=item.description,
-            source_ids=[sid], supporting_passages=item.supporting_passages,
-            branches=[f"Si cette proposition s'applique : {item.description}"],
-            status="conditional",
-        )
-        for index, item in enumerate([*triggers, *conditions])
-    ]
+    # Les clauses conditionnelles restent des RuleElement. Elles ne deviennent
+    # des faits à demander que si la revue source-bornée identifie précisément
+    # un fait utilisateur absent et le relie à un passage de l'article.
+    conditional_facts: list[RuleFact] = []
     supporting_facts = [RuleFact(
         fact_id=f"supporting_{index}",
         description="Conserver les éléments de preuve liés à la proposition source.",
@@ -323,8 +345,59 @@ def build_rule_contract(
         conditional_facts.extend(source_conditional)
         supporting_facts.extend(source_supporting)
         not_required.extend(source_not_required)
+        review = reviews.get(number, {})
+        for required in review.get("required_application_facts", []):
+            if not isinstance(required, dict):
+                continue
+            fact_id = str(required.get("id") or "").strip()
+            description = str(required.get("description") or "").strip()
+            question = str(required.get("question") or "").strip()
+            passage = str(required.get("passage_source") or "").strip()
+            if (not fact_id or not description or not passage
+                    or _fold(passage) not in _fold(text)):
+                continue
+            raw_value = facts.get(fact_id)
+            if isinstance(raw_value, dict) and "value" in raw_value:
+                raw_value = raw_value.get("value")
+            if raw_value is True:
+                value_status = "known_true"
+            elif raw_value is False:
+                value_status = "known_false"
+            else:
+                value_status = "unknown"
+            fact = RuleFact(
+                fact_id=fact_id,
+                description=description,
+                source_ids=[sid],
+                supporting_passages=[passage],
+                branches=[
+                    f"Si {description}, applique la proposition soutenue par {sid}; "
+                    f"sinon, n'en déduis pas cette conséquence."
+                ],
+                status="conditional" if value_status == "unknown" else "supporting",
+                value_status=value_status,
+                question=question or f"Pouvez-vous préciser si {description}?",
+            )
+            (conditional_facts if value_status == "unknown"
+             else supporting_facts).append(fact)
     blocking_facts: list[RuleFact] = []
     facts_not_required = list(dict.fromkeys(not_required))
+    # Un même fait peut être soutenu par plusieurs sources. Conserver une seule
+    # question tout en réunissant sa provenance.
+    merged_conditional: dict[str, RuleFact] = {}
+    for fact in conditional_facts:
+        if fact.fact_id not in merged_conditional:
+            merged_conditional[fact.fact_id] = fact
+            continue
+        current = merged_conditional[fact.fact_id]
+        current.source_ids = list(dict.fromkeys([*current.source_ids,
+                                                 *fact.source_ids]))
+        current.supporting_passages = list(dict.fromkeys([
+            *current.supporting_passages, *fact.supporting_passages]))
+        current.branches = list(dict.fromkeys([*current.branches,
+                                               *fact.branches]))
+    conditional_facts = list(merged_conditional.values())
+    decisive_facts = [fact.fact_id for fact in conditional_facts]
     branches = list(dict.fromkeys(
         branch for fact in conditional_facts for branch in fact.branches))
     summary = " ".join(item.description for item in elements[:3]).strip()
@@ -343,7 +416,7 @@ def build_rule_contract(
         blocking_facts=blocking_facts,
         conditional_facts=conditional_facts,
         supporting_facts=supporting_facts,
-        decisive_facts_needed=[],
+        decisive_facts_needed=decisive_facts,
         facts_not_required=facts_not_required,
         conditional_branches=branches,
         permitted_claims=[item.description for item in elements],
@@ -382,6 +455,18 @@ def validate_rule_contract(
                 for passage in element.supporting_passages:
                     if _fold(passage) not in _fold(source_texts[sid]):
                         errors.append(f"passage absent pour {element.id}: {sid}")
+    for fact in [*contract.blocking_facts, *contract.conditional_facts,
+                 *contract.supporting_facts]:
+        for sid in fact.source_ids:
+            if sid not in retrieved_source_ids:
+                errors.append(f"source absente pour le fait {fact.fact_id}: {sid}")
+            if sid in rejected:
+                errors.append(f"source rejetée pour le fait {fact.fact_id}: {sid}")
+            if source_texts and sid in source_texts:
+                for passage in fact.supporting_passages:
+                    if _fold(passage) not in _fold(source_texts[sid]):
+                        errors.append(
+                            f"passage absent pour le fait {fact.fact_id}: {sid}")
     return list(dict.fromkeys(errors))
 
 
@@ -742,9 +827,22 @@ def _build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
                     and not re.search(r"\b(?:prévoit|prevu|stipule|dispose|doit|peut|"
                                       r"est tenu|a droit|réparer|reparer)\b", text, re.I)):
                 continue
-            cited = set(_ARTICLE_RE.findall(text))
+            # Extraction PARTAGÉE : « les articles 1457 et 1465 » et « 1465
+            # C.c.Q. » doivent livrer TOUS leurs numéros. Un numéro non
+            # extrait n'était confronté à aucune source et l'affirmation
+            # partait comme vérifiée.
+            cited = set(extract_article_citations(text))
             source_ids = [sid for sid in allowed
                           if not cited or sid.rsplit(":", 1)[-1] in cited]
+            # Numéro cité qui ne correspond à AUCUN texte officiel récupéré :
+            # la citation est inventée. La comparaison porte sur
+            # ``source_texts`` — TOUT ce qui a été récupéré et vérifié — et
+            # non sur ``allowed``, qui n'est que la sélection retenue pour le
+            # contrat de règle. Citer un article régulièrement récupéré mais
+            # hors sélection est légitime; le confondre avec une invention
+            # faisait échouer des réponses correctes.
+            fabriques = sorted(
+                cited - {sid.rsplit(":", 1)[-1] for sid in source_texts})
             claim_category = _remedy_claim_category(text)
             support_type = "unsupported"
             passage = None
@@ -792,6 +890,17 @@ def _build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
                     supporting_ids = [
                         str(first_evidence.get("source_id", ""))
                     ] if first_evidence.get("source_id") in source_texts else []
+            if fabriques:
+                # Un numéro absent du dossier ne peut JAMAIS être vérifié,
+                # quelle que soit la qualité du rapprochement obtenu sur les
+                # autres sources citées dans la même phrase.
+                support_type = "unsupported"
+                comparison = {
+                    "support_type": "unsupported",
+                    "reason": ("article(s) " + ", ".join(fabriques)
+                               + " cité(s) sans source récupérée correspondante"),
+                }
+                supporting_ids = []
             verified = support_type != "unsupported"
             claims.append(LegalClaim(
                 claim_id=f"claim-{index}", text=text,

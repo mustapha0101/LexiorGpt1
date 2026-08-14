@@ -10,7 +10,12 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
-from .citations import CASE_CITATION_RE, CASE_NAME_RE
+from .citations import (
+    CASE_CITATION_RE,
+    CASE_NAME_RE,
+    extract_article_citations,
+    mentions_article,
+)
 from .error_codes import BLOCKING_CODES, ErrorCode, extract_code, tag
 from .migration import canonical_request_type
 from .response_verifier import contains_generated_summary
@@ -495,9 +500,8 @@ def validate_trajectory(trajectory: TrainingTrajectory, catalog: ToolCatalog,
     evidence_text = "\n".join(
         o.normalized_response for o in source_observations
     ).casefold()
-    for article in ARTICLE_CITATION_RE.findall(final):
-        if not re.search(rf"\barticle\s+{re.escape(article)}\b",
-                         evidence_text, re.IGNORECASE):
+    for article in extract_article_citations(final):
+        if not mentions_article(evidence_text, article):
             errors.append(tag(ErrorCode.UNGROUNDED_ARTICLE, f"article {article} absent des réponses d'outils"))
 
     assistant_text = "\n".join(

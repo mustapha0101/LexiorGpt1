@@ -222,6 +222,39 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         if e.result_status not in ("usable", "exact_match", "truncated")
     ]
 
+    # Une source peut être pertinente pour expliquer la règle générale même
+    # si la revue ne permet pas encore une conclusion définitive. Dans ce cas,
+    # les articles conditionnels restent une preuve autorisée : la réponse
+    # doit être conditionnelle, pas transformée en « aucune preuve ».
+    raw_contract_for_mode = state.get("rule_contract") or {}
+    if hasattr(raw_contract_for_mode, "model_dump"):
+        raw_contract_for_mode = raw_contract_for_mode.model_dump(mode="json")
+    has_rule_elements = bool(raw_contract_for_mode.get("elements"))
+    if not articles_retenus and textes_officiels and has_rule_elements:
+        contract_numbers = {
+            str(source_id).rsplit(":", 1)[-1]
+            for source_id in raw_contract_for_mode.get("primary_source_ids", [])
+            if ":" in str(source_id)
+        }
+        articles_retenus = [
+            number for number in textes_officiels
+            if (number in contract_numbers
+                and number not in incompatibles_deterministes
+                and reviews_stored.get(number, {}).get("status") in {
+                    "applicable", "conditionally_applicable"})
+        ]
+        official_indices = [
+            index for index, observation in enumerate(tool_history)
+            if (observation.tool_name in {"get_ccq_articles", "get_cpc_articles"}
+                and any(number in articles_retenus for number in
+                        textes_recuperes([observation])))
+        ]
+        usable_idx = list(dict.fromkeys([*usable_idx, *official_indices]))
+        usable_tools = [
+            tool_history[i].tool_name for i in usable_idx
+            if 0 <= i < len(tool_history)
+        ]
+
     attempted_research = bool(tool_history)
     # ``usable_entries`` reste l'historique de classification; ``usable_idx``
     # est la liste effectivement autorisée dans le contrat, après le filtre
@@ -231,10 +264,28 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         state.get("request_type", "")
         in _SUBSTANTIVE_TYPES_NEEDING_EVIDENCE)
 
+    decisive_questions = [
+        {
+            "fact_id": str(fact.get("fact_id", "")),
+            "description": str(fact.get("description", "")),
+            "question": str(fact.get("question", "")),
+            "source_ids": list(fact.get("source_ids", [])),
+        }
+        for fact in raw_contract_for_mode.get("conditional_facts", [])
+        if isinstance(fact, dict)
+        and fact.get("value_status", "unknown") == "unknown"
+        and fact.get("question")
+    ]
+    has_application_gaps = bool(
+        state.get("request_type") == "case_analysis"
+        and (raw_contract_for_mode.get("decisive_facts_needed")
+             or decisive_questions))
+
     if not attempted_research:
         answer_mode = "direct"
     elif has_usable:
-        answer_mode = "grounded"
+        answer_mode = (
+            "grounded_conditional" if has_application_gaps else "grounded")
     elif needs_evidence:
         answer_mode = "no_evidence"
     else:
@@ -253,6 +304,12 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             "AUCUNE preuve utilisable n'a été récupérée : n'affirme "
             "aucune règle de fond; explique la limite de recherche et "
             "oriente vers les sources officielles (CanLII, SOQUIJ).")
+    elif answer_mode == "grounded_conditional":
+        directives.append(
+            "Les sources officielles sont suffisantes pour exposer la règle "
+            "générale, mais certains faits d'application manquent. Réponds "
+            "par branches si/alors; ne présente pas une conclusion définitive "
+            "et termine par les questions factuelles décisives.")
     if filtre_articles_effectue:
         if articles_retenus:
             directives.append(
@@ -352,7 +409,8 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
 
     # Alternative sources directive.
     alternatives_for_contract = []
-    if alternative_entries and answer_mode in ("grounded", "no_evidence"):
+    if alternative_entries and answer_mode in (
+            "grounded", "grounded_conditional", "no_evidence"):
         for alt in alternative_entries:
             alternatives_for_contract.append({
                 "tool": alt.get("tool_name", ""),
@@ -374,6 +432,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "juridiction_etablie": (state.get("resolved_jurisdiction")
                                 or "unknown"),
         "juridiction_verrouillee": state.get("jurisdiction_locked", False),
+        "regime_juridique": state.get("legal_regime", "unknown"),
         "mode_de_reponse": answer_mode,
         "preuves_utilisables": usable_tools,
         # Indices, et non seulement noms d'outils : le rédacteur peut ainsi
@@ -400,6 +459,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "source_sufficiency_decision": sufficiency.model_dump(mode="json"),
         "authorized_source_ids": list(selected_source_ids),
         "conditional_branches": list(rule_contract.conditional_branches),
+        "questions_decisives": decisive_questions,
         "supporting_facts": [item.model_dump(mode="json")
                              for item in rule_contract.supporting_facts],
         "limitations": list(rule_contract.application_limits),

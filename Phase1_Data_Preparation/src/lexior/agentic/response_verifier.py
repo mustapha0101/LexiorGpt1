@@ -97,7 +97,14 @@ def strip_reader_directed(text: str) -> str:
         if not any(marker in line.casefold()
                    for marker in READER_DIRECTED_MARKERS)
     ]
-    return "\n".join(kept).strip()
+    cleaned = "\n".join(kept).strip()
+    if not cleaned:
+        # Un texte officiel peut légitimement contenir un marqueur sur
+        # CHACUNE de ses lignes — l'art. 513 C.p.c. disparaissait ainsi
+        # entièrement. Supprimer toute la source est toujours pire que
+        # laisser passer une formule d'adresse : on rend l'original.
+        return text
+    return cleaned
 
 
 # ---------------------------------------------------------------------------

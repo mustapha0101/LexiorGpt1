@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Le graphe central Lexior — UN StateGraph, deux modes.
+"""Le graphe central de la démonstration live Lexior.
 
 Topologie ::
 
@@ -18,8 +18,7 @@ Topologie ::
                      │           ├─ resolve_jurisdiction (reprise du cycle)
                      │           ├─ handle_clarification
                      │           └─ validate_final → compute_acceptance
-                     │                ├─ export_dataset     → END   (dataset)
-                     │                ├─ return_live_answer → END   (live)
+                     │                ├─ return_live_answer → END
                      │                ├─ repair_trajectory  → plan
                      │                └─ reject → END
                      └─ reject → END
@@ -57,7 +56,6 @@ _LINEAR_PREFIX = (
 # gardé afin qu'un Command(goto="reject") ne soit jamais concurrencé par une
 # arête statique après une exception.
 _STATIC_EDGES = (
-    ("export_dataset", END),
     ("return_live_answer", END),
     ("reject", END),
 )
@@ -99,18 +97,21 @@ def _wrap(node_name: str, fn, ctx: GraphContext):
             raise
         except Exception as exc:  # noqa: BLE001 — rejet contrôlé
             reason = f"{node_name}: {type(exc).__name__}: {exc}"
-            return Command(
-                update={
-                    "status": "rejected",
-                    "stop_reason": reason,
-                    "deterministic_blockers": [reason],
-                    "node_failed": node_name,
-                    "error_type": type(exc).__name__,
-                    "task_id": state.get("task_id", ""),
-                    "thread_id": state.get("thread_id", ""),
-                },
-                goto="reject",
-            )
+            update = {
+                "status": "rejected",
+                "stop_reason": reason,
+                "deterministic_blockers": [reason],
+                "node_failed": node_name,
+                "error_type": type(exc).__name__,
+                "task_id": state.get("task_id", ""),
+                "thread_id": state.get("thread_id", ""),
+            }
+            if node_name == "reject":
+                # « reject » EST la sortie de secours : la renvoyer vers
+                # elle-même bouclerait jusqu'à GraphRecursionError. Une
+                # arête statique la mène déjà à END.
+                return update
+            return Command(update=update, goto="reject")
 
     return _node
 
@@ -131,16 +132,19 @@ def build_graph(context: GraphContext, checkpointer=None):
         graph.add_node(module.NAME, _wrap(module.NAME, module.run, context))
 
     graph.set_entry_point(_LINEAR_PREFIX[0])
-    for upstream, downstream in zip(_LINEAR_PREFIX, _LINEAR_PREFIX[1:]):
-        # resolve_jurisdiction / analyze_facts sont aussi des cibles de
-        # boucle; les arêtes linéaires restent valides pour LangGraph.
-        graph.add_edge(upstream, downstream)
 
     for source, router in ROUTERS.items():
         graph.add_conditional_edges(source, router,
                                     dict(CONDITIONAL_ROUTES[source]))
 
-    for upstream, downstream in _GUARDED_STATIC_EDGES:
+    # Le préfixe linéaire passe par le MÊME routeur gardé que les autres
+    # transitions internes : une arête statique concurrencerait un
+    # Command(goto="reject") émis par _wrap et LangGraph lèverait
+    # InvalidUpdateError (deux valeurs pour une même clé au même pas).
+    # resolve_jurisdiction / analyze_facts restent des cibles de boucle.
+    for upstream, downstream in (
+            *zip(_LINEAR_PREFIX, _LINEAR_PREFIX[1:]),
+            *_GUARDED_STATIC_EDGES):
         graph.add_conditional_edges(
             upstream,
             lambda state, target=downstream: (

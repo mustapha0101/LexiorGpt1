@@ -64,6 +64,17 @@ export function ToolCallCard({ call }: Props) {
           </span>
         )}
 
+        {/* Observation revue après vérification : la version affichée n'est
+            pas celle qui a d'abord été reçue de l'outil. */}
+        {call.revised && (
+          <span
+            title="Résultat mis à jour après vérification de la source"
+            className="text-[11px] px-1.5 py-0.5 rounded shrink-0 bg-brand-50 text-brand-600 border border-brand-300"
+          >
+            vérifié
+          </span>
+        )}
+
         {/* Chevron */}
         <svg
           className={`w-4 h-4 ml-auto text-text-muted transition-transform ${expanded ? "rotate-180" : ""}`}

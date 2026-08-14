@@ -17,7 +17,6 @@ from . import (
     execute_tool,
     extract_rule_contract,
     derive_rule_specific_facts,
-    export_dataset,
     generate_answer,
     handle_clarification,
     initialize,
@@ -63,7 +62,6 @@ NODE_MODULES = (
     repair_trajectory,
     validate_final,
     compute_acceptance,
-    export_dataset,
     return_live_answer,
     reject,
 )

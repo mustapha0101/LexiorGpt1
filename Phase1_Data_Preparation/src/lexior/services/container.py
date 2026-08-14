@@ -1,9 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Conteneur des services Lexior + fabrique unique.
-
-Un seul jeu de services est construit par :func:`build_services` et
-partagé par les deux modes (dataset et live).
-"""
+"""Conteneur des services utilisés par la démonstration live."""
 
 from __future__ import annotations
 
@@ -17,7 +13,6 @@ from .answer_generation import AnswerGenerationService
 from .clarification import ClarificationService
 from .critics import CriticsService
 from .assertion_grounding import AssertionGroundingService
-from .dataset_export import DatasetExportService
 from .jurisdiction import JurisdictionService
 from .legal_research import LegalResearchService
 from .planner import PlannerService
@@ -43,8 +38,6 @@ class LexiorServices:
     critics: CriticsService
     validation: ValidationService
     repair: RepairService
-    export: DatasetExportService = field(
-        default_factory=DatasetExportService)
     assertion_grounding: AssertionGroundingService = field(
         default_factory=AssertionGroundingService)
 
@@ -56,7 +49,6 @@ def build_services(
     executor: Any,
     teacher=None,
     critic_client=None,
-    storage=None,
 ) -> LexiorServices:
     """Construit LE jeu de services partagé par les deux modes.
 
@@ -105,5 +97,4 @@ def build_services(
             agentic_min_score=config.agentic_min_score,
             max_repairs=config.max_repairs,
         ),
-        export=DatasetExportService(storage),
     )

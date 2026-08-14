@@ -253,6 +253,9 @@ class DecisionTrace(BaseModel):
 class PlannerDecision(BaseModel):
     request_type: str = ""
     jurisdiction: str = ""
+    # La juridiction est le lieu (Québec, Ontario, etc.). Le régime indique
+    # séparément si la matière relève du droit provincial ou fédéral.
+    legal_regime: Literal["unknown", "provincial", "federal"] = "unknown"
     missing_critical_facts: list[str] = Field(default_factory=list)
     required_sources: list[str] = Field(default_factory=list)
     decision: Decision
@@ -265,6 +268,15 @@ class PlannerDecision(BaseModel):
     # s'ajoute à la question, ne la remplace jamais.
     legal_terms: str = ""
     thinking_text: str = ""
+    # Une clarification n'a pas toujours le même effet sur la recherche.
+    # La juridiction/le régime peut bloquer le choix des sources; un fait
+    # d'application doit normalement être traité par branches conditionnelles.
+    clarification_scope: Literal[
+        "none", "jurisdiction", "legal_regime", "application_fact"
+    ] = "none"
+    clarification_blocking: bool = False
+    answerable_conditionally: bool = True
+    clarification_fact_keys: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +381,8 @@ class RuleFact(BaseModel):
     supporting_passages: list[str] = Field(default_factory=list)
     branches: list[str] = Field(default_factory=list)
     status: Literal["blocking", "conditional", "supporting", "not_required"] = "supporting"
+    value_status: Literal["known_true", "known_false", "unknown"] = "unknown"
+    question: str = ""
 
 
 class ClarificationDecision(BaseModel):
@@ -526,6 +540,9 @@ class ResearchState(BaseModel):
     step: int = Field(default=0, ge=0)
     max_tool_calls: int = Field(default=4, ge=0)
     jurisdiction_status: str = "unknown"
+    work_location: str = ""
+    legal_regime: Literal["unknown", "provincial", "federal"] = "unknown"
+    employment_sector: str = ""
     missing_critical_facts: list[str] = Field(default_factory=list)
     status: StateStatus = StateStatus.planning
     stop_reason: Optional[str] = None

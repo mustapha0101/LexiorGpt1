@@ -145,30 +145,6 @@ paths:
   data_root: data/agentic
   catalog: ../docs/mcp_tools_catalog.json
   mcp_config: ../.mcp.json
-  # Enregistrement des sessions de chat. VIDE = DÉSACTIVÉ.
-  # Renseigner un chemin active l'écriture d'un JSONL par session, hors du
-  # corpus de trajectoires. Variable d'environnement équivalente et
-  # prioritaire : LEXIOR_CHAT_SESSIONS_DIR.
-  # Activé ici plutôt que dans l'environnement : un redémarrage de l'API
-  # désactiverait l'enregistrement en silence, et on poserait des questions
-  # sans rien garder sans s'en apercevoir.
-  chat_sessions: "data/chat_sessions"
-
-split:
-  train: 0.90
-  validation: 0.05
-  test: 0.05
-  # Dimensions reellement consommees par publisher.leakage_groups.
-  # fact_template et question_family ont ete retirees : aucun champ du
-  # schema ne les porte, une cle inconnue leve desormais une erreur.
-  group_by:
-    - scenario_family_id
-    - source_id
-    - citations
-    - primary_article
-  separate_agentic_evaluation: true
-  # Part reservee a l'evaluation, par familles entieres de scenarios.
-  agentic_eval: 0.05
-
-hf:
-  dataset_repo_id: intelliwork/agentic_cot_data
+  # La démo affiche déjà les événements dans l'interface; aucun journal de
+  # conversation n'est écrit sur disque.
+  chat_sessions: ""

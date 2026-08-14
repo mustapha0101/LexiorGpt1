@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReactElement } from "react";
-import type { AgentLogEntry, AppView, RawSSELine } from "../types";
+import type { AgentLogEntry, RawSSELine } from "../types";
 
 interface Props {
-  currentView: AppView;
-  onNavigate: (view: AppView) => void;
   agentLog: AgentLogEntry[];
   rawEvents: RawSSELine[];
   streaming: boolean;
@@ -75,24 +72,6 @@ function ChatIcon() {
   );
 }
 
-function DashboardIcon() {
-  return (
-    <svg
-      className="w-5 h-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      viewBox="0 0 24 24"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"
-      />
-    </svg>
-  );
-}
-
 const NODE_COLORS: Record<string, string> = {
   initialize: "bg-slate-400",
   classify_request: "bg-sky-400",
@@ -136,14 +115,7 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-const navItems: { view: AppView; label: string; Icon: () => ReactElement }[] = [
-  { view: "chat", label: "Chat", Icon: ChatIcon },
-  { view: "dashboard", label: "Dashboard", Icon: DashboardIcon },
-];
-
 export function Sidebar({
-  currentView,
-  onNavigate,
   agentLog,
   rawEvents,
   streaming,
@@ -171,27 +143,10 @@ export function Sidebar({
 
       {/* Navigation */}
       <nav className="p-3 space-y-1">
-        {navItems.map(({ view, label, Icon }) => {
-          const active = currentView === view;
-          return (
-            <button
-              key={view}
-              onClick={() => onNavigate(view)}
-              className={`
-                w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
-                transition-colors duration-150 cursor-pointer
-                ${
-                  active
-                    ? "bg-brand-600 text-white"
-                    : "text-text-secondary hover:bg-surface-raised hover:text-text-primary"
-                }
-              `}
-            >
-              <Icon />
-              {label}
-            </button>
-          );
-        })}
+        <div className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium bg-brand-600 text-white">
+          <ChatIcon />
+          Chat live
+        </div>
       </nav>
 
       {/* Agent Activity Log */}

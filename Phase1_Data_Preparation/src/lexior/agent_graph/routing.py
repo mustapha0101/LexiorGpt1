@@ -134,12 +134,7 @@ def route_after_acceptance(state: LexiorState) -> str:
     acceptance = state.get("acceptance_result")
     accepted = bool(acceptance and acceptance.accepted)
     if accepted:
-        return "return_live_answer" if _is_live(state) else "export_dataset"
-    # Rejet réparable : un premier pas invalide identifié + budget restant.
-    if (state.get("first_invalid_step") is not None
-            and state.get("repair_count", 0) < state.get("max_repairs", 1)
-            and not _is_live(state)):
-        return "repair_trajectory"
+        return "return_live_answer"
     return "reject"
 
 
@@ -185,9 +180,7 @@ CONDITIONAL_ROUTES: dict[str, dict[str, str]] = {
         "reject": "reject",
     },
     "compute_acceptance": {
-        "export_dataset": "export_dataset",
         "return_live_answer": "return_live_answer",
-        "repair_trajectory": "repair_trajectory",
         "reject": "reject",
     },
 }

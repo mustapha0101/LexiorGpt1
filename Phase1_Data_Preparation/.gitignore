@@ -32,6 +32,8 @@ outputs/
 runs/
 checkpoints/
 generated_data/
+data/chat_sessions/
+data/evaluations/
 
 # IDE
 .idea/

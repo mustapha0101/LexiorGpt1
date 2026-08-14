@@ -1,20 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { UseChatReturn } from "../hooks/useChat";
-import type { HumanEvaluationReturn } from "../hooks/useHumanEvaluation";
 import { CHAT_MODEL_OPTIONS, type ChatMessage, type ChatModelId } from "../types";
 import { AgentProgress } from "./AgentProgress";
 import { MessageBubble } from "./MessageBubble";
 import { InputBar } from "./InputBar";
-import { HumanEvaluationPanel } from "./HumanEvaluationPanel";
 
 interface Props {
   chat: UseChatReturn;
-  evaluation: HumanEvaluationReturn;
-  onStartScenario: (scenarioId: number) => Promise<void>;
-  onEvaluationLoaded: (run: HumanEvaluationReturn["run"]) => void;
 }
 
-export function Chat({ chat, evaluation, onStartScenario, onEvaluationLoaded }: Props) {
+export function Chat({ chat }: Props) {
   const {
     messages,
     streaming,
@@ -69,22 +64,6 @@ export function Chat({ chat, evaluation, onStartScenario, onEvaluationLoaded }: 
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={evaluation.mode}
-            onChange={(event) => {
-              const next = event.target.value as "normal" | "human_40";
-              evaluation.setMode(next);
-              if (next === "normal") {
-                chat.setEvaluationContext(null);
-                chat.clearMessages();
-              }
-            }}
-            title="Mode de conversation"
-            className="text-xs bg-surface-raised border border-border rounded-lg px-2.5 py-1.5 text-text-secondary cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-          >
-            <option value="normal">Mode normal</option>
-            <option value="human_40">Mode évaluation — 40 situations</option>
-          </select>
           <select
             value={model}
             onChange={(e) => setModel(e.target.value as ChatModelId)}
@@ -152,20 +131,12 @@ export function Chat({ chat, evaluation, onStartScenario, onEvaluationLoaded }: 
           )}
         </div>
 
-        {evaluation.mode === "human_40" && (
-          <HumanEvaluationPanel
-            evaluation={evaluation}
-            canReview={chat.lastDone && !chat.lastDonePendingClarification && !streaming}
-            onStartScenario={onStartScenario}
-            onEvaluationLoaded={onEvaluationLoaded}
-          />
-        )}
       </div>
 
       {/* Input */}
       <InputBar
         onSend={sendMessage}
-        disabled={evaluation.mode === "human_40" && !evaluation.currentScenario}
+        disabled={false}
         streaming={streaming}
         onCancel={cancelStream}
       />
