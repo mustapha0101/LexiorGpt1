@@ -8,6 +8,9 @@ generation:
   max_clarifications_live: 2
   max_search_reformulations_live: 1
   max_planner_decisions_live: 12
+  # Sous ce seuil, le système demande ce que l'utilisateur souhaite au lieu
+  # de déclencher une recherche juridique sur une classification incertaine.
+  classification_min_confidence: 0.65
   # Les articles issus de la recherche sont lus en lots : on commence assez
   # large pour vérifier plusieurs hypothèses, puis on élargit seulement si la
   # revue ne trouve aucune règle utilisable. Aucun numéro d'article n'est
@@ -21,7 +24,7 @@ generation:
   # pouvoir conserver intégralement leurs textes officiels pour les vérifier.
   max_tool_response_chars: 14000
   near_duplicate_jaccard: 0.90
-  prompt_version: agentic-4.0-intermediate
+  prompt_version: agentic-4.1-semantic-routing
   max_search_reformulations: 1
   max_thinking_words: 45
   failure_injection_rate: 0.07

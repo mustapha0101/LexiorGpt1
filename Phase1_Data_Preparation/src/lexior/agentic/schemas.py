@@ -72,6 +72,27 @@ class RequestType(str, Enum):
     non_legal = "non_legal"
 
 
+class RequestIntent(str, Enum):
+    """Nature sémantique du dernier message utilisateur."""
+
+    legal = "legal"
+    non_legal = "non_legal"
+    greeting = "greeting"
+    ambiguous = "ambiguous"
+
+
+class RequestClassification(BaseModel):
+    """Description structurée de la demande avant toute politique."""
+
+    intent: RequestIntent = RequestIntent.ambiguous
+    request_type: str = "unknown"
+    legal_domain: str = "unknown"
+    jurisdiction_material: bool = False
+    employment_regime_material: bool = False
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reason: str = ""
+
+
 class ClarificationStage(str, Enum):
     none = "none"
     before_search = "before_search"
@@ -272,7 +293,8 @@ class PlannerDecision(BaseModel):
     # La juridiction/le régime peut bloquer le choix des sources; un fait
     # d'application doit normalement être traité par branches conditionnelles.
     clarification_scope: Literal[
-        "none", "jurisdiction", "legal_regime", "application_fact"
+        "none", "request_intent", "jurisdiction", "legal_regime",
+        "application_fact"
     ] = "none"
     clarification_blocking: bool = False
     answerable_conditionally: bool = True
@@ -410,6 +432,7 @@ class RuleContract(BaseModel):
     rule_type: str = ""
     rule_summary: str = ""
     primary_source_ids: list[str] = Field(default_factory=list)
+    secondary_source_ids: list[str] = Field(default_factory=list)
     elements: list[RuleElement] = Field(default_factory=list)
     supported_exceptions: list[RuleElement] = Field(default_factory=list)
     subject: list[RuleElement] = Field(default_factory=list)
@@ -450,6 +473,11 @@ class RemedyIntent(BaseModel):
 class SourceSufficiencyDecision(BaseModel):
     task_id: str = ""
     sufficient_for_initial_answer: bool = False
+    application_mode: Literal[
+        "direct_application",
+        "conditional_application",
+        "insufficient_legal_evidence",
+    ] = "insufficient_legal_evidence"
     legislation_status: Literal["required", "sufficient", "missing", "not_needed"] = "missing"
     regulation_status: Literal["required", "conditionally_required", "sufficient", "missing", "not_needed"] = "not_needed"
     jurisprudence_status: Literal["required", "conditionally_required", "sufficient", "missing", "not_needed"] = "not_needed"
@@ -543,6 +571,13 @@ class ResearchState(BaseModel):
     work_location: str = ""
     legal_regime: Literal["unknown", "provincial", "federal"] = "unknown"
     employment_sector: str = ""
+    request_intent: Literal[
+        "legal", "non_legal", "greeting", "ambiguous"
+    ] = "ambiguous"
+    legal_domain: str = "unknown"
+    jurisdiction_material: bool = False
+    employment_regime_material: bool = False
+    classification_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     missing_critical_facts: list[str] = Field(default_factory=list)
     status: StateStatus = StateStatus.planning
     stop_reason: Optional[str] = None

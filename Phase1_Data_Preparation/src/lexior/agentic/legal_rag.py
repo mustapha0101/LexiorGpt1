@@ -31,7 +31,7 @@ CODE_NAMES = {
     "CCQ": "Code civil du Québec",
     "CPC": "Code de procédure civile du Québec",
 }
-RETRIEVAL_VERSION = "legal-rag-1.9-wide-reviewed-diverse-rerank"
+RETRIEVAL_VERSION = "legal-rag-2.0-stable-hybrid-rerank"
 
 # Saturation BM25 pour ramener un score lexical non borné dans [0, 1[. Seule
 # la forme de la courbe compte : les planchers sont calibrés après coup sur
@@ -158,6 +158,21 @@ def _normalize_rows(matrix: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return matrix / norms
+
+
+def _stable_descending(scores: np.ndarray,
+                       tie_breaker: np.ndarray | None = None) -> np.ndarray:
+    """Classe les scores décroissants avec un départage reproductible.
+
+    ``numpy.argsort`` utilise un tri non stable par défaut. Deux articles au
+    même score pouvaient donc changer d'ordre selon la plateforme ou une
+    reconstruction de l'index. Le rang du document dans le corpus sert ici de
+    clé secondaire explicite.
+    """
+    values = np.asarray(scores, dtype=np.float64)
+    ties = (np.arange(len(values), dtype=np.int64)
+            if tie_breaker is None else np.asarray(tie_breaker, dtype=np.int64))
+    return np.lexsort((ties, -values))
 
 
 def _article_number(label: str) -> str:
@@ -830,8 +845,8 @@ class LegalRAG:
         for autre in lexical_par_formulation[1:]:
             lexical = np.maximum(lexical, autre)
         candidate_k = min(max(self.cfg.candidate_k, 1), len(indices))
-        dense_positions = np.argsort(-dense)[:candidate_k]
-        lexical_positions = np.argsort(-lexical)[:candidate_k]
+        dense_positions = _stable_descending(dense)[:candidate_k]
+        lexical_positions = _stable_descending(lexical)[:candidate_k]
         candidate_positions = np.asarray(
             list(dict.fromkeys([*dense_positions.tolist(), *lexical_positions.tolist()])),
             dtype=np.int64,
@@ -853,7 +868,7 @@ class LegalRAG:
         lexical_normalized = self._minmax(lexical[candidate_positions])
         weight = min(max(float(self.cfg.dense_weight), 0.0), 1.0)
         reranked = weight * dense_normalized + (1.0 - weight) * lexical_normalized
-        order = np.argsort(-reranked)
+        order = _stable_descending(reranked, candidate_positions)
         wanted = min(max(int(top_k or self.cfg.top_k), 1), len(order), 20)
 
         pre_rerank_count = min(
@@ -931,6 +946,12 @@ class LegalRAG:
         return {
             "text": text,
             "query": arguments.get("query", ""),
+            "query_fingerprint": hashlib.sha256(json.dumps({
+                "query": str(arguments.get("query") or "").strip(),
+                "legal_terms": str(arguments.get("legal_terms") or "").strip(),
+                "code": code,
+                "retrieval_version": RETRIEVAL_VERSION,
+            }, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16],
             "code": code,
             "results": results,
             "retrieval": (

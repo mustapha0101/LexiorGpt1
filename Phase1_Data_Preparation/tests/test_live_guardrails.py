@@ -15,7 +15,6 @@ import pathlib
 
 import pytest
 
-from lexior.agent_graph.nodes._common import is_clearly_non_legal, is_greeting
 from lexior.agent_graph.nodes.validate_plan import _distinct_legal_terms
 from lexior.agent_graph.state import LexiorState, initial_state
 from lexior.agentic.citations import (
@@ -33,37 +32,6 @@ SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "lexior"
 # « Quelle est la meilleure recette de poutine? » recevait
 # « Dans quelle province êtes-vous? » : en live, seul un salut menait à
 # non_legal, tout le reste héritant du défaut « case_analysis » du runner.
-
-@pytest.mark.parametrize("question", [
-    "Quelle est la meilleure recette de poutine?",
-    "Quel temps fait-il a Montreal aujourd'hui?",
-    "Traduis cette phrase en anglais",
-    "Qui a gagne le match de hockey hier?",
-    "Ecris-moi un code python pour trier une liste",
-])
-def test_hors_droit_est_detecte(question):
-    assert is_clearly_non_legal(question)
-
-
-@pytest.mark.parametrize("question", [
-    # Question de droit SANS vocabulaire juridique : le piège à éviter.
-    "Mon fils a casse la vitrine du depanneur",
-    "Mon voisin a un chien qui a mordu mon fils",
-    "Mon proprietaire veut augmenter mon loyer de 15%",
-    "Je viens d'etre congedie sans preavis",
-    "Que dit l'article 1457 CCQ?",
-    "J'ai achete une voiture avec un vice cache",
-    "Comment contester une contravention?",
-    "Le restaurant refuse de me rembourser mon repas immangeable",
-    "Mon vol a ete annule, ai-je droit a une indemnite?",
-])
-def test_question_juridique_jamais_ecartee(question):
-    assert not is_clearly_non_legal(question)
-
-
-def test_salutation_toujours_reconnue():
-    assert is_greeting("bonjour")
-
 
 # ── Repliement typographique ─────────────────────────────────────────────
 # Le corpus officiel compte 21 932 apostrophes U+2019 pour UNE ASCII, et

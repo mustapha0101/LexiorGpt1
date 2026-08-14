@@ -28,7 +28,13 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     latest = state.get("latest_user_message", "")
     previous_answer = last_assistant_content(messages)
 
-    is_follow_up = looks_like_follow_up(latest, bool(previous_answer))
+    resumed_clarification = bool(
+        state.get("last_clarification_category")
+        and str(state.get("clarification_answer") or "").strip()
+        == (latest or "").strip()
+    )
+    is_follow_up = resumed_clarification or looks_like_follow_up(
+        latest, bool(previous_answer))
     multi_turn = user_turn_count(messages) > 1
 
     return {

@@ -20,7 +20,6 @@ from typing import Any
 
 from lexior.agentic.taxonomy import REQUEST_TYPES
 from lexior.services.modes import is_live
-from lexior.services.jurisdiction import is_employment_text
 
 from ..context import GraphContext
 from ..state import LexiorState
@@ -63,21 +62,23 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             facts["juridiction"] = resolved
             missing_before_search = [
                 f for f in missing_before_search if f != _JURISDICTION_FACT]
-        elif (state.get("request_type") != "non_legal"
+        elif (state.get("request_intent") == "legal"
+                and state.get("jurisdiction_material", False)
                 and _JURISDICTION_FACT not in missing_before_search):
             missing_before_search.append(_JURISDICTION_FACT)
-        active_text = str(
-            state.get("latest_user_intent")
-            or state.get("latest_user_message")
-            or state.get("active_issue")
-            or state["scenario"].user_query
-        )
-        if (is_employment_text(active_text)
+        else:
+            missing_before_search = [
+                fact for fact in missing_before_search
+                if fact != _JURISDICTION_FACT
+            ]
+        if (state.get("request_intent") == "legal"
+                and state.get("employment_regime_material", False)
                 and state.get("legal_regime", "unknown") == "unknown"
                 and _LEGAL_REGIME_FACT not in missing_before_search):
             missing_before_search.append(_LEGAL_REGIME_FACT)
-        elif state.get("legal_regime", "unknown") != "unknown":
-            facts["legal_regime"] = state.get("legal_regime")
+        else:
+            if state.get("legal_regime", "unknown") != "unknown":
+                facts["legal_regime"] = state.get("legal_regime")
             missing_before_search = [
                 fact for fact in missing_before_search
                 if fact != _LEGAL_REGIME_FACT

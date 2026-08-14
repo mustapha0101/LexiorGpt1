@@ -1239,6 +1239,12 @@ class PlannerAgent:
             "jurisdiction_status": state.jurisdiction_status,
             "legal_regime": state.legal_regime,
             "employment_sector": state.employment_sector,
+            "request_intent": state.request_intent,
+            "request_type": state.scenario.request_type,
+            "legal_domain": state.legal_domain,
+            "jurisdiction_material": state.jurisdiction_material,
+            "employment_regime_material": state.employment_regime_material,
+            "classification_confidence": state.classification_confidence,
             "messages": [m.model_dump(mode="json") for m in state.messages],
             "clarification_already_answered": any(
                 state.messages[index].role.value == "assistant" and

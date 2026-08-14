@@ -70,6 +70,12 @@ class LexiorState(TypedDict, total=False):
 
     # ── Classification de la demande / suivi conversationnel ─────────────
     request_type: str
+    request_classification: dict[str, Any]
+    request_intent: str
+    legal_domain: str
+    jurisdiction_material: bool
+    employment_regime_material: bool
+    classification_confidence: float
     active_issue: str
     current_user_goal: str
     latest_user_intent: str
@@ -109,6 +115,7 @@ class LexiorState(TypedDict, total=False):
     prior_evidence: list[ToolObservation]
     article_reviews: dict[str, dict[str, Any]]
     clarification_history: list[dict[str, Any]]
+    last_clarification_category: str
 
     # ── Planification et exécution d'outils ──────────────────────────────
     latest_decision: Optional[dict]
@@ -269,6 +276,12 @@ def initial_state(
         "messages": messages,
         "latest_user_message": scenario.user_query or "",
         "request_type": scenario.request_type,
+        "request_classification": {},
+        "request_intent": "ambiguous",
+        "legal_domain": scenario.legal_domain or "unknown",
+        "jurisdiction_material": False,
+        "employment_regime_material": False,
+        "classification_confidence": 0.0,
         "active_issue": "",
         "current_user_goal": "",
         "latest_user_intent": "",
@@ -308,6 +321,7 @@ def initial_state(
         "prior_evidence": [],
         "article_reviews": {},
         "clarification_history": [],
+        "last_clarification_category": "",
         "latest_decision": None,
         "planner_feedback": "",
         "information_gap": "",
@@ -475,9 +489,14 @@ def to_research_state(state: LexiorState) -> ResearchState:
     # Le dossier enrichi sert au chat multi-tours. Les trajectoires dataset
     # doivent conserver exactement la question synthétique du scénario pour
     # leurs contrôles de cohérence et leur reproductibilité.
-    if (state.get("mode") == "live" and description
-            and description != scenario.user_query):
-        scenario = scenario.model_copy(update={"user_query": description})
+    if state.get("mode") == "live":
+        scenario_updates = {
+            "request_type": state.get("request_type", "unknown"),
+            "legal_domain": state.get("legal_domain", "unknown"),
+        }
+        if description and description != scenario.user_query:
+            scenario_updates["user_query"] = description
+        scenario = scenario.model_copy(update=scenario_updates)
     status = state.get("status", "planning")
     if status not in {s.value for s in StateStatus}:
         status = StateStatus.planning.value
@@ -493,6 +512,12 @@ def to_research_state(state: LexiorState) -> ResearchState:
         work_location=state.get("work_location", ""),
         legal_regime=state.get("legal_regime", "unknown"),
         employment_sector=state.get("employment_sector", ""),
+        request_intent=state.get("request_intent", "ambiguous"),
+        legal_domain=state.get("legal_domain", "unknown"),
+        jurisdiction_material=state.get("jurisdiction_material", False),
+        employment_regime_material=state.get(
+            "employment_regime_material", False),
+        classification_confidence=state.get("classification_confidence", 0.0),
         missing_critical_facts=state.get("missing_critical_facts", []),
         status=StateStatus(status),
         stop_reason=state.get("stop_reason") or None,
@@ -537,12 +562,16 @@ def to_quality_report(state: LexiorState) -> QualityReport:
 def to_trajectory(state: LexiorState) -> TrainingTrajectory:
     """Projette l'état du graphe vers la trajectoire d'entraînement."""
     scenario = state["scenario"]
+    request_type = (state.get("request_type", scenario.request_type)
+                    if state.get("mode") == "live" else scenario.request_type)
+    legal_domain = (state.get("legal_domain", scenario.legal_domain)
+                    if state.get("mode") == "live" else scenario.legal_domain)
     return TrainingTrajectory(
         scenario_id=scenario.scenario_id,
         scenario_family_id=scenario.scenario_family_id,
         language=scenario.language,
-        request_type=scenario.request_type,
-        legal_domain=scenario.legal_domain,
+        request_type=request_type,
+        legal_domain=legal_domain,
         expected_jurisdiction=scenario.expected_jurisdiction,
         resolved_jurisdiction=state.get("resolved_jurisdiction", ""),
         messages=state.get("messages", []),

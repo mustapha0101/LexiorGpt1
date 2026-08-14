@@ -196,6 +196,7 @@ class AgenticConfig:
     max_clarifications_live: int = 2
     max_search_reformulations_live: int = 1
     max_planner_decisions_live: int = 12
+    classification_min_confidence: float = 0.65
     # Recherche d'articles en lots progressifs. Ces bornes sont des
     # paramètres de coût/qualité, jamais des correspondances de droit.
     initial_article_fetch_k: int = 6
@@ -233,7 +234,7 @@ class AgenticConfig:
     rag: RAGConfig = field(default_factory=RAGConfig)
 
     # --- versions --------------------------------------------------------
-    prompt_version: str = "agentic-4.0-intermediate"
+    prompt_version: str = "agentic-4.1-semantic-routing"
 
     # --- distributions (spec sections 15-16) ----------------------------
     request_type_weights: dict[str, float] = field(default_factory=dict)
@@ -296,6 +297,7 @@ class AgenticConfig:
             "max_clarifications_live": self.max_clarifications_live,
             "max_search_reformulations_live": self.max_search_reformulations_live,
             "max_planner_decisions_live": self.max_planner_decisions_live,
+            "classification_min_confidence": self.classification_min_confidence,
             "initial_article_fetch_k": self.initial_article_fetch_k,
             "article_fetch_batch_size": self.article_fetch_batch_size,
             "max_articles_per_issue": self.max_articles_per_issue,
@@ -361,6 +363,9 @@ def load_config(config_path: Optional[str] = None,
         cfg.max_search_reformulations_live))
     cfg.max_planner_decisions_live = int(gen.get(
         "max_planner_decisions_live", cfg.max_planner_decisions_live))
+    cfg.classification_min_confidence = min(max(float(gen.get(
+        "classification_min_confidence",
+        cfg.classification_min_confidence)), 0.0), 1.0)
     cfg.max_tool_response_chars = int(gen.get("max_tool_response_chars",
                                               cfg.max_tool_response_chars))
     cfg.near_duplicate_jaccard = float(gen.get("near_duplicate_jaccard",

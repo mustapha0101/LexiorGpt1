@@ -9,9 +9,6 @@ from typing import Optional
 from lexior.agentic.schemas import Message
 from lexior.agentic.citations import find_case_citation
 
-_GREETING_RE = re.compile(
-    r"^\s*(bonjour|salut|allo|hello|hi|merci)\b[\s!.,]*$", re.I)
-
 _ARTICLE_REQUEST_RE = re.compile(
     r"(?:"
     r"\b(?:cite|donne|montre|reproduis|fournis)\b.*\barticles?\b"
@@ -43,46 +40,6 @@ _ANAPHORA_RE = re.compile(
     re.I,
 )
 
-# Tout signal juridique — même faible — désarme la détection « non
-# juridique ». La liste couvre le vocabulaire du droit ET celui des
-# situations qui l'appellent (préjudice, congédiement, bail…).
-_LEGAL_MARKER_RE = re.compile(
-    r"\b(droits?|loi|lois|l[ée]gal|l[ée]gale|juridique|juridiction|"
-    r"articles?|c\.?c\.?q|c\.?p\.?c|r[èe]glement|jurisprudence|"
-    # « code » seul désigne aussi du code informatique : il ne compte comme
-    # marqueur juridique qu'accompagné de son intitulé.
-    r"code\s+(?:civil|criminel|de\s+proc[ée]dure|du\s+travail|"
-    r"de\s+la\s+route|de\s+la\s+s[ée]curit[ée])|"
-    r"tribunal|cour|juge|avocat|notaire|proc[èe]s|poursuite|litige|"
-    r"recours|plainte|mise\s+en\s+demeure|assign|contrat|clause|bail|"
-    r"locataire|locateur|propri[ée]taire|loyer|[ée]viction|hypoth[èe]que|"
-    r"succession|testament|h[ée]ritage|divorce|s[ée]paration|garde|"
-    r"pension\s+alimentaire|cong[ée]di|licenci|employeur|employ[ée]|"
-    r"salaire|responsab|pr[ée]judice|dommages?|indemnit|faute|"
-    r"n[ée]glig|infraction|amende|contravention|police|arrest|criminel|"
-    r"assurance|garantie|vice\s+cach[ée]|consommateur|rembours|"
-    r"obligation|cr[ée]anc|dette|faillite|permis|licence|"
-    r"discrimination|harc[èe]l|vie\s+priv[ée]e|renseignements\s+personnels|"
-    r"refuse\s+de|a\s+droit|ai-?je\s+le\s+droit|annul)",
-    re.I,
-)
-
-# Sujets explicitement hors du droit. Ne déclenche RIEN à lui seul :
-# il faut aussi l'absence de tout marqueur juridique ci-dessus.
-_NON_LEGAL_TOPIC_RE = re.compile(
-    r"\b(recette|cuisin|ingr[ée]dient|dessert|"
-    r"m[ée]t[ée]o|quel\s+temps\s+fait|temps\s+qu'?il\s+fait|"
-    r"pluie|neige|temp[ée]rature|ensoleill|"
-    r"capitale\s+de|population\s+de|traduis|traduction|"
-    r"calcule?[- ]|combien\s+font|racine\s+carr[ée]e|"
-    r"blague|histoire\s+dr[ôo]le|chanson|film|s[ée]rie\s+t[ée]l|musique|"
-    r"hockey|soccer|football|match\s+de|[ée]quipe\s+de\s+(?:hockey|soccer)|"
-    r"code\s+(?:python|javascript|java|c\+\+|html|sql)|"
-    r"[ée]cris[- ]moi|programme?r\b|script\s+python|"
-    r"po[èe]me|voyage|itin[ée]raire)",
-    re.I,
-)
-
 
 def last_user_content(messages: list[Message]) -> str:
     for message in reversed(messages):
@@ -109,29 +66,6 @@ def user_turn_count(messages: list[Message]) -> int:
     return sum(
         1 for m in messages
         if getattr(m.role, "value", m.role) == "user")
-
-
-def is_greeting(text: str) -> bool:
-    return bool(_GREETING_RE.match(text or ""))
-
-
-def is_clearly_non_legal(text: str) -> bool:
-    """Demande manifestement hors du droit, détectée sans appel de modèle.
-
-    Volontairement CONJONCTIVE : il faut un sujet explicitement non
-    juridique ET aucun marqueur juridique. Une question de droit exprimée
-    en langage courant — « mon fils a cassé la vitrine du dépanneur » —
-    ne porte aucun marqueur non juridique et reste donc traitée comme
-    juridique. Le faux négatif (on cherche du droit pour rien) coûte une
-    recherche; le faux positif (on refuse une vraie question) coûte la
-    réponse.
-    """
-    value = text or ""
-    if not value.strip():
-        return False
-    if _LEGAL_MARKER_RE.search(value):
-        return False
-    return bool(_NON_LEGAL_TOPIC_RE.search(value))
 
 
 def requested_output_type(text: str) -> str:

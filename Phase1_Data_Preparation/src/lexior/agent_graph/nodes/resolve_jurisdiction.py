@@ -47,6 +47,10 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     previous = _previous(state)
 
     if is_live(state.get("mode", "")):
+        if state.get("request_intent", "ambiguous") != "legal":
+            # Une salutation ou une demande indéterminée ne doit pas ouvrir
+            # un raisonnement de compétence. Le dossier antérieur est conservé.
+            return {}
         resolution = service.resolve_live(
             state.get("messages", []), previous)
         updates = _updates(resolution)

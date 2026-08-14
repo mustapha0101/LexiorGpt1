@@ -233,7 +233,10 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     if not articles_retenus and textes_officiels and has_rule_elements:
         contract_numbers = {
             str(source_id).rsplit(":", 1)[-1]
-            for source_id in raw_contract_for_mode.get("primary_source_ids", [])
+            for source_id in [
+                *raw_contract_for_mode.get("primary_source_ids", []),
+                *raw_contract_for_mode.get("secondary_source_ids", []),
+            ]
             if ":" in str(source_id)
         }
         articles_retenus = [
@@ -354,6 +357,13 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     sufficiency = (raw_sufficiency if isinstance(raw_sufficiency, SourceSufficiencyDecision)
                    else SourceSufficiencyDecision.model_validate(raw_sufficiency))
     if evidence_first:
+        application_mode = sufficiency.application_mode
+        if not attempted_research:
+            application_mode = "direct_application"
+        elif answer_mode == "no_evidence":
+            application_mode = "insufficient_legal_evidence"
+        elif has_application_gaps:
+            application_mode = "conditional_application"
         if rule_contract.conditional_branches:
             directives.append(
                 "Présente les branches conditionnelles dérivées des passages "
@@ -362,10 +372,23 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             directives.append(
                 "Mentionne les éléments de preuve comme supporting facts; ils "
                 "ne constituent pas des conditions bloquantes.")
-        if sufficiency.sufficient_for_initial_answer:
+        if application_mode == "conditional_application":
+            directives.append(
+                "La règle est suffisamment sourcée, mais son application "
+                "reste conditionnelle : expose la règle, applique les faits "
+                "connus, puis présente les branches et questions décisives.")
+        elif (application_mode == "direct_application"
+              and sufficiency.sufficient_for_initial_answer):
             directives.append(
                 "Réponds directement à l'objectif de l'utilisateur; n'ajoute "
                 "pas une limitation générique si la source suffit.")
+    else:
+        application_mode = (
+            "insufficient_legal_evidence" if answer_mode == "no_evidence"
+            else "conditional_application"
+            if answer_mode == "grounded_conditional"
+            else "direct_application"
+        )
 
     source_texts = {
         source_id: item[0]
@@ -434,6 +457,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         "juridiction_verrouillee": state.get("jurisdiction_locked", False),
         "regime_juridique": state.get("legal_regime", "unknown"),
         "mode_de_reponse": answer_mode,
+        "mode_application": application_mode,
         "preuves_utilisables": usable_tools,
         # Indices, et non seulement noms d'outils : le rédacteur peut ainsi
         # recevoir exactement les observations classées utilisables.

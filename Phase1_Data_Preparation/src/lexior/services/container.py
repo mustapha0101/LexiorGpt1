@@ -17,6 +17,7 @@ from .jurisdiction import JurisdictionService
 from .legal_research import LegalResearchService
 from .planner import PlannerService
 from .repair import RepairService
+from .request_classifier import RequestClassifierService
 from .result_verification import ResultVerificationService
 from .tool_execution import ToolExecutionService
 from .validation import ValidationService
@@ -29,6 +30,7 @@ class LexiorServices:
     config: AgenticConfig
     catalog: ToolCatalog
     planner: PlannerService
+    request_classifier: RequestClassifierService
     tools: ToolExecutionService
     verification: ResultVerificationService
     research: LegalResearchService
@@ -73,6 +75,9 @@ def build_services(
             evidence_first_initial_candidate_count=config.evidence_first_initial_candidate_count,
             evidence_first_initial_fetch_count=config.evidence_first_initial_fetch_count,
             evidence_first_maximum_article_batches=config.evidence_first_maximum_article_batches),
+        request_classifier=RequestClassifierService(
+            client=teacher, offline=offline,
+            minimum_confidence=config.classification_min_confidence),
         tools=ToolExecutionService(executor),
         verification=ResultVerificationService(),
         research=LegalResearchService(),

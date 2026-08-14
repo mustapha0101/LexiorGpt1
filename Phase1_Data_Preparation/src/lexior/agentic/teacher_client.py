@@ -31,7 +31,7 @@ from .config import EndpointConfig
 
 from lexior.observability.costs import CostTracker
 
-COST_ROLES = ("scenario_generator", "planner", "trajectory_writer",
+COST_ROLES = ("scenario_generator", "request_classifier", "planner", "trajectory_writer",
               "legal_critic", "agentic_critic", "retrieval_reranker", "repair")
 
 

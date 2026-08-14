@@ -22,15 +22,14 @@ from ..state import LexiorState
 NAME = "handle_clarification"
 
 
-def _clarification_category(question: str, missing_facts: list[str]) -> str:
-    """Catégorie explicite pour éviter de redemander la même information."""
-    corpus = " ".join([question, *map(str, missing_facts)]).casefold()
-    if any(token in corpus for token in (
-            "secteur", "employeur", "régime", "fédéral", "federal",
-            "provincial")):
-        return "legal_regime"
-    return "jurisdiction" if any(token in corpus for token in (
-        "province", "juridiction", "territoire", "pays")) else "fact"
+def _clarification_category(scope: str) -> str:
+    """Catégorie explicite issue du contrat, jamais du vocabulaire."""
+    return {
+        "request_intent": "request_intent",
+        "jurisdiction": "jurisdiction",
+        "legal_regime": "legal_regime",
+        "application_fact": "fact",
+    }.get(scope, "fact")
 
 
 def _history_entry(question: str, missing_facts: list[str], answer: str,
@@ -107,7 +106,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
         pending = {
             "clarification_id": "fact-runtime",
             "category": _clarification_category(
-                question, state.get("missing_critical_facts", [])),
+                decision.clarification_scope),
             "fact_keys": fallback_keys,
             "question": question,
             "answer_type": "yes_no_or_explanation",
@@ -146,7 +145,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     missing_facts = list(pending.get(
         "fact_keys", state.get("missing_critical_facts", [])))
     category = str(pending.get("category") or
-                   _clarification_category(question, missing_facts))
+                   _clarification_category(decision.clarification_scope))
 
     if is_live(state.get("mode", "")):
         # Suspension du graphe — la question part vers l'utilisateur réel.
@@ -184,6 +183,7 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
             "latest_user_intent": answer_text,
             "facts": facts,
             "clarification_history": history,
+            "last_clarification_category": category,
             "case_context": context,
             "pending_clarification": {},
             "status": "planning",

@@ -39,13 +39,11 @@
           },
           "legal_terms": {
             "type": "string",
-            "minLength": 1,
-            "description": "Obligatoire. La même question rendue dans le vocabulaire du Code — « mise en demeure » pour « lettre d'avertissement ». Recherchée EN PLUS de query, jamais à sa place : les candidats des deux recherches sont réunis."
+            "description": "Optionnel. Une formulation réellement distincte dans le vocabulaire du Code — « mise en demeure » pour « lettre d'avertissement ». Recherchée EN PLUS de query, jamais à sa place. Omettre ou laisser vide si elle ne ferait que répéter query."
           }
         },
         "required": [
-          "query",
-          "legal_terms"
+          "query"
         ]
       },
       "minimalValidExample": {
@@ -75,13 +73,11 @@
           },
           "legal_terms": {
             "type": "string",
-            "minLength": 1,
-            "description": "Obligatoire. La même question rendue dans le vocabulaire du Code — « mise en demeure » pour « lettre d'avertissement ». Recherchée EN PLUS de query, jamais à sa place : les candidats des deux recherches sont réunis."
+            "description": "Optionnel. Une formulation réellement distincte dans le vocabulaire du Code — « mise en demeure » pour « lettre d'avertissement ». Recherchée EN PLUS de query, jamais à sa place. Omettre ou laisser vide si elle ne ferait que répéter query."
           }
         },
         "required": [
-          "query",
-          "legal_terms"
+          "query"
         ]
       },
       "minimalValidExample": {

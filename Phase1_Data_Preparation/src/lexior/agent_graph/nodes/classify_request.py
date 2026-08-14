@@ -1,11 +1,5 @@
 # -*- coding: utf-8 -*-
-"""classify_request — type de demande et type de sortie attendus.
-
-Dataset : le type vient du scénario (vérité de génération).
-Live : heuristique déterministe sur le dernier message (pas de LLM ici;
-le planner affine ensuite, mais l'état porte déjà une classification
-exploitable par le contrat de réponse).
-"""
+"""classify_request — classification sémantique avant toute politique."""
 
 from __future__ import annotations
 
@@ -15,7 +9,7 @@ from lexior.services.modes import is_live
 
 from ..context import GraphContext
 from ..state import LexiorState
-from ._common import is_clearly_non_legal, is_greeting, requested_output_type
+from ._common import requested_output_type
 
 NAME = "classify_request"
 
@@ -24,16 +18,23 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
     scenario = state["scenario"]
     latest = state.get("latest_user_message", "")
 
-    request_type = scenario.request_type
-    if is_live(state.get("mode", "")) and (
-            is_greeting(latest) or is_clearly_non_legal(latest)):
-        # En live, ``scenario.request_type`` porte la valeur par défaut du
-        # runner (``case_analysis``) : sans cette détection, une demande de
-        # recette part en résolution de juridiction et l'utilisateur se voit
-        # demander sa province.
-        request_type = "non_legal"
+    if is_live(state.get("mode", "")):
+        classification = ctx.services.request_classifier.classify(
+            latest,
+            state.get("messages", []),
+            state.get("active_issue", ""),
+        )
+    else:
+        classification = ctx.services.request_classifier.from_scenario(
+            scenario.request_type, scenario.legal_domain)
 
     return {
-        "request_type": request_type,
+        "request_classification": classification.model_dump(mode="json"),
+        "request_intent": classification.intent.value,
+        "request_type": classification.request_type,
+        "legal_domain": classification.legal_domain,
+        "jurisdiction_material": classification.jurisdiction_material,
+        "employment_regime_material": classification.employment_regime_material,
+        "classification_confidence": classification.confidence,
         "requested_output_type": requested_output_type(latest),
     }

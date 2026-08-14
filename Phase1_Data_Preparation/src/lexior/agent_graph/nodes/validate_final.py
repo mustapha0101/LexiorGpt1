@@ -46,8 +46,17 @@ _RE_CITED_ARTICLE = re.compile(
     r"\b(?:articles?|art\.)\s*(\d{1,4}(?:\.\d+)?)", re.IGNORECASE)
 
 
+def _decisive_questions(contract: dict[str, Any]) -> list[str]:
+    return list(dict.fromkeys(
+        str(item.get("question", "")).strip()
+        for item in contract.get("questions_decisives", [])
+        if isinstance(item, dict) and str(item.get("question", "")).strip()
+    ))
+
+
 def _source_bounded_fallback(textes: dict[str, str],
-                             articles: list[str]) -> str:
+                             articles: list[str],
+                             contract: dict[str, Any]) -> str:
     """Produit un repli utile sans transformer une source en conclusion.
 
     Il ne s'agit pas d'une nouvelle analyse juridique : le texte officiel est
@@ -61,69 +70,96 @@ def _source_bounded_fallback(textes: dict[str, str],
     ]
     if not blocs:
         return ""
-    return (
-        "Je ne peux pas d\u00e9terminer, \u00e0 partir des seuls faits fournis, si les "
-        "conditions de responsabilit\u00e9 sont r\u00e9unies. Voici le texte officiel "
-        "r\u00e9cup\u00e9r\u00e9 qui peut servir \u00e0 l'analyse :\n\n"
-        + "\n\n".join(blocs[:2])
-        + "\n\nConservez les \u00e9l\u00e9ments factuels et les communications utiles; "
-          "un professionnel peut ensuite appliquer ces textes \u00e0 votre situation."
-    )
+    parts = [
+        "Les sources officielles récupérées permettent d'exposer la règle "
+        "générale, mais les faits fournis ne permettent pas encore une "
+        "conclusion définitive.",
+        *blocs[:2],
+    ]
+    questions = _decisive_questions(contract)
+    if questions:
+        parts.append("Pour appliquer ces textes, il faut notamment préciser :\n- "
+                     + "\n- ".join(questions[:4]))
+    return "\n\n".join(parts)
 
 
 def _conditional_evidence_fallback(
         textes: dict[str, str], contract: dict[str, Any]) -> str:
     """Return a source-bounded conditional answer before the generic fallback."""
     entries = contract.get("conditional_reasoning_contract") or []
-    retained = {str(number) for number in contract.get("articles_retenus", [])}
+    retained_ordered = list(dict.fromkeys(
+        str(number) for number in contract.get("articles_retenus", [])))
+    retained = set(retained_ordered)
     entries = [entry for entry in entries
                if str(entry.get("article", "")) in retained
                and str(entry.get("article", "")) in textes]
+    rule_contract = contract.get("rule_contract") or {}
+    if not entries and retained:
+        entries = [
+            {
+                "article": article,
+                "source_propositions": [textes.get(article, "").strip()],
+                "user_asserted_facts": [
+                    {"fact": str(item.get("description", ""))}
+                    for item in rule_contract.get("supporting_facts", [])
+                    if isinstance(item, dict)
+                    and item.get("value_status") in {"known_true", "known_false"}
+                    and str(item.get("description", "")).strip()
+                ],
+                "unresolved_conditions": [
+                    str(item.get("description", "")).strip()
+                    for item in [
+                        *rule_contract.get("blocking_facts", []),
+                        *rule_contract.get("conditional_facts", []),
+                    ]
+                    if isinstance(item, dict)
+                    and item.get("value_status", "unknown") == "unknown"
+                    and str(item.get("description", "")).strip()
+                ],
+            }
+            for article in retained_ordered if textes.get(article, "").strip()
+        ]
     if not entries:
         return ""
     paragraphs = [
-        "Les textes officiels retenus peuvent être pertinents pour analyser la situation, mais ils ne permettent pas à eux seuls de conclure à une responsabilité.",
+        "Les textes officiels retenus permettent d'exposer la règle générale, "
+        "mais son application dépend encore de faits à établir.",
     ]
-    asserted: list[str] = []
-    unresolved: list[str] = []
     for entry in entries:
-        for item in entry.get("user_asserted_facts", []):
-            fact = str(item.get("fact", "")).strip()
-            if fact and fact not in asserted:
-                asserted.append(fact)
-        for condition in entry.get("unresolved_conditions", []):
-            condition = str(condition).strip()
-            if condition and condition not in unresolved:
-                unresolved.append(condition)
         article = str(entry.get("article", ""))
         proposition = (entry.get("source_propositions") or [])
         proposition = str(proposition[0]).strip() if proposition else textes[article].strip()
         if proposition:
-            paragraphs.append(f"Article {article} : le texte officiel énonce notamment : {proposition}")
-    if asserted:
-        paragraphs.append("Vous avez affirmé, sans vérification indépendante : "
-                          + "; ".join(asserted) + ".")
-    if unresolved:
-        paragraphs.append("Il reste notamment à établir : " + "; ".join(unresolved) + ".")
-    paragraphs.append(
-        "La responsabilité n'est donc pas automatique : l'application dépend des faits à établir et du lien avec le préjudice. Conservez les photos, les échanges, la date et les estimations utiles.")
+            paragraphs.append(f"Article {article}\n{proposition}")
+    branches = [str(value).strip() for value in rule_contract.get(
+        "conditional_branches", []) if str(value).strip()]
+    if branches:
+        paragraphs.append("Application conditionnelle :\n- "
+                          + "\n- ".join(branches[:4]))
+    questions = _decisive_questions(contract)
+    if questions:
+        paragraphs.append("Questions décisives :\n- "
+                          + "\n- ".join(questions[:4]))
     return "\n\n".join(paragraphs)
 
 
-def _safe_unresolved_fallback() -> str:
+def _safe_unresolved_fallback(contract: dict[str, Any]) -> str:
     """Réponse sûre quand aucun texte vérifié ne peut être affiché.
 
     Le contrôle a écarté le brouillon et le contrat ne contient aucune
     disposition autorisée. Le flux live doit rester utile, sans déguiser ce
     manque de preuve en erreur technique ni tirer de conclusion juridique.
     """
-    return (
+    answer = (
         "Je ne peux pas déterminer, à partir des faits et des sources "
         "vérifiées disponibles, si les conditions juridiques sont réunies. "
-        "Conservez les photos, la date, les échanges et les estimations de "
-        "réparation; un professionnel pourra ensuite examiner ces éléments "
-        "et les sources officielles applicables."
+        "Une source officielle pertinente ou un fait décisif manque encore."
     )
+    questions = _decisive_questions(contract)
+    if questions:
+        answer += "\n\nPour poursuivre, il faut préciser :\n- " + "\n- ".join(
+            questions[:4])
+    return answer
 
 
 def _articles_cites(reponse: str) -> list[str]:
@@ -265,27 +301,30 @@ def run(state: LexiorState, ctx: GraphContext) -> dict[str, Any]:
                 str(number) for number in contract.get("articles_retenus", [])
                 if str(number) in textes
             ]
-        candidate = (
-            ("" if ctx.config.evidence_first_enabled
-             else _conditional_evidence_fallback(textes, contract))
-            or _source_bounded_fallback(textes, cited_numbers)
-        )
-        candidate_ledger = verifier.verify_answer(
-            candidate, selection, source_texts,
-            task_id=state.get("task_id", ""),
-            rule_contract=state.get("rule_contract"),
-            remedy_intent=state.get("remedy_intent")
-            or contract.get("remedy_intent"),
-            version=ledger.version + 1,
-        ) if candidate else None
-        if candidate_ledger and not any(
-                claim.verification_status == "failed"
-                for claim in candidate_ledger.claims):
-            fallback, ledger = candidate, candidate_ledger
+        candidates = list(dict.fromkeys(filter(None, [
+            _conditional_evidence_fallback(textes, contract),
+            _source_bounded_fallback(textes, cited_numbers, contract),
+        ])))
+        candidate_ledger = None
+        for candidate in candidates:
+            checked = verifier.verify_answer(
+                candidate, selection, source_texts,
+                task_id=state.get("task_id", ""),
+                rule_contract=state.get("rule_contract"),
+                remedy_intent=state.get("remedy_intent")
+                or contract.get("remedy_intent"),
+                version=ledger.version + 1,
+            )
+            if not any(claim.verification_status == "failed"
+                       for claim in checked.claims):
+                fallback, candidate_ledger = candidate, checked
+                break
+        if candidate_ledger is not None:
+            ledger = candidate_ledger
             claim_ledger_rebuilt = True
             repair_status = "successful"
         else:
-            fallback = _safe_unresolved_fallback()
+            fallback = _safe_unresolved_fallback(contract)
             fallback_ledger = verifier.verify_answer(
                 fallback, selection, source_texts,
                 task_id=state.get("task_id", ""),

@@ -61,12 +61,6 @@ _STOPWORDS = {
     "ne", "ou", "par", "pour", "qui", "que", "se", "son", "sur", "un",
     "une", "vous", "est", "sont", "doit", "peut", "pas", "the", "and",
 }
-_GENERIC_FACT_IDS = (
-    "general_liability_basis", "fault", "causation", "prior_knowledge",
-    "failure_to_take_reasonable_action", "damage_assessment",
-)
-
-
 def _fold(value: Any) -> str:
     # Repliement partagé : replie AUSSI l'apostrophe typographique, que le
     # corpus officiel emploie exclusivement (cf. services.text_folding).
@@ -213,23 +207,11 @@ def _source_bounded_contract_for_source(
     # des faits à demander que si la revue source-bornée identifie précisément
     # un fait utilisateur absent et le relie à un passage de l'article.
     conditional_facts: list[RuleFact] = []
-    supporting_facts = [RuleFact(
-        fact_id=f"supporting_{index}",
-        description="Conserver les éléments de preuve liés à la proposition source.",
-        source_ids=[sid], supporting_passages=item.supporting_passages,
-        status="supporting",
-    ) for index, item in enumerate(consequences)]
-    # The extractor is deliberately conservative: it never turns generic
-    # responsibility vocabulary into a condition.  Such legacy conditions
-    # are recorded as not required unless the source explicitly contains a
-    # matching proposition.
-    source_folded = _fold(text)
-    not_required = [
-        fact_id for fact_id in _GENERIC_FACT_IDS
-        if fact_id.replace("_", " ") not in source_folded
-        and not (fact_id == "fault" and re.search(r"\bfaute\b", source_folded))
-        and not (fact_id == "causation" and re.search(r"\bcausal", source_folded))
-    ]
+    # Les faits et conseils pratiques doivent venir soit de l'utilisateur,
+    # soit de la revue source-bornée ci-dessous. Aucun profil générique de
+    # responsabilité n'est injecté dans tous les domaines.
+    supporting_facts: list[RuleFact] = []
+    not_required: list[str] = []
     return (all_elements, subject, persons, triggers, conditions, consequences,
             exceptions, conditional_facts, supporting_facts, not_required)
 
@@ -327,7 +309,10 @@ def build_rule_contract(
     conditional_facts: list[RuleFact] = []
     supporting_facts: list[RuleFact] = []
     not_required: list[str] = []
-    for sid in selection.primary_sources:
+    selected_sources = list(dict.fromkeys([
+        *selection.primary_sources, *selection.secondary_sources,
+    ]))
+    for sid in selected_sources:
         if sid not in articles:
             continue
         text, number, _index = articles[sid]
@@ -406,6 +391,7 @@ def build_rule_contract(
         rule_type="source_bounded_rule",
         rule_summary=summary,
         primary_source_ids=list(selection.primary_sources),
+        secondary_source_ids=list(selection.secondary_sources),
         elements=elements,
         supported_exceptions=exceptions,
         subject=subject,
@@ -436,9 +422,9 @@ def validate_rule_contract(
     """Validate source IDs and exact supporting passages."""
     rejected = rejected_source_ids or set()
     errors: list[str] = []
-    for sid in contract.primary_source_ids:
+    for sid in [*contract.primary_source_ids, *contract.secondary_source_ids]:
         if sid not in retrieved_source_ids:
-            errors.append(f"source principale absente: {sid}")
+            errors.append(f"source sélectionnée absente: {sid}")
     all_elements = [*contract.elements, *contract.supported_exceptions,
                     *contract.subject, *contract.persons_covered,
                     *contract.trigger_events, *contract.positive_conditions,
@@ -582,9 +568,21 @@ def decide_source_sufficiency(
         jurisprudence = "required"
     else:
         jurisprudence = "not_needed" if legislation == "sufficient" else "conditionally_required"
+    unresolved_application_facts = any(
+        fact.value_status == "unknown"
+        for fact in [*rule_contract.blocking_facts,
+                     *rule_contract.conditional_facts]
+    )
+    sources_sufficient = legislation == "sufficient" and not refs
+    application_mode = (
+        "insufficient_legal_evidence" if not sources_sufficient
+        else "conditional_application" if unresolved_application_facts
+        else "direct_application"
+    )
     return SourceSufficiencyDecision(
         task_id=task_id,
-        sufficient_for_initial_answer=legislation == "sufficient" and not refs,
+        sufficient_for_initial_answer=sources_sufficient,
+        application_mode=application_mode,
         legislation_status=legislation, regulation_status=regulation,
         jurisprudence_status=jurisprudence, doctrine_status="not_needed",
         missing_questions=(
@@ -780,10 +778,16 @@ def _build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
         allowed = list(source_texts)
     if rule_contract:
         if isinstance(rule_contract, dict):
-            contract_sources = list(rule_contract.get("primary_source_ids", []))
+            contract_sources = [
+                *rule_contract.get("primary_source_ids", []),
+                *rule_contract.get("secondary_source_ids", []),
+            ]
             contract_elements = rule_contract.get("elements", [])
         else:
-            contract_sources = list(rule_contract.primary_source_ids)
+            contract_sources = [
+                *rule_contract.primary_source_ids,
+                *rule_contract.secondary_source_ids,
+            ]
             contract_elements = rule_contract.elements
         for element in contract_elements:
             if isinstance(element, dict):
@@ -808,6 +812,11 @@ def _build_claim_ledger(answer: str, selection: PrimaryAuthoritySelection,
             index = paragraph_index if len(chunks) == 1 else (
                 f"{paragraph_index}.{chunk_index + 1}")
             text = text.strip()
+            # Une question factuelle n'affirme aucune règle juridique. Elle
+            # peut contenir « délai », « article » ou « responsabilité » sans
+            # devenir une claim à vérifier comme une conclusion.
+            if text.endswith("?"):
+                continue
             if (not text or not _LEGAL_MARKER_RE.search(text)
                     or "get_" in text.casefold()
                     or text.casefold().startswith((

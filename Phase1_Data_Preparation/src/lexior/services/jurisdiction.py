@@ -78,9 +78,6 @@ _CITY_RE = re.compile(
 _YES_RE = re.compile(r"^\s*(oui|yes|ouais|exactement|c'est ça)\s*[.!]?\s*$", re.I)
 _NO_RE = re.compile(r"^\s*(non|no|nope|pas au qu[ée]bec)\s*[.!]?\s*$", re.I)
 
-_EMPLOYMENT_RE = re.compile(
-    r"\b(?:emploi|employ[ée]|employeur|travail|travaille|salari[ée]|"
-    r"congédi|licenci|heures? supplémentaires?|syndicat)\b", re.I)
 _FEDERAL_SECTOR_RE = re.compile(
     r"\b(?:banque|bank|compagnie aérienne|transport aérien|aéroport|"
     r"chemin de fer|railway|transport interprovincial|télécom|"
@@ -135,20 +132,6 @@ def detect_jurisdiction_hint(messages: Sequence) -> Optional[str]:
                 elif _NO_RE.match(message.content):
                     hint = OUTSIDE_QUEBEC
     return hint
-
-
-def is_employment_matter(messages: Sequence) -> bool:
-    """Détecte seulement si la conversation porte explicitement sur l'emploi."""
-    return any(
-        getattr(message.role, "value", message.role) == "user"
-        and is_employment_text(message.content or "")
-        for message in messages
-    )
-
-
-def is_employment_text(text: str) -> bool:
-    """Détecte l'emploi dans le texte de la tâche active uniquement."""
-    return _EMPLOYMENT_RE.search(text or "") is not None
 
 
 def detect_legal_regime_hint(messages: Sequence) -> tuple[Optional[str], str]:

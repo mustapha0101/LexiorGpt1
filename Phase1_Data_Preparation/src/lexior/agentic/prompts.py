@@ -27,7 +27,7 @@ import json
 
 from .tool_catalog import ToolCatalog
 
-PROMPT_VERSION = "agentic-4.0-intermediate"
+PROMPT_VERSION = "agentic-4.1-semantic-routing"
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +67,8 @@ def agent_system_prompt(catalog: ToolCatalog) -> str:
         "  {\"name\":\"...\",\"arguments\":{...}}\n"
         "  </tool_call>\n"
         "  puis STOP.\n\n"
-        "Règles : un outil par tour ; clarification si juridiction incertaine ; "
+        "Règles : un outil par tour ; clarifie la juridiction uniquement si "
+        "la classification structurée indique qu'elle change les sources ; "
         "hors-droit → pas d'outil ; français, prose, sources récupérées uniquement."
     )
 
@@ -184,7 +185,7 @@ def scenario_user_prompt(
             "Fournis synthetic_clarification_answer.\n"
         )
     return (
-        f"Type de demande imposé : {request_type_name}\n"
+        f"Type de scénario demandé : {request_type_name}\n"
         f"Description : {request_type_description}\n"
         f"Juridiction assignée : {jurisdiction_status}\n"
         f"Stade de clarification : {clarification_stage}\n"
@@ -238,13 +239,11 @@ CHAT_PLANNER_SUPPLEMENT = (
     "récupère d'abord la décision complète avec get_quebec_regulation à "
     "partir de son URL CanLII/SOQUIJ. Ne cite ni la décision ni le résumé "
     "avant cette récupération.\n"
-    "JURIDICTION : le droit applicable dépend souvent de la province. Si la "
-    "question relève d'un domaine provincial (droit civil, famille, "
-    "logement, travail, consommation) et que la province de l'utilisateur "
-    "est inconnue, pose d'abord une question de clarification (ex. "
-    "« Habitez-vous au Québec? »). Le droit criminel relève du Code "
-    "criminel fédéral et s'applique partout au Canada — pas besoin de "
-    "clarifier la province pour une question purement criminelle.\n"
+    "JURIDICTION : les champs request_intent, request_type, legal_domain, "
+    "jurisdiction_material et employment_regime_material sont produits en "
+    "amont par le classificateur sémantique et font autorité. Ne reclassifie "
+    "jamais la demande à partir de mots isolés. Demande la province seulement "
+    "si jurisdiction_material=true et qu'aucune juridiction n'est établie.\n"
     "PARTAGE DES COMPÉTENCES : la province ne détermine pas tout — le "
     "régime applicable peut dépendre de l'ACTIVITÉ. Droit du travail : "
     "provincial par défaut (au Québec : Loi sur les normes du travail, "
@@ -252,9 +251,9 @@ CHAT_PLANNER_SUPPLEMENT = (
     "(banques, compagnies aériennes, chemins de fer, transport "
     "interprovincial, télécommunications, radiodiffusion, fonction "
     "publique fédérale) relèvent du Code canadien du travail quelle que "
-    "soit la province. Pour une question d'emploi dont le secteur est "
-    "inconnu, demande aussi pour quel type d'entreprise travaille "
-    "l'utilisateur. Fédéral partout : criminel, faillite, divorce "
+    "soit la province. Demande le secteur de l'employeur seulement si "
+    "employment_regime_material=true et que le régime est inconnu. "
+    "Fédéral partout : criminel, faillite, divorce "
     "(conditions de fond), assurance-emploi, propriété intellectuelle. "
     "Ne présume jamais le droit québécois par défaut : choisis le régime "
     "qui gouverne réellement la situation.\n"
@@ -362,8 +361,8 @@ def planner_system_prompt(catalog: ToolCatalog) -> str:
         "citation — écrire « article 1465 CCQ » ne cherche rien et trahit "
         "une croyance au lieu d'une description. S'AJOUTE à la requête de "
         "recherche, ne la remplace jamais : les deux formulations sont "
-        "cherchées puis réunies. Remplis-le à chaque recherche : c'est lui "
-        'qui porte la traduction.",\n'
+        "cherchées puis réunies. Remplis-le quand la traduction est réellement "
+        'distincte; sinon laisse-le vide plutôt que de recopier query.",\n'
         '  "request_type": "...",\n'
         '  "jurisdiction": "lieu: Québec, Ontario, etc.",\n'
         '  "legal_regime": "unknown | provincial | federal",\n'
@@ -373,7 +372,7 @@ def planner_system_prompt(catalog: ToolCatalog) -> str:
         '  "next_tool": "nom_canonique ou null",\n'
         '  "arguments": {...},\n'
         '  "clarification_question": "... ou null",\n'
-        '  "clarification_scope": "none | jurisdiction | legal_regime | application_fact",\n'
+        '  "clarification_scope": "none | request_intent | jurisdiction | legal_regime | application_fact",\n'
         '  "clarification_blocking": false,\n'
         '  "answerable_conditionally": true,\n'
         '  "clarification_fact_keys": []\n'
@@ -449,6 +448,14 @@ def planner_system_prompt(catalog: ToolCatalog) -> str:
         "- N'appelle pas le même outil 3 fois de suite.\n"
         "- Après 2 appels au même outil, synthétise.\n\n"
         "═══ RÈGLES GÉNÉRALES ═══\n"
+        "- la classification structurée en entrée fait autorité : recopie "
+        "request_type exactement et ne reclassifie jamais la demande ;\n"
+        "- request_intent=greeting ou non_legal → final_answer sans outil ni "
+        "question de juridiction ; request_intent=ambiguous → une clarification "
+        "request_intent neutre ;\n"
+        "- demande la juridiction uniquement si jurisdiction_material=true; "
+        "demande le secteur de l'employeur uniquement si "
+        "employment_regime_material=true ;\n"
         "- un seul appel d'outil à la fois ;\n"
         "- arguments conformes au schéma ;\n"
         "- clarification AVANT recherche uniquement si l'information manquante "
@@ -459,12 +466,12 @@ def planner_system_prompt(catalog: ToolCatalog) -> str:
         "existence antérieure du vice, etc.) ne bloquent pas la recherche : "
         "clarification_blocking=false, answerable_conditionally=true, puis "
         "réponse par branches si/alors et questions à la fin ;\n"
-        "- pour l'emploi, si la province et le secteur fédéral/provincial sont "
-        "inconnus, regroupe ces éléments dans une seule clarification courte ;\n"
+        "- si employment_regime_material=true et que la province et le secteur "
+        "sont inconnus, regroupe ces éléments dans une clarification courte ;\n"
         "- ne mets jamais Federal dans jurisdiction : jurisdiction décrit le "
         "lieu de travail; mets federal dans legal_regime ;\n"
-        "- UNE SEULE clarification autorisée ; si "
-        "clarification_already_answered=true, INTERDIT de redemander ;\n"
+        "- respecte le budget de clarification fourni dans l'état; regroupe "
+        "les faits liés et ne redemande jamais une information déjà fournie ;\n"
         "- question non juridique : final_answer, aucun outil ;\n"
         "- article précis : récupère l'article, puis arrête ;\n"
         "- faillite, banques, brevets, marques, maritime → droit fédéral ;\n"

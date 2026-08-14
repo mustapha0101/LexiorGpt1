@@ -118,7 +118,7 @@ class GraphRunner:
     def build_live_state(self, query: str, *, thread_id: str,
                          history: Optional[list[dict]] = None,
                          system_prompt: Optional[str] = None,
-                         request_type: str = "case_analysis",
+                         request_type: str = "unknown",
                          prior_case_context: Optional[dict] = None) -> dict:
         """État initial d'un tour live (historique client inclus)."""
         from lexior.agentic.schemas import Message, Role

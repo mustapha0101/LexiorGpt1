@@ -66,6 +66,8 @@ def route_after_clarification(state: LexiorState) -> str:
         # Dataset sans réponse synthétique : la trajectoire d'entraînement
         # se termine sur la question elle-même.
         return ANSWER_PATH
+    if state.get("last_clarification_category") == "request_intent":
+        return "classify_request"
     # Réponse obtenue (synthétique ou reprise après interrupt) : elle peut
     # changer la juridiction — on repasse par la résolution.
     return "resolve_jurisdiction"
@@ -152,6 +154,7 @@ CONDITIONAL_ROUTES: dict[str, dict[str, str]] = {
         "reject": "reject",
     },
     "handle_clarification": {
+        "classify_request": "classify_request",
         "resolve_jurisdiction": "resolve_jurisdiction",
         ANSWER_PATH: ANSWER_PATH,
         "reject": "reject",

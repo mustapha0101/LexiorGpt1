@@ -32,6 +32,7 @@ _EXPORTS = {
     "build_services": ".container",
     # services
     "PlannerService": ".planner",
+    "RequestClassifierService": ".request_classifier",
     "ToolExecutionService": ".tool_execution",
     "build_mock_executor": ".tool_execution",
     "build_real_executor": ".tool_execution",
